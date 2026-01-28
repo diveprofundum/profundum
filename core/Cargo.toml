@@ -1,0 +1,16 @@
+[package]
+name = "divelog_core"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[lib]
+name = "divelog_core"
+path = "src/lib.rs"
+
+[dependencies]
+rusqlite = "0.31"
+uniffi = { version = "0.28" }
+
+[build-dependencies]
+uniffi = { version = "0.28", features = ["cli"] }

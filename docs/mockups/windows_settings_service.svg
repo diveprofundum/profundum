@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1366" height="768" viewBox="0 0 1366 768">
+  <rect width="1366" height="768" fill="#0E1114"/>
+  <rect x="32" y="32" width="1302" height="704" rx="6" fill="#151B20"/>
+  <rect x="32" y="32" width="1302" height="56" rx="6" fill="#1D242B"/>
+  <text x="64" y="68" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="20">Settings</text>
+  <text x="1220" y="68" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Windows</text>
+
+  <rect x="64" y="104" width="420" height="600" rx="4" fill="#1D242B"/>
+  <text x="88" y="140" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="13">General</text>
+  <text x="88" y="170" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="13">Units: Metric</text>
+  <text x="88" y="200" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="13">Density: Field</text>
+  <text x="88" y="230" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="13">Auto Sync: On</text>
+
+  <rect x="508" y="104" width="812" height="300" rx="4" fill="#1D242B"/>
+  <text x="532" y="140" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="13">Service Reminders</text>
+  <text x="532" y="170" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="13">O2 Cells · due in 32 days</text>
+  <text x="532" y="200" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="13">Scrubber · remaining 3h 12m</text>
+  <text x="532" y="230" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="13">Dil Cylinder Hydro · due in 4 months</text>
+
+  <rect x="508" y="420" width="812" height="284" rx="4" fill="#1D242B"/>
+  <text x="532" y="456" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="13">Export</text>
+  <rect x="532" y="472" width="160" height="32" rx="6" fill="#151B20" stroke="#3FB8C5"/>
+  <text x="552" y="494" fill="#3FB8C5" font-family="IBM Plex Sans" font-size="12">Export CSV</text>
+  <rect x="700" y="472" width="180" height="32" rx="6" fill="#151B20"/>
+  <text x="720" y="494" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Export Subsurface</text>
+</svg>

@@ -1,0 +1,47 @@
+namespace divelog_core;
+
+typedef string DeviceId;
+
+record BleDeviceInfo {
+  string id;
+  string name;
+  i16 rssi;
+};
+
+record BleLogHeader {
+  string id;
+  i64 start_time_unix;
+  i32 duration_sec;
+  float max_depth_m;
+};
+
+record BleChunk {
+  u32 offset;
+  sequence<u8> data;
+  optional<u32> crc;
+};
+
+enum BleError {
+  PermissionDenied,
+  BluetoothOff,
+  DeviceNotFound,
+  ConnectionFailed,
+  GattError,
+  ChecksumMismatch,
+  Timeout,
+  Cancelled,
+  Unknown,
+};
+
+interface BleSession {
+};
+
+interface BleAdapter {
+  sequence<BleDeviceInfo> scan(u32 timeout_ms) throws BleError;
+  BleSession connect(string device_id) throws BleError;
+  void disconnect(BleSession session) throws BleError;
+
+  sequence<BleLogHeader> list_logs(BleSession session) throws BleError;
+  sequence<BleChunk> download_log(BleSession session, string log_id, optional<u32> resume_offset) throws BleError;
+  void cancel(BleSession session) throws BleError;
+};

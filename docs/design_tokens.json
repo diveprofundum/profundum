@@ -1,0 +1,61 @@
+{
+  "name": "abyssal-instruments",
+  "version": "0.1.0",
+  "typography": {
+    "fonts": {
+      "display": "Fraunces",
+      "body": "IBM Plex Sans",
+      "mono": "IBM Plex Mono"
+    },
+    "scaleSp": {
+      "12": 12,
+      "14": 14,
+      "16": 16,
+      "20": 20,
+      "24": 24,
+      "32": 32
+    },
+    "lineHeightSp": {
+      "h1": 36,
+      "h2": 28,
+      "h3": 24,
+      "body": 22,
+      "small": 20,
+      "micro": 16
+    }
+  },
+  "color": {
+    "ink": "#0E1114",
+    "panel": "#151B20",
+    "surface": "#1D242B",
+    "text": "#E7EDF3",
+    "muted": "#A7B3BF",
+    "accentCyan": "#3FB8C5",
+    "accentOrange": "#F77F00",
+    "statusGreen": "#3AAE6A",
+    "statusRed": "#D64545",
+    "chartSubtle": "#5D6B76"
+  },
+  "spacingPx": {
+    "4": 4,
+    "8": 8,
+    "12": 12,
+    "16": 16,
+    "24": 24,
+    "32": 32
+  },
+  "radiusPx": {
+    "2": 2,
+    "4": 4,
+    "8": 8
+  },
+  "elevation": {
+    "card": 1,
+    "panel": 2
+  },
+  "motionMs": {
+    "fast": 120,
+    "base": 160,
+    "slow": 180
+  }
+}

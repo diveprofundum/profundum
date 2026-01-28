@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1366" height="768" viewBox="0 0 1366 768">
+  <rect width="1366" height="768" fill="#0E1114"/>
+  <rect x="32" y="32" width="1302" height="704" rx="6" fill="#151B20"/>
+  <rect x="32" y="32" width="1302" height="56" rx="6" fill="#1D242B"/>
+  <text x="64" y="68" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="20">Dive Dashboard</text>
+  <text x="1220" y="68" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Windows</text>
+
+  <rect x="64" y="108" width="620" height="116" rx="4" fill="#1D242B"/>
+  <rect x="700" y="108" width="620" height="116" rx="4" fill="#1D242B"/>
+  <text x="88" y="144" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="14">CCR Hours</text>
+  <text x="88" y="188" fill="#E7EDF3" font-family="Fraunces" font-size="32">431</text>
+  <text x="724" y="144" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="14">Deco Hours</text>
+  <text x="724" y="188" fill="#E7EDF3" font-family="Fraunces" font-size="32">138</text>
+
+  <rect x="64" y="240" width="1256" height="220" rx="4" fill="#1D242B"/>
+  <text x="88" y="272" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="14">Depth Distribution</text>
+  <rect x="100" y="420" width="120" height="20" fill="#3FB8C5"/>
+  <rect x="240" y="400" width="120" height="40" fill="#5D6B76"/>
+  <rect x="380" y="380" width="120" height="60" fill="#5D6B76"/>
+  <rect x="520" y="340" width="120" height="100" fill="#F77F00"/>
+
+  <rect x="64" y="476" width="1256" height="220" rx="4" fill="#1D242B"/>
+  <text x="88" y="508" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="14">Recent Dives</text>
+  <text x="88" y="540" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="14">2026-01-02 · Barkley Sound · CCR · 62m · 84min</text>
+  <text x="88" y="568" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="14">2025-12-18 · Tahoe · OC · 51m · 42min</text>
+</svg>

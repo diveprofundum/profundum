@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="390" height="844" viewBox="0 0 390 844">
+  <rect width="390" height="844" fill="#0E1114"/>
+  <rect x="16" y="20" width="358" height="48" rx="10" fill="#1D242B"/>
+  <text x="32" y="52" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="18">Dives · Field</text>
+  <text x="320" y="52" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">iOS</text>
+
+  <rect x="16" y="80" width="358" height="28" rx="14" fill="#151B20" stroke="#3FB8C5"/>
+  <text x="28" y="99" fill="#3FB8C5" font-family="IBM Plex Sans" font-size="11">CCR</text>
+  <rect x="66" y="80" width="52" height="28" rx="14" fill="#151B20"/>
+  <text x="78" y="99" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="11">Deco</text>
+  <rect x="122" y="80" width="52" height="28" rx="14" fill="#151B20"/>
+  <text x="134" y="99" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="11">>60m</text>
+  <rect x="178" y="80" width="64" height="28" rx="14" fill="#151B20"/>
+  <text x="192" y="99" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="11">Cave</text>
+
+  <rect x="16" y="120" width="358" height="88" rx="10" fill="#1D242B"/>
+  <text x="32" y="144" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="13">Barkley Sound</text>
+  <text x="32" y="164" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="11">2026-01-02 · CCR · 62m · 84min · Deco 23</text>
+  <text x="32" y="182" fill="#5D6B76" font-family="IBM Plex Mono" font-size="10">GF 90/70 · CNS 38% · OTU 124</text>
+
+  <rect x="16" y="216" width="358" height="88" rx="10" fill="#1D242B"/>
+  <text x="32" y="240" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="13">Tahoe</text>
+  <text x="32" y="260" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="11">2025-12-18 · OC · 51m · 42min · Deco 0</text>
+  <text x="32" y="278" fill="#5D6B76" font-family="IBM Plex Mono" font-size="10">GF 85/85 · CNS 12% · OTU 38</text>
+
+  <rect x="16" y="312" width="358" height="88" rx="10" fill="#1D242B"/>
+  <text x="32" y="336" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="13">Ginnie Springs</text>
+  <text x="32" y="356" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="11">2025-11-07 · CCR · 54m · 76min · Deco 18</text>
+  <text x="32" y="374" fill="#5D6B76" font-family="IBM Plex Mono" font-size="10">GF 80/70 · CNS 32% · OTU 98</text>
+</svg>

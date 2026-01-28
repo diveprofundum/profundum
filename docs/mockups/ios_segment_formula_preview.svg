@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="390" height="844" viewBox="0 0 390 844">
+  <rect width="390" height="844" fill="#0E1114"/>
+  <rect x="16" y="20" width="358" height="48" rx="10" fill="#1D242B"/>
+  <text x="32" y="52" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="18">Segment Stats</text>
+  <text x="300" y="52" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">iOS</text>
+
+  <rect x="16" y="84" width="358" height="220" rx="12" fill="#1D242B"/>
+  <text x="32" y="112" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Depth Profile</text>
+  <polyline points="32,260 72,230 112,250 152,200 192,220 232,190 272,180 312,200 352,170" fill="none" stroke="#3FB8C5" stroke-width="3"/>
+  <rect x="120" y="190" width="120" height="60" fill="#3FB8C5" opacity="0.15"/>
+  <text x="124" y="184" fill="#3FB8C5" font-family="IBM Plex Sans" font-size="10">Segment A</text>
+
+  <rect x="16" y="320" width="358" height="160" rx="12" fill="#1D242B"/>
+  <text x="32" y="348" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Segment Formula</text>
+  <rect x="32" y="360" width="326" height="36" rx="8" fill="#151B20" stroke="#3FB8C5"/>
+  <text x="44" y="384" fill="#E7EDF3" font-family="IBM Plex Mono" font-size="12">segment_deco_time_min / segment_time_min</text>
+  <text x="32" y="414" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="11">Preview: 0.31</text>
+
+  <rect x="16" y="496" width="358" height="180" rx="12" fill="#1D242B"/>
+  <text x="32" y="524" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Segment Stats</text>
+  <text x="32" y="552" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="12">Avg Depth: 48m</text>
+  <text x="32" y="572" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="12">Time: 18m</text>
+  <text x="32" y="592" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="12">CNS: 6.2% · OTU: 22</text>
+</svg>

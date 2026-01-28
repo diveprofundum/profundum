@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="412" height="915" viewBox="0 0 412 915">
+  <rect width="412" height="915" fill="#0E1114"/>
+  <rect x="16" y="24" width="380" height="52" rx="12" fill="#1D242B"/>
+  <text x="32" y="58" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="18">Formula Builder</text>
+  <text x="320" y="58" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Android</text>
+
+  <rect x="16" y="92" width="380" height="160" rx="12" fill="#1D242B"/>
+  <text x="32" y="120" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Expression</text>
+  <rect x="32" y="132" width="348" height="48" rx="8" fill="#151B20" stroke="#3FB8C5"/>
+  <text x="44" y="162" fill="#E7EDF3" font-family="IBM Plex Mono" font-size="12">round(otu / bottom_time_min, 2)</text>
+  <text x="32" y="194" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="11">Scope: Dive</text>
+  <text x="32" y="212" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="11">Preview: 1.48</text>
+
+  <rect x="16" y="268" width="380" height="150" rx="12" fill="#1D242B"/>
+  <text x="32" y="296" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Variables</text>
+  <text x="32" y="324" fill="#E7EDF3" font-family="IBM Plex Mono" font-size="11">otu · cns_percent · deco_time_min</text>
+  <text x="32" y="344" fill="#E7EDF3" font-family="IBM Plex Mono" font-size="11">gas_switch_count · setpoint_change_count</text>
+
+  <rect x="16" y="434" width="380" height="160" rx="12" fill="#1D242B"/>
+  <text x="32" y="462" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Apply To</text>
+  <rect x="32" y="478" width="160" height="28" rx="6" fill="#151B20" stroke="#3FB8C5"/>
+  <text x="48" y="498" fill="#3FB8C5" font-family="IBM Plex Sans" font-size="11">Filtered Dives</text>
+  <rect x="200" y="478" width="180" height="28" rx="6" fill="#151B20"/>
+  <text x="212" y="498" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="11">Filter: is_ccr</text>
+  <text x="32" y="528" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="11">Preview: Ginnie Springs · 1.32</text>
+
+  <rect x="16" y="610" width="380" height="140" rx="12" fill="#1D242B"/>
+  <text x="32" y="638" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Actions</text>
+  <rect x="32" y="654" width="120" height="32" rx="6" fill="#151B20" stroke="#3FB8C5"/>
+  <text x="52" y="676" fill="#3FB8C5" font-family="IBM Plex Sans" font-size="12">Validate</text>
+  <rect x="160" y="654" width="120" height="32" rx="6" fill="#151B20"/>
+  <text x="190" y="676" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Save</text>
+</svg>

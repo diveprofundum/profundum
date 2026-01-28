@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="390" height="844" viewBox="0 0 390 844">
+  <rect width="390" height="844" fill="#0E1114"/>
+  <text x="24" y="56" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="20">Welcome to Divelog</text>
+  <text x="24" y="86" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="13">Local‑first CCR dive analytics</text>
+
+  <rect x="24" y="140" width="342" height="160" rx="12" fill="#1D242B"/>
+  <text x="40" y="176" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="14">Sync from Shearwater</text>
+  <text x="40" y="200" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Import logs over BLE</text>
+
+  <rect x="24" y="320" width="342" height="160" rx="12" fill="#1D242B"/>
+  <text x="40" y="356" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="14">Segment analytics</text>
+  <text x="40" y="380" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Select ranges, get stats</text>
+
+  <a href="sync.svg">
+    <rect x="24" y="720" width="342" height="48" rx="10" fill="#151B20" stroke="#3FB8C5"/>
+    <text x="140" y="752" fill="#3FB8C5" font-family="IBM Plex Sans" font-size="14">Continue</text>
+  </a>
+
+  <a href="index.svg">
+    <text x="24" y="812" fill="#5D6B76" font-family="IBM Plex Sans" font-size="12">Back to index</text>
+  </a>
+</svg>

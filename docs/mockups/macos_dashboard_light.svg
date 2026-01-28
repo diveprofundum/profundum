@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
+  <rect width="1280" height="800" fill="#F2F5F7"/>
+  <rect x="40" y="40" width="1200" height="720" rx="8" fill="#FFFFFF"/>
+  <rect x="40" y="40" width="1200" height="64" rx="8" fill="#E9EEF2"/>
+  <text x="72" y="80" fill="#0E1114" font-family="IBM Plex Sans" font-size="22">Dive Dashboard</text>
+  <text x="1140" y="80" fill="#5D6B76" font-family="IBM Plex Sans" font-size="14">macOS · Light</text>
+
+  <rect x="72" y="128" width="520" height="120" rx="6" fill="#FFFFFF" stroke="#D7DEE4"/>
+  <rect x="608" y="128" width="520" height="120" rx="6" fill="#FFFFFF" stroke="#D7DEE4"/>
+  <text x="96" y="168" fill="#5D6B76" font-family="IBM Plex Sans" font-size="14">Total Dives</text>
+  <text x="96" y="210" fill="#0E1114" font-family="Fraunces" font-size="32">248</text>
+  <text x="632" y="168" fill="#5D6B76" font-family="IBM Plex Sans" font-size="14">Hours Underwater</text>
+  <text x="632" y="210" fill="#0E1114" font-family="Fraunces" font-size="32">612</text>
+
+  <rect x="72" y="268" width="1056" height="220" rx="6" fill="#FFFFFF" stroke="#D7DEE4"/>
+  <text x="96" y="306" fill="#5D6B76" font-family="IBM Plex Sans" font-size="14">Hours by Month</text>
+  <polyline points="120,440 200,420 280,430 360,390 440,410 520,370 600,360 680,380 760,340 840,350 920,320 1040,330" fill="none" stroke="#3FB8C5" stroke-width="3"/>
+
+  <rect x="72" y="508" width="520" height="200" rx="6" fill="#FFFFFF" stroke="#D7DEE4"/>
+  <rect x="608" y="508" width="520" height="200" rx="6" fill="#FFFFFF" stroke="#D7DEE4"/>
+  <text x="96" y="546" fill="#5D6B76" font-family="IBM Plex Sans" font-size="14">Service Events</text>
+  <text x="96" y="582" fill="#0E1114" font-family="IBM Plex Sans" font-size="14">O2 Cells (JJ-CCR) · due in 32 days</text>
+  <text x="96" y="610" fill="#0E1114" font-family="IBM Plex Sans" font-size="14">Dil Cylinder Hydro · due in 4 months</text>
+
+  <text x="632" y="546" fill="#5D6B76" font-family="IBM Plex Sans" font-size="14">Recent Dives</text>
+  <text x="632" y="582" fill="#0E1114" font-family="IBM Plex Sans" font-size="14">2026-01-02 · Barkley Sound · CCR · 62m · 84min</text>
+  <text x="632" y="610" fill="#0E1114" font-family="IBM Plex Sans" font-size="14">2025-12-18 · Tahoe · OC · 51m · 42min</text>
+</svg>

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1366" height="768" viewBox="0 0 1366 768">
+  <rect width="1366" height="768" fill="#0E1114"/>
+  <rect x="32" y="32" width="1302" height="704" rx="6" fill="#151B20"/>
+  <rect x="32" y="32" width="1302" height="56" rx="6" fill="#1D242B"/>
+  <text x="64" y="68" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="20">Settings</text>
+  <text x="1190" y="68" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Desktop</text>
+
+  <rect x="64" y="104" width="380" height="600" rx="4" fill="#1D242B"/>
+  <text x="88" y="140" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="13">Display</text>
+  <text x="88" y="170" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="13">Units</text>
+  <text x="88" y="200" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="13">Sync</text>
+  <text x="88" y="230" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="13">Data</text>
+
+  <rect x="472" y="104" width="830" height="220" rx="4" fill="#1D242B"/>
+  <text x="496" y="140" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="13">Time Format</text>
+  <rect x="496" y="156" width="140" height="32" rx="6" fill="#151B20" stroke="#3FB8C5"/>
+  <text x="528" y="178" fill="#3FB8C5" font-family="IBM Plex Sans" font-size="12">MM:SS</text>
+  <rect x="644" y="156" width="160" height="32" rx="6" fill="#151B20"/>
+  <text x="680" y="178" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">HH:MM:SS</text>
+  <text x="496" y="208" fill="#5D6B76" font-family="IBM Plex Sans" font-size="12">Preview: 62:14</text>
+</svg>

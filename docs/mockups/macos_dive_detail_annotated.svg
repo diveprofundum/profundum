@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
+  <rect width="1280" height="800" fill="#0E1114"/>
+  <rect x="40" y="40" width="1200" height="720" rx="8" fill="#151B20"/>
+  <rect x="40" y="40" width="1200" height="64" rx="8" fill="#1D242B"/>
+  <text x="72" y="80" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="22">Barkley Sound · Jan 02, 2026</text>
+  <text x="1120" y="80" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="14">macOS</text>
+
+  <rect x="72" y="128" width="1056" height="120" rx="6" fill="#1D242B"/>
+  <text x="96" y="166" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="14">CCR · Max 62m · 84min · Deco 23min</text>
+  <text x="96" y="190" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">GF 90/70 · CNS 38% · OTU 124 · Temp 6C</text>
+
+  <rect x="72" y="268" width="1056" height="260" rx="6" fill="#1D242B"/>
+  <text x="96" y="302" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="14">Depth Profile</text>
+  <polyline points="120,500 200,470 280,490 360,430 440,460 520,410 600,400 680,430 760,390 840,410 920,370 1000,380" fill="none" stroke="#3FB8C5" stroke-width="3"/>
+  <circle cx="360" cy="430" r="5" fill="#F77F00"/>
+  <text x="374" y="426" fill="#F77F00" font-family="IBM Plex Sans" font-size="11">SP 1.2</text>
+  <circle cx="600" cy="400" r="5" fill="#F77F00"/>
+  <text x="614" y="396" fill="#F77F00" font-family="IBM Plex Sans" font-size="11">Gas switch</text>
+
+  <rect x="72" y="544" width="520" height="180" rx="6" fill="#1D242B"/>
+  <rect x="608" y="544" width="520" height="180" rx="6" fill="#1D242B"/>
+  <text x="96" y="578" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="14">Tags</text>
+  <rect x="96" y="596" width="60" height="22" rx="11" fill="#151B20" stroke="#3FB8C5"/>
+  <text x="110" y="611" fill="#3FB8C5" font-family="IBM Plex Sans" font-size="11">CCR</text>
+  <rect x="162" y="596" width="60" height="22" rx="11" fill="#151B20"/>
+  <text x="176" y="611" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="11">Deco</text>
+  <rect x="228" y="596" width="60" height="22" rx="11" fill="#151B20"/>
+  <text x="242" y="611" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="11">Cold</text>
+
+  <text x="632" y="578" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="14">Notes</text>
+  <text x="632" y="606" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="12">"Nice viz, 6C, long deco. New cells performing."</text>
+</svg>

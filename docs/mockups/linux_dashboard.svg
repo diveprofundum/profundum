@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
+  <rect width="1280" height="800" fill="#0E1114"/>
+  <rect x="36" y="36" width="1208" height="728" rx="10" fill="#151B20"/>
+  <rect x="36" y="36" width="1208" height="56" rx="10" fill="#1D242B"/>
+  <text x="64" y="72" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="20">Dive Dashboard</text>
+  <text x="1130" y="72" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Linux</text>
+
+  <rect x="64" y="112" width="540" height="140" rx="8" fill="#1D242B"/>
+  <rect x="620" y="112" width="540" height="140" rx="8" fill="#1D242B"/>
+  <text x="88" y="148" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="14">Total Dives</text>
+  <text x="88" y="196" fill="#E7EDF3" font-family="Fraunces" font-size="32">248</text>
+  <text x="644" y="148" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="14">Max Depth</text>
+  <text x="644" y="196" fill="#E7EDF3" font-family="Fraunces" font-size="32">92m</text>
+
+  <rect x="64" y="268" width="1096" height="240" rx="8" fill="#1D242B"/>
+  <text x="88" y="302" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="14">Hours by CCR Unit</text>
+  <rect x="100" y="460" width="160" height="18" fill="#3FB8C5"/>
+  <rect x="280" y="440" width="160" height="38" fill="#5D6B76"/>
+  <rect x="460" y="420" width="160" height="58" fill="#5D6B76"/>
+
+  <rect x="64" y="524" width="1096" height="220" rx="8" fill="#1D242B"/>
+  <text x="88" y="556" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="14">Service Reminders</text>
+  <text x="88" y="588" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="14">O2 Cells · due in 32 days</text>
+  <text x="88" y="616" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="14">Scrubber · remaining 3h 12m</text>
+</svg>

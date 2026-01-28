@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Claude Code local settings
+.claude/
+
+# Rust
+target/
+Cargo.lock
+
+# IDE
+.idea/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# Gradle
+.gradle/
+build/
+local.properties

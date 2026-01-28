@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600" viewBox="0 0 900 600">
+  <rect width="900" height="600" fill="#0E1114"/>
+  <text x="40" y="60" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="24">Divelog Low‑Fi Prototype</text>
+  <text x="40" y="90" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="14">Click a tile to navigate</text>
+
+  <a href="onboarding.svg">
+    <rect x="40" y="130" width="380" height="120" rx="8" fill="#1D242B"/>
+    <text x="60" y="180" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="18">Onboarding</text>
+  </a>
+
+  <a href="sync.svg">
+    <rect x="440" y="130" width="380" height="120" rx="8" fill="#1D242B"/>
+    <text x="460" y="180" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="18">BLE Sync</text>
+  </a>
+
+  <a href="dive_list.svg">
+    <rect x="40" y="270" width="380" height="120" rx="8" fill="#1D242B"/>
+    <text x="60" y="320" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="18">Dive List</text>
+  </a>
+
+  <a href="dive_detail.svg">
+    <rect x="440" y="270" width="380" height="120" rx="8" fill="#1D242B"/>
+    <text x="460" y="320" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="18">Dive Detail</text>
+  </a>
+
+  <a href="segments.svg">
+    <rect x="40" y="410" width="380" height="120" rx="8" fill="#1D242B"/>
+    <text x="60" y="460" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="18">Segment Flow</text>
+  </a>
+
+  <a href="formula_builder.svg">
+    <rect x="440" y="410" width="380" height="120" rx="8" fill="#1D242B"/>
+    <text x="460" y="460" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="18">Formula Builder</text>
+  </a>
+</svg>

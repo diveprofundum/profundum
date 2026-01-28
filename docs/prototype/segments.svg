@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="390" height="844" viewBox="0 0 390 844">
+  <rect width="390" height="844" fill="#0E1114"/>
+  <text x="24" y="56" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="20">Segment A</text>
+  <text x="24" y="86" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Selected range · 18m</text>
+
+  <rect x="24" y="120" width="342" height="200" rx="12" fill="#1D242B"/>
+  <text x="40" y="150" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Depth Profile</text>
+  <polyline points="40,290 70,270 100,285 130,240 160,260 190,230 220,220 250,240 280,210 310,230" fill="none" stroke="#3FB8C5" stroke-width="3"/>
+  <rect x="120" y="220" width="90" height="40" fill="#3FB8C5" opacity="0.15"/>
+
+  <rect x="24" y="340" width="342" height="160" rx="12" fill="#1D242B"/>
+  <text x="40" y="372" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Segment Stats</text>
+  <text x="40" y="396" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="12">Avg Depth: 48m</text>
+  <text x="40" y="418" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="12">Time: 18m</text>
+  <text x="40" y="440" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="12">CNS: 6.2% · OTU: 22</text>
+
+  <a href="dive_detail.svg">
+    <rect x="24" y="520" width="342" height="48" rx="10" fill="#151B20" stroke="#3FB8C5"/>
+    <text x="150" y="550" fill="#3FB8C5" font-family="IBM Plex Sans" font-size="13">Save Segment</text>
+  </a>
+
+  <a href="dive_detail.svg">
+    <text x="24" y="812" fill="#5D6B76" font-family="IBM Plex Sans" font-size="12">Back to dive</text>
+  </a>
+</svg>

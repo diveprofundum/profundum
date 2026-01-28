@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="390" height="844" viewBox="0 0 390 844">
+  <rect width="390" height="844" fill="#0E1114"/>
+  <text x="24" y="56" fill="#E7EDF3" font-family="IBM Plex Sans" font-size="20">Barkley Sound</text>
+  <text x="24" y="86" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">CCR · 62m · 84min · Deco 23</text>
+
+  <rect x="24" y="120" width="342" height="200" rx="12" fill="#1D242B"/>
+  <text x="40" y="150" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="12">Depth Profile</text>
+  <polyline points="40,290 70,270 100,285 130,240 160,260 190,230 220,220 250,240 280,210 310,230" fill="none" stroke="#3FB8C5" stroke-width="3"/>
+
+  <a href="segments.svg">
+    <rect x="24" y="340" width="342" height="48" rx="10" fill="#151B20" stroke="#3FB8C5"/>
+    <text x="110" y="370" fill="#3FB8C5" font-family="IBM Plex Sans" font-size="13">Create Segment</text>
+  </a>
+
+  <a href="formula_builder.svg">
+    <rect x="24" y="400" width="342" height="48" rx="10" fill="#151B20"/>
+    <text x="100" y="430" fill="#A7B3BF" font-family="IBM Plex Sans" font-size="13">Open Formula Builder</text>
+  </a>
+
+  <a href="dive_list.svg">
+    <text x="24" y="812" fill="#5D6B76" font-family="IBM Plex Sans" font-size="12">Back to list</text>
+  </a>
+</svg>
