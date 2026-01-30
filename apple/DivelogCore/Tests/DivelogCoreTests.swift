@@ -250,4 +250,132 @@ final class DivelogCoreTests: XCTestCase {
         XCTAssertTrue(names.contains("max"))
         XCTAssertTrue(names.contains("round"))
     }
+
+    // MARK: - Sample Data Tests
+
+    func testHasSampleDataInitiallyFalse() throws {
+        let sampleService = SampleDataService(database: database)
+        XCTAssertFalse(try sampleService.hasSampleData())
+    }
+
+    func testLoadSampleData() throws {
+        let sampleService = SampleDataService(database: database)
+
+        // Initially empty
+        XCTAssertFalse(try sampleService.hasSampleData())
+
+        // Load sample data
+        try sampleService.loadSampleData()
+
+        // Now has data
+        XCTAssertTrue(try sampleService.hasSampleData())
+
+        // Check devices were created
+        let devices = try diveService.listDevices(includeArchived: true)
+        XCTAssertEqual(devices.count, 4)
+        XCTAssertTrue(devices.contains { $0.model == "Shearwater Petrel 3" })
+        XCTAssertTrue(devices.contains { $0.model == "Garmin Descent Mk2i" })
+
+        // Check one device is archived
+        let activeDevices = try diveService.listDevices(includeArchived: false)
+        XCTAssertEqual(activeDevices.count, 3)
+
+        // Check sites were created
+        let sites = try diveService.listSites()
+        XCTAssertEqual(sites.count, 4)
+        XCTAssertTrue(sites.contains { $0.name == "Ginnie Springs - Ballroom" })
+
+        // Check buddies were created
+        let buddies = try diveService.listBuddies()
+        XCTAssertEqual(buddies.count, 3)
+
+        // Check dives were created
+        let dives = try diveService.listDives()
+        XCTAssertEqual(dives.count, 5)
+
+        // Check for CCR dives
+        let ccrDives = try diveService.listDives(query: DiveQuery.ccrOnly())
+        XCTAssertEqual(ccrDives.count, 2)
+
+        // Check for deco dives
+        let decoDives = try diveService.listDives(query: DiveQuery.decoOnly())
+        XCTAssertEqual(decoDives.count, 1)
+    }
+
+    func testLoadSampleDataCreatesSamples() throws {
+        let sampleService = SampleDataService(database: database)
+        try sampleService.loadSampleData()
+
+        // Get a dive and check it has samples
+        let dives = try diveService.listDives()
+        let dive = dives.first!
+
+        let samples = try diveService.getSamples(diveId: dive.id)
+        XCTAssertFalse(samples.isEmpty)
+
+        // Samples should be ordered by time
+        for i in 1..<samples.count {
+            XCTAssertGreaterThan(samples[i].tSec, samples[i-1].tSec)
+        }
+    }
+
+    func testClearAllData() throws {
+        let sampleService = SampleDataService(database: database)
+
+        // Load then clear
+        try sampleService.loadSampleData()
+        XCTAssertTrue(try sampleService.hasSampleData())
+
+        try sampleService.clearAllData()
+        XCTAssertFalse(try sampleService.hasSampleData())
+
+        // Verify all tables are empty
+        let devices = try diveService.listDevices(includeArchived: true)
+        XCTAssertEqual(devices.count, 0)
+
+        let dives = try diveService.listDives()
+        XCTAssertEqual(dives.count, 0)
+    }
+
+    // MARK: - Device Archive Tests
+
+    func testArchiveDevice() throws {
+        let device = Device(model: "Test", serialNumber: "SN", firmwareVersion: "1.0")
+        try diveService.saveDevice(device)
+
+        // Initially active
+        var devices = try diveService.listDevices(includeArchived: false)
+        XCTAssertEqual(devices.count, 1)
+
+        // Archive it
+        let archived = try diveService.archiveDevice(id: device.id)
+        XCTAssertTrue(archived)
+
+        // No longer in active list
+        devices = try diveService.listDevices(includeArchived: false)
+        XCTAssertEqual(devices.count, 0)
+
+        // Still in full list
+        devices = try diveService.listDevices(includeArchived: true)
+        XCTAssertEqual(devices.count, 1)
+        XCTAssertFalse(devices.first!.isActive)
+    }
+
+    func testRestoreDevice() throws {
+        let device = Device(model: "Test", serialNumber: "SN", firmwareVersion: "1.0", isActive: false)
+        try diveService.saveDevice(device)
+
+        // Initially archived
+        var devices = try diveService.listDevices(includeArchived: false)
+        XCTAssertEqual(devices.count, 0)
+
+        // Restore it
+        let restored = try diveService.restoreDevice(id: device.id)
+        XCTAssertTrue(restored)
+
+        // Now in active list
+        devices = try diveService.listDevices(includeArchived: false)
+        XCTAssertEqual(devices.count, 1)
+        XCTAssertTrue(devices.first!.isActive)
+    }
 }

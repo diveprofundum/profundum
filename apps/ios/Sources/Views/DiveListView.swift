@@ -7,26 +7,41 @@ struct DiveListView: View {
     @State private var searchText = ""
     @State private var filterCCROnly = false
     @State private var showNewDiveSheet = false
+    @State private var errorMessage: String?
 
     var filteredDives: [Dive] {
         dives.filter { dive in
             let matchesSearch = searchText.isEmpty ||
                 String(dive.maxDepthM).contains(searchText)
-            let matchesCCR = !filterCCROnly || dive.isCcr
-            return matchesSearch && matchesCCR
+            return matchesSearch
         }
     }
 
     var body: some View {
         NavigationStack {
-            List {
-                ForEach(filteredDives, id: \.id) { dive in
-                    NavigationLink(destination: DiveDetailView(dive: dive)) {
-                        DiveRowView(dive: dive)
+            Group {
+                if filteredDives.isEmpty {
+                    ContentUnavailableView {
+                        Label("No Dives", systemImage: "waveform.path")
+                    } description: {
+                        Text("Add a dive or load sample data from Settings to get started.")
+                    } actions: {
+                        Button("Add Dive") {
+                            showNewDiveSheet = true
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
+                } else {
+                    List {
+                        ForEach(filteredDives, id: \.id) { dive in
+                            NavigationLink(destination: DiveDetailView(dive: dive)) {
+                                DiveRowView(dive: dive)
+                            }
+                        }
+                    }
+                    .listStyle(.plain)
                 }
             }
-            .listStyle(.plain)
             .navigationTitle("Dives")
             .searchable(text: $searchText, prompt: "Search dives")
             .toolbar {
@@ -69,15 +84,31 @@ struct DiveListView: View {
             .refreshable {
                 await loadDives()
             }
+            .onChange(of: filterCCROnly) { _, _ in
+                Task { await loadDives() }
+            }
+            .alert("Error Loading Dives", isPresented: .init(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } }
+            )) {
+                Button("Retry") {
+                    Task { await loadDives() }
+                }
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(errorMessage ?? "An unknown error occurred.")
+            }
         }
     }
 
     private func loadDives() async {
+        errorMessage = nil
+
         do {
             let query = filterCCROnly ? DiveQuery.ccrOnly() : DiveQuery()
             dives = try appState.diveService.listDives(query: query)
         } catch {
-            print("Failed to load dives: \(error)")
+            errorMessage = error.localizedDescription
         }
     }
 }

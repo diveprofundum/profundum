@@ -31,6 +31,17 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("Sample Data") {
+                    Button("Load Sample Data") {
+                        appState.loadSampleData()
+                    }
+                    .disabled(appState.hasSampleData)
+
+                    Button("Clear All Data", role: .destructive) {
+                        appState.showClearDataConfirmation = true
+                    }
+                }
+
                 Section("About") {
                     LabeledContent("Version", value: "1.0.0")
                     LabeledContent("Build", value: "1")
