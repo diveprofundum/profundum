@@ -10,9 +10,11 @@ public final class DivelogDatabase: Sendable {
     /// - Parameter path: Path to the SQLite database file. Use `:memory:` for in-memory database.
     public init(path: String) throws {
         var config = Configuration()
+        #if DEBUG
         config.prepareDatabase { db in
             db.trace { print("SQL: \($0)") }
         }
+        #endif
 
         if path == ":memory:" {
             dbQueue = try DatabaseQueue(configuration: config)
@@ -174,6 +176,15 @@ public final class DivelogDatabase: Sendable {
                 CREATE INDEX IF NOT EXISTS idx_dives_ccr ON dives(is_ccr);
                 CREATE INDEX IF NOT EXISTS idx_dives_deco ON dives(deco_required);
                 CREATE INDEX IF NOT EXISTS idx_dive_tags_tag ON dive_tags(tag);
+            """)
+        }
+
+        // Migration 2: Add soft-delete for devices
+        // Devices can be archived rather than deleted, preserving dive history provenance.
+        // Future consideration: dive merging from multiple devices.
+        migrator.registerMigration("002_device_soft_delete") { db in
+            try db.execute(sql: """
+                ALTER TABLE devices ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1;
             """)
         }
 

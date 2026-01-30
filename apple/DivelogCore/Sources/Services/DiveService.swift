@@ -23,12 +23,44 @@ public final class DiveService: Sendable {
         }
     }
 
-    public func listDevices() throws -> [Device] {
+    /// List devices, optionally including archived ones.
+    /// - Parameter includeArchived: If true, returns all devices. If false (default), returns only active devices.
+    public func listDevices(includeArchived: Bool = false) throws -> [Device] {
         try database.dbQueue.read { db in
-            try Device.fetchAll(db)
+            if includeArchived {
+                try Device.fetchAll(db)
+            } else {
+                try Device.filter(Column("is_active") == true).fetchAll(db)
+            }
         }
     }
 
+    /// Archive a device (soft-delete). The device remains in the database for dive history provenance.
+    public func archiveDevice(id: String) throws -> Bool {
+        try database.dbQueue.write { db in
+            if var device = try Device.fetchOne(db, key: id) {
+                device.isActive = false
+                try device.update(db)
+                return true
+            }
+            return false
+        }
+    }
+
+    /// Restore an archived device to active status.
+    public func restoreDevice(id: String) throws -> Bool {
+        try database.dbQueue.write { db in
+            if var device = try Device.fetchOne(db, key: id) {
+                device.isActive = true
+                try device.update(db)
+                return true
+            }
+            return false
+        }
+    }
+
+    /// Permanently delete a device. Use archiveDevice for soft-delete.
+    /// Note: This will fail if dives reference this device (foreign key constraint).
     public func deleteDevice(id: String) throws -> Bool {
         try database.dbQueue.write { db in
             try Device.deleteOne(db, key: id)

@@ -1,6 +1,19 @@
 use crate::error::FormulaError;
 use crate::formula::ast::{BinaryOp, Expr, UnaryOp};
 
+/// Relative tolerance for floating-point equality comparisons.
+/// Two values are considered equal if they differ by less than this fraction
+/// of the larger absolute value (with a floor of the tolerance itself for small numbers).
+const FLOAT_TOLERANCE: f64 = 1e-6;
+
+/// Check if two floats are nearly equal using relative tolerance.
+fn nearly_equal(a: f64, b: f64) -> bool {
+    let diff = (a - b).abs();
+    let largest = a.abs().max(b.abs());
+    // Use relative tolerance, but with absolute floor for numbers near zero
+    diff <= FLOAT_TOLERANCE * largest.max(1.0)
+}
+
 /// Result of evaluating an expression.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -132,12 +145,12 @@ fn evaluate_binary(op: BinaryOp, left: Value, right: Value) -> Result<Value, For
         BinaryOp::Eq => {
             let l = left.as_number()?;
             let r = right.as_number()?;
-            Ok(Value::Boolean((l - r).abs() < f64::EPSILON))
+            Ok(Value::Boolean(nearly_equal(l, r)))
         }
         BinaryOp::Neq => {
             let l = left.as_number()?;
             let r = right.as_number()?;
-            Ok(Value::Boolean((l - r).abs() >= f64::EPSILON))
+            Ok(Value::Boolean(!nearly_equal(l, r)))
         }
         BinaryOp::And => {
             let l = left.as_bool()?;
