@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build & Development Commands
 
-### Rust Core (primary development target)
+### Rust Compute Core
 ```bash
-# Build the core library
+# Build the compute library
 cd core && cargo build
 
 # Run tests
@@ -18,9 +18,15 @@ cd core && cargo test test_name
 # Lint and format (required before commits)
 cd core && cargo fmt --check
 cd core && cargo clippy --all-targets --all-features -- -D warnings
+```
 
-# Generate UniFFI bindings (happens automatically during build)
-cd core && cargo build
+### Swift Package (Apple platforms)
+```bash
+# Build the Swift package
+cd apple/DivelogCore && swift build
+
+# Run tests (requires Xcode)
+cd apple/DivelogCore && swift test
 ```
 
 ### CI Pipeline
@@ -28,64 +34,139 @@ The project uses GitLab CI with stages: lint → test → ui → perf. See `.git
 
 ## Architecture
 
-### Core Design: Rust + UniFFI + Native UIs
+### Hybrid Architecture: Native-First with Rust Compute Core
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  Native UI                                          │
-│  ├── Apple: SwiftUI (apps/macos/, apps/ios/)        │
-│  └── Others: Compose Multiplatform                  │
-│      (apps/android/, apps/desktop/, apps/compose/)  │
-├─────────────────────────────────────────────────────┤
-│  Platform BLE Adapters                              │
-│  (CoreBluetooth, WinRT BLE, BlueZ, Kotlin BLE)      │
-├─────────────────────────────────────────────────────┤
-│  Rust Core (core/)                                  │
-│  Exposed to Swift/Kotlin via UniFFI                 │
-└─────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│  Swift Layer (Native)                                       │
+│  ├── SwiftUI Views (apps/macos/, apps/ios/)                 │
+│  ├── GRDB Storage (all CRUD, queries, migrations)           │
+│  ├── Native Models (Codable, FetchableRecord)               │
+│  └── CoreBluetooth (platform BLE)                           │
+├─────────────────────────────────────────────────────────────┤
+│  Rust Compute Core (~500 lines, stateless)                  │
+│  ├── Formula parser (nom-based)                             │
+│  ├── Formula evaluator                                      │
+│  └── Metrics computation (DiveStats, SegmentStats)          │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### Core Module Structure (core/src/)
+### Rust Compute Core (core/src/)
+
+The Rust layer is a minimal, stateless compute library:
 
 - **lib.rs**: FFI entry point, re-exports public API via `uniffi::include_scaffolding!`
-- **models.rs**: Domain types (Dive, Device, Site, Buddy, Equipment, Segment, Formula, DiveSample)
-- **storage.rs**: `Storage` trait defining CRUD + query interface; `DiveQuery` for filtered dive lists
-- **ble.rs**: `BleAdapter` trait for platform BLE implementations; error taxonomy (`BleError`)
-- **ble_mock.rs**: `MockBleAdapter` for testing without hardware
-- **migrations.rs**: SQLite schema versioning via `core/migrations/*.sql` files
-- **divelog.udl**: UniFFI interface definition for FFI binding generation
+- **error.rs**: `FormulaError` type for formula-related errors
+- **metrics.rs**: `DiveStats` and `SegmentStats` computation from pure input types
+- **formula/**: Formula parsing and evaluation engine
+  - **ast.rs**: Abstract syntax tree types
+  - **parser.rs**: nom-based expression parser
+  - **evaluator.rs**: Expression evaluation with function support
+  - **mod.rs**: Public API (`validate`, `compute`, `validate_with_variables`)
 
-### Key Abstractions
+### Swift Storage Layer (apple/DivelogCore/)
 
-**BleAdapter trait** (`ble.rs`): Platform-agnostic interface for BLE operations (scan, connect, download logs). Each platform implements this trait using native BLE APIs.
+Swift owns all storage, domain models, and CRUD operations:
 
-**Storage trait** (`storage.rs`): Database interface supporting devices, dives, samples, segments, sites, buddies, equipment, formulas, and calculated fields. Implementation should use SQLite.
+- **Sources/Models/**: GRDB Record types (Device, Dive, DiveSample, Site, Buddy, Equipment, Segment, Formula, Settings)
+- **Sources/Database/**:
+  - `DivelogDatabase.swift`: GRDB DatabaseQueue wrapper with migrations
+  - `DiveQuery.swift`: Type-safe query builder for dive filtering/pagination
+- **Sources/Services/**:
+  - `DiveService.swift`: Main CRUD operations for all entity types
+  - `FormulaService.swift`: Formula validation, evaluation, and computed stats
+  - `ExportService.swift`: JSON export/import functionality
+- **Sources/RustBridge/**:
+  - `DivelogCompute.swift`: Swift interface to Rust compute (placeholder, awaiting UniFFI integration)
 
-**DiveQuery** (`storage.rs`): Filter struct for dive list queries (time range, depth, CCR flag, tags).
+### FFI Boundary
 
-### Data Model Highlights
+UniFFI generates Swift bindings from `core/src/divelog_compute.udl`. The interface is minimal (~5 functions):
 
-The schema (`core/schema.sql`) models technical diving with CCR support:
+```
+namespace divelog_compute {
+    string? validate_formula(string expression);
+    string? validate_formula_with_variables(string expression, sequence<string> available);
+    f64 evaluate_formula(string expression, record<string, f64> variables);
+    DiveStats compute_dive_stats(DiveInput dive, sequence<SampleInput> samples);
+    SegmentStats compute_segment_stats(i32 start_t_sec, i32 end_t_sec, sequence<SampleInput> samples);
+    sequence<FunctionInfo> supported_functions();
+}
+```
+
+### Data Model
+
+The schema (implemented in Swift GRDB migrations) models technical diving with CCR support:
 - Dives track CNS/OTU, setpoint, O2 consumption rates, deco status
 - Samples include depth, temp, setpoint_ppo2, ceiling_m, gf99
 - Segments are first-class entities for analyzing portions of a dive
 - Formulas enable user-defined calculated fields (e.g., `deco_time_min / bottom_time_min`)
 
-### FFI Boundary
+Key indices for performance:
+- `idx_dives_start_time` - primary query: list dives by date
+- `idx_samples_dive` - sample lookup for metrics
+- `idx_dives_depth`, `idx_dives_ccr`, `idx_dives_deco` - filtering
+- `idx_dive_tags_tag` - tag filtering
 
-UniFFI generates Swift and Kotlin bindings from `core/src/divelog.udl`. The build process:
-1. `build.rs` invokes `uniffi::generate_scaffolding("src/divelog.udl")`
-2. Produces native bindings at compile time
-3. Swift: linked into Xcode projects
-4. Kotlin: packaged as AAR (Android) or JVM dependency (desktop)
+### Formula Variables
+
+Variables available for dive formulas:
+- `max_depth_m`, `avg_depth_m`, `weighted_avg_depth_m`
+- `bottom_time_sec`, `bottom_time_min`, `total_time_sec`, `total_time_min`
+- `deco_time_sec`, `deco_time_min`
+- `cns_percent`, `otu`, `is_ccr`, `deco_required`
+- `min_temp_c`, `max_temp_c`, `avg_temp_c`
+- `gas_switch_count`, `max_ceiling_m`, `max_gf99`
+- `descent_rate_m_min`, `ascent_rate_m_min`
+- `o2_consumed_psi`, `o2_consumed_bar`, `o2_rate_cuft_min`, `o2_rate_l_min`
+
+Variables available for segment formulas:
+- `start_t_sec`, `end_t_sec`, `duration_sec`, `duration_min`
+- `max_depth_m`, `avg_depth_m`
+- `min_temp_c`, `max_temp_c`
+- `deco_time_sec`, `deco_time_min`, `sample_count`
 
 ## Key Constraints
 
 - **Local-first**: No network calls without explicit user action
 - **Privacy-first**: All data stored locally; cloud sync is future opt-in feature
-- **Schema migrations**: Never modify existing migrations; add new numbered files to `core/migrations/`
+- **Stateless Rust**: Rust compute core has no state, no storage dependencies
+- **Swift-owned storage**: All CRUD operations and schema migrations are in Swift/GRDB
 - **Permissive licensing**: Prefer MIT/Apache-2.0 dependencies; avoid copyleft in core
 
 ## Project Phase
 
-Currently in **Phase 0 (scaffolding)**. The Storage trait is defined but not implemented. Frontend apps are placeholders. See `docs/ROADMAP.md` for phases.
+Currently in **Phase 1 (hybrid architecture)**:
+- ✅ Rust compute core (formula parsing, metrics computation)
+- ✅ Swift GRDB storage layer (models, migrations, services)
+- ✅ Swift compute bridge (placeholder, ready for UniFFI integration)
+- ⏳ UniFFI binding generation and XCFramework packaging
+- ⏳ SwiftUI app implementation
+
+## Directory Structure
+
+```
+divelog/
+├── core/                     # Rust compute core
+│   ├── Cargo.toml
+│   ├── build.rs
+│   └── src/
+│       ├── lib.rs            # FFI entry point
+│       ├── error.rs          # FormulaError
+│       ├── metrics.rs        # DiveStats, SegmentStats
+│       ├── divelog_compute.udl
+│       └── formula/          # Parser and evaluator
+├── apple/
+│   └── DivelogCore/          # Swift Package
+│       ├── Package.swift
+│       └── Sources/
+│           ├── Models/       # GRDB Record types
+│           ├── Database/     # DivelogDatabase, DiveQuery
+│           ├── Services/     # DiveService, FormulaService, ExportService
+│           └── RustBridge/   # DivelogCompute interface
+├── apps/
+│   ├── macos/               # macOS SwiftUI (placeholder)
+│   └── ios/                 # iOS SwiftUI (placeholder)
+└── schema/
+    └── schema.sql           # Reference schema (implemented in Swift)
+```

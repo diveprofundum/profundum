@@ -1,5 +1,7 @@
 # macOS
 .DS_Store
+.AppleDouble
+.LSOverride
 
 # Claude Code local settings
 .claude/
@@ -8,12 +10,67 @@
 target/
 Cargo.lock
 
-# IDE
-.idea/
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
+xcuserdata/
 
-# Gradle
+# Xcode
+DerivedData/
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# XCFramework (generated from Rust build)
+*.xcframework/
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+.vscode/
+
+# Gradle (Android)
 .gradle/
 build/
 local.properties
+
+# Generated UniFFI bindings (can be regenerated)
+# Note: We keep these in git for easier Swift package builds
+# apple/DivelogCore/Sources/RustBridge/Generated/
+
+# SQLite databases
+*.sqlite
+*.sqlite3
+*.db
+
+# Environment and secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Test artifacts
+*.profraw
+*.profdata
+lcov.info
+coverage/
+
+# Temporary files
+*.tmp
+*.temp
+*.log

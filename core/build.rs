@@ -1,3 +1,3 @@
 fn main() {
-    uniffi::generate_scaffolding("src/divelog.udl").unwrap();
+    uniffi::generate_scaffolding("src/divelog_compute.udl").unwrap();
 }

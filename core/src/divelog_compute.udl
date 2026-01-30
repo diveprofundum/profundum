@@ -1,0 +1,105 @@
+// Minimal UniFFI interface for divelog compute core
+// This is a stateless compute library - no storage, no services
+
+namespace divelog_compute {
+    // Formula validation - returns error message or null if valid
+    string? validate_formula([ByRef] string expression);
+
+    // Formula validation with available variables check
+    string? validate_formula_with_variables([ByRef] string expression, sequence<string> available);
+
+    // Formula evaluation - pure function
+    [Throws=FormulaError]
+    f64 evaluate_formula([ByRef] string expression, record<string, f64> variables);
+
+    // Metrics computation - pure functions
+    DiveStats compute_dive_stats(DiveInput dive, sequence<SampleInput> samples);
+    SegmentStats compute_segment_stats(i32 start_t_sec, i32 end_t_sec, sequence<SampleInput> samples);
+
+    // Function info for UI
+    sequence<FunctionInfo> supported_functions();
+};
+
+// ============================================================================
+// Error Types
+// ============================================================================
+
+[Error]
+enum FormulaError {
+    "ParseError",
+    "UnknownVariable",
+    "UnknownFunction",
+    "TypeError",
+    "DivisionByZero",
+    "InvalidArgCount",
+    "EmptyExpression",
+};
+
+// ============================================================================
+// Enums
+// ============================================================================
+
+enum DepthClass {
+    "Recreational",
+    "Deep",
+    "Extended",
+    "Extreme",
+};
+
+// ============================================================================
+// Input Types (for metrics computation)
+// ============================================================================
+
+dictionary DiveInput {
+    i64 start_time_unix;
+    i64 end_time_unix;
+    i32 bottom_time_sec;
+};
+
+dictionary SampleInput {
+    i32 t_sec;
+    f32 depth_m;
+    f32 temp_c;
+    f32? setpoint_ppo2;
+    f32? ceiling_m;
+    f32? gf99;
+};
+
+// ============================================================================
+// Output Types
+// ============================================================================
+
+dictionary DiveStats {
+    i32 total_time_sec;
+    i32 bottom_time_sec;
+    i32 deco_time_sec;
+    f32 max_depth_m;
+    f32 avg_depth_m;
+    f32 weighted_avg_depth_m;
+    f32 min_temp_c;
+    f32 max_temp_c;
+    f32 avg_temp_c;
+    DepthClass depth_class;
+    u32 gas_switch_count;
+    f32 max_ceiling_m;
+    f32 max_gf99;
+    f32 descent_rate_m_min;
+    f32 ascent_rate_m_min;
+};
+
+dictionary SegmentStats {
+    i32 duration_sec;
+    f32 max_depth_m;
+    f32 avg_depth_m;
+    f32 min_temp_c;
+    f32 max_temp_c;
+    i32 deco_time_sec;
+    u64 sample_count;
+};
+
+dictionary FunctionInfo {
+    string name;
+    string signature;
+    string description;
+    u32 arg_count;
+};

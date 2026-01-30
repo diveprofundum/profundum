@@ -1,16 +1,26 @@
 [package]
-name = "divelog_core"
+name = "divelog_compute"
 version = "0.1.0"
 edition = "2021"
+description = "Stateless compute core for dive log formula parsing and metrics computation"
+license = "MIT"
 build = "build.rs"
 
 [lib]
-name = "divelog_core"
+name = "divelog_compute"
 path = "src/lib.rs"
+crate-type = ["lib", "staticlib", "cdylib"]
 
 [dependencies]
-rusqlite = "0.31"
-uniffi = { version = "0.28" }
+uniffi = { version = "0.28", features = ["cli"] }
+thiserror = "1.0"
+nom = "7.1"
 
 [build-dependencies]
-uniffi = { version = "0.28", features = ["cli"] }
+uniffi = { version = "0.28", features = ["build"] }
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+
+[dev-dependencies]

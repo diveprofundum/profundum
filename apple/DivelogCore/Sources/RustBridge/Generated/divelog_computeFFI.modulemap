@@ -1,0 +1,4 @@
+module divelog_computeFFI {
+    header "divelog_computeFFI.h"
+    export *
+}
