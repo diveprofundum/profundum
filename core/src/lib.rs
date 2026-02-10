@@ -124,6 +124,7 @@ mod tests {
                 setpoint_ppo2: None,
                 ceiling_m: None,
                 gf99: None,
+                gasmix_index: None,
             },
             SampleInput {
                 t_sec: 300,
@@ -132,6 +133,7 @@ mod tests {
                 setpoint_ppo2: None,
                 ceiling_m: Some(3.0),
                 gf99: Some(60.0),
+                gasmix_index: None,
             },
             SampleInput {
                 t_sec: 600,
@@ -140,6 +142,7 @@ mod tests {
                 setpoint_ppo2: None,
                 ceiling_m: None,
                 gf99: None,
+                gasmix_index: None,
             },
         ];
 
@@ -158,6 +161,7 @@ mod tests {
                 setpoint_ppo2: None,
                 ceiling_m: None,
                 gf99: None,
+                gasmix_index: None,
             },
             SampleInput {
                 t_sec: 200,
@@ -166,6 +170,7 @@ mod tests {
                 setpoint_ppo2: None,
                 ceiling_m: None,
                 gf99: None,
+                gasmix_index: None,
             },
             SampleInput {
                 t_sec: 300,
@@ -174,6 +179,7 @@ mod tests {
                 setpoint_ppo2: None,
                 ceiling_m: None,
                 gf99: None,
+                gasmix_index: None,
             },
         ];
 

@@ -63,6 +63,7 @@ dictionary SampleInput {
     f32? setpoint_ppo2;
     f32? ceiling_m;
     f32? gf99;
+    i32? gasmix_index;
 };
 
 // ============================================================================

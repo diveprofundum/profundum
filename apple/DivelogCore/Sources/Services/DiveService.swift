@@ -350,11 +350,20 @@ public final class DiveService: Sendable {
     }
 
     public func getGasMixes(diveId: String) throws -> [GasMix] {
-        try database.dbQueue.read { db in
+        let allMixes = try database.dbQueue.read { db in
             try GasMix
                 .filter(Column("dive_id") == diveId)
                 .order(Column("mix_index"))
                 .fetchAll(db)
+        }
+        // Read-time dedup safety net for pre-fix data
+        struct MixKey: Hashable {
+            let o2: Int, he: Int, usage: String?
+        }
+        var seen = Set<MixKey>()
+        return allMixes.filter { mix in
+            let key = MixKey(o2: Int(mix.o2Fraction * 1000), he: Int(mix.heFraction * 1000), usage: mix.usage)
+            return seen.insert(key).inserted
         }
     }
 
