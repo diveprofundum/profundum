@@ -1,41 +1,38 @@
-# Testing Plan (Draft)
+# Testing Plan
 
 ## Goals
 - Validate BLE ingestion, parsing, storage, analytics, and UI flows.
-- Ensure CCR‑critical calculations (CNS/OTU, deco time, segment stats, O2 rates) are correct.
+- Ensure CCR-critical calculations (CNS/OTU, deco time, segment stats, O2 rates) are correct.
 - Protect performance targets for lists and charts.
 
 ## Test layers
+
 ### 1) Unit tests (Rust core)
-- **Models & parsing**: parse log chunks, CRC checks, field normalization.
-- **Derived metrics**: CCR hours, deco hours, depth classes, segment stats.
-- **Formula engine**: syntax validation, variable binding, error handling.
-- **Migrations**: apply migrations in order, idempotency, version tracking.
+- **Derived metrics**: DiveStats, SegmentStats computation from pure inputs.
+- **Formula engine**: syntax validation, variable binding, error handling, ternary expressions.
 
 Coverage targets:
-- Core logic files: 80% line coverage
 - Formula engine + metrics: 95% branch coverage
 
-### 2) Integration tests (Rust core)
-- **Storage**: CRUD for dives, samples, segments, sites, buddies, equipment.
-- **Queries**: tag filters, depth ranges, calculated field columns.
-- **Migrations**: upgrade from v1 to v2 with sample data.
+### 2) Integration tests (Swift/GRDB)
+- **Storage**: CRUD for dives, samples, segments, sites, teammates, equipment.
+- **Queries**: DiveQuery builder with filters, depth ranges, pagination.
+- **Migrations**: upgrade path through all 7 migrations with sample data.
+- **Shearwater import**: multi-computer merge, fingerprint dedup, edge cases.
 
 Coverage targets:
 - Storage + query surfaces: 80% line coverage
 
-### 3) BLE adapter tests (platform)
-- **Mock adapter**: deterministic scan/connect/list/download flows.
-- **Error taxonomy**: permission denied, Bluetooth off, disconnect mid‑transfer.
-- **Resume**: download resumes from offset after failure.
+### 3) BLE / dive computer tests
+- **MockBLETransport**: deterministic read/write flows for testability.
+- **IOStreamBridge**: verify C callback bridging to Swift transport.
+- **DiveDataMapper**: field and sample mapping from libdivecomputer types.
+- **Error handling**: permission denied, disconnect mid-transfer, protocol errors.
 
-Coverage targets:
-- Adapter state machine: 100% transition coverage
-
-### 4) UI tests (SwiftUI + Compose)
+### 4) UI tests (SwiftUI)
 - **Snapshot tests**: key screens (list, detail, charts, formula editor, settings).
 - **Navigation tests**: onboarding → sync → list → detail → segments.
-- **Accessibility**: large text modes, contrast, keyboard navigation on desktop.
+- **Accessibility**: VoiceOver audit, large text modes, keyboard navigation on macOS.
 
 Coverage targets:
 - Critical flows: 100% exercised by UI tests
@@ -43,24 +40,19 @@ Coverage targets:
 ### 5) Performance tests
 - **List performance**: 10k dives filter response < 100 ms.
 - **Chart performance**: render 5k samples < 50 ms.
-- **Sync performance**: 50 dives < 3 minutes on mid‑tier hardware.
+- **Import performance**: 100-dive Shearwater import under baseline threshold.
 
-### 6) Data import tests (v2)
-- CSV/Subsurface/UDDF import mapping validation.
-- Schema compatibility for older exports.
+### 6) Data import tests
+- Shearwater Cloud .db import (implemented — see ShearwaterCloudImportTests).
+- Subsurface XML, UDDF, DL7 import (future — see GitHub Issues).
 
 ## Test data strategy
-- **Synthetic logs**: random and edge‑case profiles (deep deco, long shallow, bailout).
+- **Synthetic logs**: random and edge-case profiles (deep deco, long shallow, bailout).
 - **Golden files**: known Shearwater logs with expected output.
-- **Property‑based tests**: time ordering, no negative depths, monotonic timestamps.
+- **In-memory databases**: `DivelogDatabase(path: ":memory:")` for fast, isolated test runs.
 
 ## CI pipeline
-- Rust unit/integration tests on Linux/macOS.
-- SwiftUI snapshots on macOS runner.
-- Compose UI tests on Linux/Windows.
-- Linting and formatting gates.
-
-## Ownership
-- Core logic: backend engineer.
-- BLE adapters: platform leads.
-- UI tests: platform UI owners.
+- GitHub Actions with path filtering.
+- Rust tests on Ubuntu runner (`rust-test`, `rust-lint`).
+- Swift tests on macOS-14 runner (`swift-test`).
+- Version consistency check (`version-check`).

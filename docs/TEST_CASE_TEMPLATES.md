@@ -1,30 +1,30 @@
-# Test Case Templates (Draft)
+# Test Case Templates
 
-## BLE Adapter
-### Test: Scan returns devices
-- **Setup**: Mock adapter with 2 devices
-- **Action**: scan(timeout=3000)
-- **Assert**: returns 2 devices, RSSI present, no errors
+## BLE / Dive Computer Import
+### Test: MockBLETransport read/write
+- **Setup**: MockBLETransport with canned response data
+- **Action**: write characteristic, read response
+- **Assert**: data round-trips correctly, writeWithoutResponse used
 
-### Test: Connect fails when device missing
-- **Setup**: Mock adapter with empty device list
-- **Action**: connect("missing")
-- **Assert**: error DeviceNotFound
+### Test: Import with missing fingerprint
+- **Setup**: In-memory DB, dive data with no prior fingerprint
+- **Action**: import via DiveComputerImportService
+- **Assert**: dive created, fingerprint stored in dive_source_fingerprints
 
-### Test: Download resumes from offset
-- **Setup**: Mock adapter returns chunks [0..1024], [1024..2048]
-- **Action**: download(resume_offset=1024)
-- **Assert**: only chunk 2 returned, CRC verified
+### Test: Import with duplicate fingerprint
+- **Setup**: In-memory DB with existing fingerprint
+- **Action**: reimport same dive data
+- **Assert**: dive skipped, no duplicate created
 
-### Test: BLE permission denied
-- **Setup**: Adapter configured to throw PermissionDenied
-- **Action**: scan(timeout=3000)
-- **Assert**: error propagated, UI shows guidance
+### Test: Multi-computer merge
+- **Setup**: Two dives from different serials within 120s window
+- **Action**: import both
+- **Assert**: single dive with groupId, two fingerprint records
 
-### Test: Mid‑transfer disconnect
-- **Setup**: Adapter disconnects after first chunk
+### Test: BLE disconnect mid-transfer
+- **Setup**: MockBLETransport configured to error after N bytes
 - **Action**: download
-- **Assert**: ConnectionFailed, resume works on retry
+- **Assert**: DiveComputerError.connectionFailed, partial data not persisted
 
 ## Formula Engine
 ### Test: Valid expression parses

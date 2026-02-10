@@ -22,27 +22,24 @@
 
 ## Variable sets
 ### Dive-level
-- `max_depth_m`
-- `avg_depth_m`
-- `bottom_time_min`
-- `deco_time_min`
-- `otu`
-- `cns_percent`
-- `is_ccr`
-- `gas_switch_count`
-- `setpoint_change_count`
-- `o2_consumed_psi`
-- `o2_consumed_bar`
-- `o2_rate_cuft_min`
-- `o2_rate_l_min`
-- `o2_tank_factor`
+- `max_depth_m`, `avg_depth_m`, `weighted_avg_depth_m`
+- `max_depth_ft`, `avg_depth_ft`, `weighted_avg_depth_ft`
+- `bottom_time_sec`, `bottom_time_min`, `total_time_sec`, `total_time_min`
+- `deco_time_sec`, `deco_time_min`
+- `cns_percent`, `otu`, `is_ccr`, `deco_required`
+- `min_temp_c`, `max_temp_c`, `avg_temp_c`
+- `min_temp_f`, `max_temp_f`, `avg_temp_f`
+- `gas_switch_count`, `max_ceiling_m`, `max_ceiling_ft`, `max_gf99`
+- `descent_rate_m_min`, `ascent_rate_m_min`
+- `o2_consumed_psi`, `o2_consumed_bar`, `o2_rate_cuft_min`, `o2_rate_l_min`
 
 ### Segment-level (if context is a segment)
-- `segment_time_min`
-- `segment_avg_depth_m`
-- `segment_deco_time_min`
-- `segment_otu`
-- `segment_cns_percent`
+- `start_t_sec`, `end_t_sec`, `duration_sec`, `duration_min`
+- `max_depth_m`, `avg_depth_m`
+- `max_depth_ft`, `avg_depth_ft`
+- `min_temp_c`, `max_temp_c`
+- `min_temp_f`, `max_temp_f`
+- `deco_time_sec`, `deco_time_min`, `sample_count`
 
 ## Workflow
 1. Create a formula from the Formula Library.
