@@ -6,6 +6,7 @@ struct TeammateListView: View {
     @State private var teammates: [Teammate] = []
     @State private var showAddSheet = false
     @State private var editingTeammate: Teammate?
+    @State private var errorMessage: String?
 
     var body: some View {
         List {
@@ -63,13 +64,18 @@ struct TeammateListView: View {
         .refreshable {
             await loadTeammates()
         }
+        .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "")
+        }
     }
 
     private func loadTeammates() async {
         do {
             teammates = try appState.diveService.listTeammates()
         } catch {
-            print("Failed to load teammates: \(error)")
+            errorMessage = "Failed to load teammates: \(error.localizedDescription)"
         }
     }
 
@@ -78,7 +84,7 @@ struct TeammateListView: View {
             _ = try appState.diveService.deleteTeammate(id: teammate.id)
             teammates.removeAll { $0.id == teammate.id }
         } catch {
-            print("Failed to delete teammate: \(error)")
+            errorMessage = "Failed to delete teammate: \(error.localizedDescription)"
         }
     }
 }
@@ -151,6 +157,7 @@ struct AddTeammateSheet: View {
     @State private var certificationLevel = ""
     @State private var contact = ""
     @State private var notes = ""
+    @State private var errorMessage: String?
 
     var editingTeammate: Teammate?
 
@@ -203,6 +210,11 @@ struct AddTeammateSheet: View {
                     notes = tm.notes ?? ""
                 }
             }
+            .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(errorMessage ?? "")
+            }
         }
     }
 
@@ -218,7 +230,7 @@ struct AddTeammateSheet: View {
             try appState.diveService.saveTeammate(teammate)
             dismiss()
         } catch {
-            print("Failed to save teammate: \(error)")
+            errorMessage = "Failed to save teammate: \(error.localizedDescription)"
         }
     }
 }

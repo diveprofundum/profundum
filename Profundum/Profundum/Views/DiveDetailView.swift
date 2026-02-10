@@ -17,6 +17,8 @@ struct DiveDetailView: View {
     @State private var showSourceDevices = false
     @State private var surfaceIntervalSec: Int64?
     @State private var formulaResults: [(name: String, value: Double)] = []
+    @State private var errorMessage: String?
+    @State private var exportedJSON: Data?
 
     var onDiveUpdated: (() -> Void)?
 
@@ -121,11 +123,37 @@ struct DiveDetailView: View {
         .toolbar {
             #if os(iOS)
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Edit") {
-                    showEditSheet = true
+                HStack(spacing: 16) {
+                    if let exportedJSON {
+                        ShareLink(item: exportedJSON, preview: SharePreview("Dive Export", image: Image(systemName: "doc.text"))) {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    } else {
+                        Button {
+                            generateExport()
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
+                    Button("Edit") {
+                        showEditSheet = true
+                    }
                 }
             }
             #else
+            ToolbarItem {
+                if let exportedJSON {
+                    ShareLink(item: exportedJSON, preview: SharePreview("Dive Export", image: Image(systemName: "doc.text"))) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                } else {
+                    Button {
+                        generateExport()
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                }
+            }
             ToolbarItem {
                 Button("Edit") {
                     showEditSheet = true
@@ -148,6 +176,11 @@ struct DiveDetailView: View {
                 editingTeammateIds: loadedTeammateIds,
                 editingEquipmentIds: loadedEquipmentIds
             )
+        }
+        .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "")
         }
     }
 
@@ -518,6 +551,15 @@ struct DiveDetailView: View {
         }
     }
 
+    private func generateExport() {
+        do {
+            let exportService = ExportService(database: appState.database)
+            exportedJSON = try exportService.exportDives(ids: [dive.id])
+        } catch {
+            errorMessage = "Failed to export dive: \(error.localizedDescription)"
+        }
+    }
+
     private func loadDiveData() async {
         do {
             let detail = try appState.diveService.getDiveDetail(diveId: dive.id)
@@ -564,7 +606,7 @@ struct DiveDetailView: View {
                 formulaResults = results
             }
         } catch {
-            print("Failed to load dive data: \(error)")
+            errorMessage = "Failed to load dive data: \(error.localizedDescription)"
         }
     }
 }

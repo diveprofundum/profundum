@@ -12,6 +12,7 @@ struct SettingsView: View {
     @State private var pressureUnit: PressureUnit = .bar
     @State private var showExportSheet = false
     @State private var showImportPicker = false
+    @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -93,6 +94,11 @@ struct SettingsView: View {
             ) { result in
                 handleImport(result)
             }
+            .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(errorMessage ?? "")
+            }
         }
     }
 
@@ -131,13 +137,18 @@ struct SettingsView: View {
                 let exportService = ExportService(database: appState.database)
                 _ = try exportService.importJSON(data)
             } catch {
-                print("Import failed: \(error)")
+                errorMessage = "Import failed: \(error.localizedDescription)"
             }
 
         case .failure(let error):
-            print("File picker failed: \(error)")
+            errorMessage = "File picker failed: \(error.localizedDescription)"
         }
     }
+}
+
+enum ExportFormat: String, CaseIterable {
+    case json = "JSON"
+    case csv = "CSV"
 }
 
 struct ExportSheet: View {
@@ -145,6 +156,8 @@ struct ExportSheet: View {
     @EnvironmentObject var appState: AppState
     @State private var exportData: Data?
     @State private var showShareSheet = false
+    @State private var errorMessage: String?
+    @State private var selectedFormat: ExportFormat = .json
 
     var body: some View {
         NavigationStack {
@@ -156,10 +169,23 @@ struct ExportSheet: View {
                 Text("Export Dive Data")
                     .font(.title2)
 
-                Text("Export all your dives, devices, sites, and teammates to a JSON file.")
+                Text(selectedFormat == .json
+                    ? "Export all dives, devices, sites, and teammates to a JSON file."
+                    : "Export a summary of all dives to a CSV spreadsheet.")
                     .multilineTextAlignment(.center)
                     .foregroundColor(.secondary)
                     .padding(.horizontal)
+
+                Picker("Format", selection: $selectedFormat) {
+                    ForEach(ExportFormat.allCases, id: \.self) { format in
+                        Text(format.rawValue).tag(format)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 40)
+                .onChange(of: selectedFormat) { _, _ in
+                    exportData = nil
+                }
 
                 Button("Export") {
                     generateExport()
@@ -167,8 +193,9 @@ struct ExportSheet: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(exportData != nil)
 
-                if exportData != nil {
-                    ShareLink(item: exportData!, preview: SharePreview("Divelog Export", image: Image(systemName: "doc.text"))) {
+                if let exportData {
+                    let fileName = selectedFormat == .json ? "divelog-export.json" : "divelog-export.csv"
+                    ShareLink(item: exportData, preview: SharePreview(fileName, image: Image(systemName: "doc.text"))) {
                         Label("Share Export", systemImage: "square.and.arrow.up")
                     }
                     .buttonStyle(.bordered)
@@ -179,7 +206,7 @@ struct ExportSheet: View {
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #else
-            .frame(minWidth: 400, idealWidth: 500, minHeight: 300)
+            .frame(minWidth: 400, idealWidth: 500, minHeight: 350)
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -188,15 +215,25 @@ struct ExportSheet: View {
                     }
                 }
             }
+            .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(errorMessage ?? "")
+            }
         }
     }
 
     private func generateExport() {
         do {
             let exportService = ExportService(database: appState.database)
-            exportData = try exportService.exportAll()
+            switch selectedFormat {
+            case .json:
+                exportData = try exportService.exportAll()
+            case .csv:
+                exportData = try exportService.exportDivesAsCSV(ids: [])
+            }
         } catch {
-            print("Export failed: \(error)")
+            errorMessage = "Export failed: \(error.localizedDescription)"
         }
     }
 }

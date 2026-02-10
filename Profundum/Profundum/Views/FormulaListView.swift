@@ -5,6 +5,7 @@ struct FormulaListView: View {
     @EnvironmentObject var appState: AppState
     @State private var formulas: [Formula] = []
     @State private var showAddSheet = false
+    @State private var errorMessage: String?
 
     var body: some View {
         List {
@@ -49,13 +50,18 @@ struct FormulaListView: View {
         .refreshable {
             await loadFormulas()
         }
+        .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "")
+        }
     }
 
     private func loadFormulas() async {
         do {
             formulas = try appState.diveService.listFormulas()
         } catch {
-            print("Failed to load formulas: \(error)")
+            errorMessage = "Failed to load formulas: \(error.localizedDescription)"
         }
     }
 
@@ -64,7 +70,7 @@ struct FormulaListView: View {
             _ = try appState.diveService.deleteFormula(id: formula.id)
             formulas.removeAll { $0.id == formula.id }
         } catch {
-            print("Failed to delete formula: \(error)")
+            errorMessage = "Failed to delete formula: \(error.localizedDescription)"
         }
     }
 }
@@ -174,6 +180,7 @@ struct AddFormulaSheet: View {
     @State private var expression = ""
     @State private var formulaDescription = ""
     @State private var validationError: String?
+    @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -222,6 +229,11 @@ struct AddFormulaSheet: View {
             .onChange(of: expression) { _, newValue in
                 validateExpression(newValue)
             }
+            .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(errorMessage ?? "")
+            }
         }
     }
 
@@ -243,7 +255,7 @@ struct AddFormulaSheet: View {
             try appState.diveService.saveFormula(formula)
             dismiss()
         } catch {
-            print("Failed to save formula: \(error)")
+            errorMessage = "Failed to save formula: \(error.localizedDescription)"
         }
     }
 }

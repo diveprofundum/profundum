@@ -17,6 +17,7 @@ struct DiveListView: View {
     @State private var editMode: EditMode = .inactive
     @State private var selectedDiveIDs: Set<String> = []
     @State private var showDeleteConfirmation = false
+    @State private var batchExportData: Data?
     #endif
     @State private var hasMoreDives = true
     @State private var isLoadingMore = false
@@ -76,6 +77,17 @@ struct DiveListView: View {
                                 selectedDiveIDs = Set(filteredDives.map(\.id))
                             }
                             if !selectedDiveIDs.isEmpty {
+                                if let batchExportData {
+                                    ShareLink(item: batchExportData, preview: SharePreview("Dive Export", image: Image(systemName: "doc.text"))) {
+                                        Label("Share \(selectedDiveIDs.count)", systemImage: "square.and.arrow.up")
+                                    }
+                                } else {
+                                    Button {
+                                        generateBatchExport()
+                                    } label: {
+                                        Label("Export \(selectedDiveIDs.count)", systemImage: "square.and.arrow.up")
+                                    }
+                                }
                                 Button(role: .destructive) {
                                     showDeleteConfirmation = true
                                 } label: {
@@ -98,13 +110,17 @@ struct DiveListView: View {
                         Button("Done") {
                             editMode = .inactive
                             selectedDiveIDs.removeAll()
+                            batchExportData = nil
                         }
                     } else {
                         Menu {
                             Button(action: { showNewDiveSheet = true }) {
                                 Label("Add Dive", systemImage: "plus")
                             }
-                            Button(action: { editMode = .active }) {
+                            Button(action: {
+                                editMode = .active
+                                batchExportData = nil
+                            }) {
                                 Label("Select Dives", systemImage: "checkmark.circle")
                             }
                         } label: {
@@ -325,12 +341,23 @@ struct DiveListView: View {
         }
     }
 
+    #if os(iOS)
+    private func generateBatchExport() {
+        do {
+            let exportService = ExportService(database: appState.database)
+            batchExportData = try exportService.exportDives(ids: Array(selectedDiveIDs))
+        } catch {
+            errorMessage = "Failed to export dives: \(error.localizedDescription)"
+        }
+    }
+    #endif
+
     private func deleteDive(_ diveWithSite: DiveWithSite) {
         do {
             _ = try appState.diveService.deleteDive(id: diveWithSite.dive.id)
             dives.removeAll { $0.id == diveWithSite.id }
         } catch {
-            print("Failed to delete dive: \(error)")
+            errorMessage = "Failed to delete dive: \(error.localizedDescription)"
         }
     }
 

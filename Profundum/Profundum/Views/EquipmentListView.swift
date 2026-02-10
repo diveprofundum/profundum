@@ -6,6 +6,7 @@ struct EquipmentListView: View {
     @State private var equipment: [Equipment] = []
     @State private var showAddSheet = false
     @State private var editingEquipment: Equipment?
+    @State private var errorMessage: String?
 
     var body: some View {
         List {
@@ -63,13 +64,18 @@ struct EquipmentListView: View {
         .refreshable {
             await loadEquipment()
         }
+        .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "")
+        }
     }
 
     private func loadEquipment() async {
         do {
             equipment = try appState.diveService.listEquipment()
         } catch {
-            print("Failed to load equipment: \(error)")
+            errorMessage = "Failed to load equipment: \(error.localizedDescription)"
         }
     }
 
@@ -78,7 +84,7 @@ struct EquipmentListView: View {
             _ = try appState.diveService.deleteEquipment(id: item.id)
             equipment.removeAll { $0.id == item.id }
         } catch {
-            print("Failed to delete equipment: \(error)")
+            errorMessage = "Failed to delete equipment: \(error.localizedDescription)"
         }
     }
 }
@@ -177,6 +183,7 @@ struct AddEquipmentSheet: View {
     @State private var hasLastServiceDate = false
     @State private var lastServiceDate = Date()
     @State private var notes = ""
+    @State private var errorMessage: String?
 
     var editingEquipment: Equipment?
 
@@ -252,6 +259,11 @@ struct AddEquipmentSheet: View {
                     notes = eq.notes ?? ""
                 }
             }
+            .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(errorMessage ?? "")
+            }
         }
     }
 
@@ -269,7 +281,7 @@ struct AddEquipmentSheet: View {
             try appState.diveService.saveEquipment(item)
             dismiss()
         } catch {
-            print("Failed to save equipment: \(error)")
+            errorMessage = "Failed to save equipment: \(error.localizedDescription)"
         }
     }
 }
