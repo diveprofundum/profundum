@@ -39,6 +39,7 @@ struct NewDiveSheet: View {
     @State private var equipment: [Equipment] = []
     @State private var selectedEquipmentIds: Set<String> = []
     @State private var equipmentSearchText = ""
+    @State private var errorMessage: String?
 
     // Edit mode
     var editingDive: Dive?
@@ -89,7 +90,7 @@ struct NewDiveSheet: View {
                     teammates = try appState.diveService.listTeammates()
                     equipment = try appState.diveService.listEquipment()
                 } catch {
-                    print("Failed to load data: \(error)")
+                    errorMessage = "Failed to load form data: \(error.localizedDescription)"
                 }
             }
             .onAppear {
@@ -120,6 +121,11 @@ struct NewDiveSheet: View {
                     selectedTeammateIds = Set(editingTeammateIds)
                     selectedEquipmentIds = Set(editingEquipmentIds)
                 }
+            }
+            .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(errorMessage ?? "")
             }
         }
     }
@@ -481,7 +487,7 @@ struct NewDiveSheet: View {
             newSiteName = ""
             isCreatingNewSite = false
         } catch {
-            print("Failed to create site: \(error)")
+            errorMessage = "Failed to create site: \(error.localizedDescription)"
         }
     }
 
@@ -506,7 +512,7 @@ struct NewDiveSheet: View {
             selectedTeammateIds.insert(teammate.id)
             teammateSearchText = ""
         } catch {
-            print("Failed to create teammate: \(error)")
+            errorMessage = "Failed to create teammate: \(error.localizedDescription)"
         }
     }
 
@@ -520,7 +526,7 @@ struct NewDiveSheet: View {
             selectedEquipmentIds.insert(item.id)
             equipmentSearchText = ""
         } catch {
-            print("Failed to create equipment: \(error)")
+            errorMessage = "Failed to create equipment: \(error.localizedDescription)"
         }
     }
 
@@ -564,7 +570,7 @@ struct NewDiveSheet: View {
             )
             dismiss()
         } catch {
-            print("Failed to save dive: \(error)")
+            errorMessage = "Failed to save dive: \(error.localizedDescription)"
         }
     }
 }

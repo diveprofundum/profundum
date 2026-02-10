@@ -232,6 +232,7 @@ struct AddDeviceSheet: View {
     @State private var model = ""
     @State private var serialNumber = ""
     @State private var firmwareVersion = ""
+    @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -266,11 +267,16 @@ struct AddDeviceSheet: View {
                             try appState.diveService.saveDevice(device)
                             dismiss()
                         } catch {
-                            print("Failed to save device: \(error)")
+                            errorMessage = "Failed to save device: \(error.localizedDescription)"
                         }
                     }
                     .disabled(model.isEmpty || serialNumber.isEmpty)
                 }
+            }
+            .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(errorMessage ?? "")
             }
         }
     }

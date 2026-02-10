@@ -6,6 +6,7 @@ struct SiteListView: View {
     @State private var sites: [Site] = []
     @State private var showAddSheet = false
     @State private var siteToEdit: Site?
+    @State private var errorMessage: String?
 
     var body: some View {
         List {
@@ -63,13 +64,18 @@ struct SiteListView: View {
         .refreshable {
             await loadSites()
         }
+        .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "")
+        }
     }
 
     private func loadSites() async {
         do {
             sites = try appState.diveService.listSites()
         } catch {
-            print("Failed to load sites: \(error)")
+            errorMessage = "Failed to load sites: \(error.localizedDescription)"
         }
     }
 
@@ -78,7 +84,7 @@ struct SiteListView: View {
             _ = try appState.diveService.deleteSite(id: site.id)
             sites.removeAll { $0.id == site.id }
         } catch {
-            print("Failed to delete site: \(error)")
+            errorMessage = "Failed to delete site: \(error.localizedDescription)"
         }
     }
 }
@@ -140,6 +146,7 @@ struct AddSiteSheet: View {
     @State private var latitude = ""
     @State private var longitude = ""
     @State private var notes = ""
+    @State private var errorMessage: String?
 
     var editingSite: Site?
 
@@ -193,7 +200,7 @@ struct AddSiteSheet: View {
                             try appState.diveService.saveSite(site, tags: [])
                             dismiss()
                         } catch {
-                            print("Failed to save site: \(error)")
+                            errorMessage = "Failed to save site: \(error.localizedDescription)"
                         }
                     }
                     .disabled(name.isEmpty)
@@ -206,6 +213,11 @@ struct AddSiteSheet: View {
                     if let lon = site.lon { longitude = String(lon) }
                     notes = site.notes ?? ""
                 }
+            }
+            .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(errorMessage ?? "")
             }
         }
     }

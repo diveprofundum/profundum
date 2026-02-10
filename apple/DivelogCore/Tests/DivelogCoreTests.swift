@@ -691,6 +691,147 @@ final class DivelogCoreTests: XCTestCase {
         XCTAssertTrue(detail.sourceDeviceNames.first?.contains("Detail Test") ?? false)
     }
 
+    // MARK: - Export Tests
+
+    func testExportDivesSubset() throws {
+        let device = Device(model: "Export Test", serialNumber: "EX01", firmwareVersion: "1.0")
+        try diveService.saveDevice(device)
+
+        let dive1 = Dive(
+            deviceId: device.id,
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000
+        )
+        let dive2 = Dive(
+            deviceId: device.id,
+            startTimeUnix: 1700100000,
+            endTimeUnix: 1700103600,
+            maxDepthM: 20.0,
+            avgDepthM: 12.0,
+            bottomTimeSec: 2000
+        )
+        try diveService.saveDive(dive1, tags: ["deep"], teammateIds: [], equipmentIds: [])
+        try diveService.saveDive(dive2)
+
+        // Add a sample for dive1
+        try diveService.saveSamples([
+            DiveSample(diveId: dive1.id, tSec: 0, depthM: 0.0, tempC: 22.0),
+            DiveSample(diveId: dive1.id, tSec: 60, depthM: 30.0, tempC: 18.0),
+        ])
+
+        let exportService = ExportService(database: database)
+
+        // Export only dive1
+        let data = try exportService.exportDives(ids: [dive1.id])
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let export = try decoder.decode(ExportData.self, from: data)
+
+        XCTAssertEqual(export.dives.count, 1)
+        XCTAssertEqual(export.dives.first?.dive.id, dive1.id)
+        XCTAssertEqual(export.dives.first?.tags, ["deep"])
+        XCTAssertEqual(export.dives.first?.samples.count, 2)
+        XCTAssertEqual(export.devices.count, 1)
+    }
+
+    func testExportDivesEmptyIdsExportsAll() throws {
+        let device = Device(model: "Export All", serialNumber: "EA01", firmwareVersion: "1.0")
+        try diveService.saveDevice(device)
+
+        try diveService.saveDive(Dive(
+            deviceId: device.id,
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000
+        ))
+        try diveService.saveDive(Dive(
+            deviceId: device.id,
+            startTimeUnix: 1700100000,
+            endTimeUnix: 1700103600,
+            maxDepthM: 20.0,
+            avgDepthM: 12.0,
+            bottomTimeSec: 2000
+        ))
+
+        let exportService = ExportService(database: database)
+        let data = try exportService.exportDives(ids: [])
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let export = try decoder.decode(ExportData.self, from: data)
+
+        XCTAssertEqual(export.dives.count, 2)
+    }
+
+    func testExportDivesAsCSV() throws {
+        let device = Device(model: "CSV Test", serialNumber: "CSV01", firmwareVersion: "1.0")
+        try diveService.saveDevice(device)
+
+        let site = Site(name: "Blue Hole")
+        try diveService.saveSite(site, tags: [])
+
+        try diveService.saveDive(Dive(
+            deviceId: device.id,
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 40.0,
+            avgDepthM: 25.0,
+            bottomTimeSec: 2400,
+            siteId: site.id,
+            notes: "Great dive",
+            minTempC: 16.0,
+            maxTempC: 22.0
+        ))
+
+        let exportService = ExportService(database: database)
+        let data = try exportService.exportDivesAsCSV(ids: [])
+        let csv = String(data: data, encoding: .utf8)!
+
+        // Check header
+        XCTAssertTrue(csv.hasPrefix("date,site,max_depth_m,duration_min,bottom_time_min,min_temp_c,max_temp_c,is_ccr,deco_required,cns_percent,notes\n"))
+
+        // Check that it has exactly 2 lines (header + 1 dive)
+        let lines = csv.split(separator: "\n", omittingEmptySubsequences: true)
+        XCTAssertEqual(lines.count, 2)
+
+        // Check data row contains expected values
+        let row = String(lines[1])
+        XCTAssertTrue(row.contains("Blue Hole"))
+        XCTAssertTrue(row.contains("40.0"))
+        XCTAssertTrue(row.contains("16.0"))
+        XCTAssertTrue(row.contains("22.0"))
+        XCTAssertTrue(row.contains("Great dive"))
+    }
+
+    func testExportCSVEscapesCommas() throws {
+        let device = Device(model: "CSV Escape", serialNumber: "CSE01", firmwareVersion: "1.0")
+        try diveService.saveDevice(device)
+
+        let site = Site(name: "Blue Hole, Belize")
+        try diveService.saveSite(site, tags: [])
+
+        try diveService.saveDive(Dive(
+            deviceId: device.id,
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 40.0,
+            avgDepthM: 25.0,
+            bottomTimeSec: 2400,
+            siteId: site.id
+        ))
+
+        let exportService = ExportService(database: database)
+        let data = try exportService.exportDivesAsCSV(ids: [])
+        let csv = String(data: data, encoding: .utf8)!
+
+        XCTAssertTrue(csv.contains("\"Blue Hole, Belize\""))
+    }
+
     // MARK: - Surface Interval
 
     func testSurfaceInterval() throws {

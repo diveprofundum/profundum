@@ -324,11 +324,19 @@ class ImportSession: ObservableObject {
             ?? "Unknown Dive Computer"
 
         // Try to find existing device by BLE UUID
-        if var existing = try? diveService?.listDevices(includeArchived: true)
-            .first(where: { $0.bleUuid == bleUuid }) {
-            existing.lastSyncUnix = Int64(Date().timeIntervalSince1970)
-            try? diveService?.saveDevice(existing)
-            return existing
+        do {
+            if var existing = try diveService?.listDevices(includeArchived: true)
+                .first(where: { $0.bleUuid == bleUuid }) {
+                existing.lastSyncUnix = Int64(Date().timeIntervalSince1970)
+                do {
+                    try diveService?.saveDevice(existing)
+                } catch {
+                    importLog.error("Failed to update device: \(error.localizedDescription)")
+                }
+                return existing
+            }
+        } catch {
+            importLog.error("Failed to list devices: \(error.localizedDescription)")
         }
 
         // Create new device
@@ -339,7 +347,11 @@ class ImportSession: ObservableObject {
             lastSyncUnix: Int64(Date().timeIntervalSince1970),
             bleUuid: bleUuid
         )
-        try? diveService?.saveDevice(device)
+        do {
+            try diveService?.saveDevice(device)
+        } catch {
+            importLog.error("Failed to save new device: \(error.localizedDescription)")
+        }
         return device
     }
 
@@ -354,7 +366,11 @@ class ImportSession: ObservableObject {
             updated.firmwareVersion = firmware
         }
         updated.lastSyncUnix = Int64(Date().timeIntervalSince1970)
-        try? diveService?.saveDevice(updated)
+        do {
+            try diveService?.saveDevice(updated)
+        } catch {
+            importLog.error("Failed to update device info: \(error.localizedDescription)")
+        }
     }
 }
 
