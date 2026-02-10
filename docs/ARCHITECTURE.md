@@ -1,80 +1,75 @@
 # Architecture
 
-## Goals
-- Native macOS + iOS apps with a shared backend core.
-- Local-first data store; optional cloud sync later.
-- Clean separation between BLE ingestion, parsing, storage, and analytics.
+## Overview
 
-## Proposed core
-- **Language**: Rust
-- **FFI**: UniFFI to Swift
-- **Storage**: SQLite (via rusqlite or sqlite wrapper)
-- **Query**: SQLite + FTS5 for notes/tags
+Profundum is a hybrid Swift + Rust dive logging application for iOS and macOS.
 
-## BLE adapter strategy
-- Each platform provides a thin native BLE adapter:
-  - Apple: CoreBluetooth
-  - Android: BLE stack via Kotlin
-  - Windows: WinRT BLE
-  - Linux: BlueZ (D-Bus)
-- The Rust core owns protocol parsing, validation, and normalization.
-- BLE adapters expose a unified interface to the core via FFI.
+- **Swift** owns all storage (GRDB/SQLite), UI (SwiftUI), and platform integrations (CoreBluetooth).
+- **Rust** provides a stateless compute core for formula parsing and dive metrics.
+- **libdivecomputer** (C) handles dive computer protocol parsing over BLE.
 
-## Segment analytics
-- Segments are first-class entities with start/end times, tags, and notes.
-- Segment stats are derived (avg depth, CNS/OTU, time at setpoint, gas usage).
-- Charts support selection to compute segment metrics on the fly.
+## Layer diagram
 
-## Formula-driven analytics
-- Users can define formulas using named fields (e.g. `deco_time_min / bottom_time_min`).
-- Formulas produce calculated fields stored per dive for list and summary views.
+```
+┌─────────────────────────────────────────────────────────┐
+│  Profundum (SwiftUI multiplatform app — iOS + macOS)    │
+│  ├── Views: dive list, detail, charts, settings, sync   │
+│  ├── BLE: scanner, peripheral transport, import session │
+│  └── Helpers: date formatters, unit formatter            │
+├─────────────────────────────────────────────────────────┤
+│  DivelogCore (Swift package)                            │
+│  ├── Models: Dive, DiveSample, Device, Site, GasMix…    │
+│  ├── Database: GRDB migrations, DiveQuery builder       │
+│  ├── Services: DiveService, ExportService,              │
+│  │   ShearwaterCloudImportService, DiveComputerImport   │
+│  └── DiveComputer: BLETransport, IOStreamBridge,        │
+│      DiveDataMapper, DiveDownloadService                │
+├─────────────────────────────────────────────────────────┤
+│  Rust Compute Core (stateless, ~500 lines)              │
+│  ├── Formula parser (nom-based)                         │
+│  ├── Formula evaluator                                  │
+│  └── Metrics: DiveStats, SegmentStats                   │
+├─────────────────────────────────────────────────────────┤
+│  libdivecomputer (C, LGPL 2.1)                          │
+│  └── Dive computer protocol parsing (Shearwater, etc.)  │
+└─────────────────────────────────────────────────────────┘
+```
 
-## Data flow
-1. BLE session manager connects to Shearwater devices.
-2. Raw log chunks are decoded and validated (CRC).
-3. Parser produces normalized `Dive` + `Sample` records.
-4. Store persists in SQLite.
-5. Query layer powers filters/tags/analytics.
+## Storage
 
-## App integration (macOS + iOS + Android + Windows + Linux)
-- Apple platforms use native SwiftUI apps.
-- Android, Windows, and Linux share a Compose Multiplatform UI codebase.
-- Native apps call into the Rust core via UniFFI for:
-  - device discovery + sync
-  - dive list and detail queries
-  - calculated metrics
-- Platform UI frameworks own navigation, view state, and presentation only.
+- **GRDB** (Swift SQLite wrapper) with explicit migrations (001–007) in `DivelogDatabase.swift`.
+- Schema supports: dives, samples, segments, devices, sites, teammates, equipment, gas mixes, tags, formulas, settings.
+- Fingerprint-based deduplication for dive computer imports.
+- Multi-computer merge: dives from different computers within a 120-second window are grouped under a shared `groupId`.
 
-## FFI bindings and packaging
-- Swift bindings generated via UniFFI and linked into macOS/iOS targets.
-- Kotlin bindings generated via UniFFI and packaged as:
-  - Android AAR (JNI + Rust static/shared lib)
-  - Desktop JVM dependency (platform-specific native libs)
+## BLE dive computer import
 
-## Design system alignment
-- Shared design tokens (type scale, spacing, color, density) defined once.
-- SwiftUI and Compose map tokens to native components with parity targets.
+1. CoreBluetooth discovers BLE dive computers.
+2. `BLETransport` protocol abstracts the BLE characteristic read/write.
+3. `IOStreamBridge` adapts BLETransport to libdivecomputer's `dc_custom_cbs_t`.
+4. libdivecomputer handles protocol-specific parsing (Shearwater Petrel, Perdix, etc.).
+5. `DiveDataMapper` converts libdivecomputer fields/samples to Profundum models.
+6. Progressive save: each parsed dive is persisted immediately via `onDive` callback.
 
-## Storage and schema evolution
-- Use explicit schema versioning and migrations.
-- Provide forward-compatible export/import for long-term data safety.
+## Formula engine
 
-## Rich metadata
-- Sites, buddies, and equipment are modeled as first-class entities.
-- Dive records reference these entities for reuse and consistency.
+- Users define calculated fields using dive/segment variables.
+- Expressions are parsed (nom) and evaluated in the Rust compute core.
+- Results are stored per-dive for use in list columns, filters, and summaries.
+- See [FORMULAS.md](FORMULAS.md) for grammar and variable reference.
+
+## FFI boundary
+
+UniFFI generates Swift bindings from `core/src/divelog_compute.udl`. The interface is minimal (~5 functions): `validate_formula`, `evaluate_formula`, `compute_dive_stats`, `compute_segment_stats`, `supported_functions`. See [uniffi-build.md](uniffi-build.md) for build pipeline details.
+
+## Design principles
+
+- **Local-first**: no network calls without explicit user action.
+- **Privacy-first**: all data stored locally; cloud sync is a future opt-in feature.
+- **Stateless Rust**: the compute core has no state, no storage, no side effects.
+- **Swift-owned storage**: all CRUD operations and schema migrations are in Swift/GRDB.
 
 ## Performance targets
-- List: 10k dives with search and filters under 100 ms response.
+
+- List: 10k dives with search and filters under 100 ms.
 - Charts: render 5k samples under 50 ms on mid-tier hardware.
-
-## Key interfaces
-- BLE transport abstraction
-- Parser for Shearwater binary logs
-- Storage API (CRUD + query)
-- Analytics API (derived metrics)
-
-## Milestones
-1. Core data model + storage schema
-2. Import pipeline stub (fake device/logs for UI testing)
-3. SwiftUI shells wired to core queries
-4. BLE connection + real ingestion
