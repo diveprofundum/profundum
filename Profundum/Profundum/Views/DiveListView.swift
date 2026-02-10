@@ -18,6 +18,7 @@ struct DiveListView: View {
     @State private var selectedDiveIDs: Set<String> = []
     @State private var showDeleteConfirmation = false
     @State private var batchExportURL: URL?
+    @State private var showBatchShareSheet = false
     #endif
     @State private var hasMoreDives = true
     @State private var isLoadingMore = false
@@ -77,16 +78,10 @@ struct DiveListView: View {
                                 selectedDiveIDs = Set(filteredDives.map(\.id))
                             }
                             if !selectedDiveIDs.isEmpty {
-                                if let batchExportURL {
-                                    ShareLink(item: batchExportURL) {
-                                        Label("Share \(selectedDiveIDs.count)", systemImage: "square.and.arrow.up")
-                                    }
-                                } else {
-                                    Button {
-                                        generateBatchExport()
-                                    } label: {
-                                        Label("Export \(selectedDiveIDs.count)", systemImage: "square.and.arrow.up")
-                                    }
+                                Button {
+                                    generateBatchExport()
+                                } label: {
+                                    Label("Export \(selectedDiveIDs.count)", systemImage: "square.and.arrow.up")
                                 }
                                 Button(role: .destructive) {
                                     showDeleteConfirmation = true
@@ -108,9 +103,7 @@ struct DiveListView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     if editMode == .active {
                         Button("Done") {
-                            editMode = .inactive
-                            selectedDiveIDs.removeAll()
-                            batchExportURL = nil
+                            exitEditMode()
                         }
                     } else {
                         Menu {
@@ -119,7 +112,6 @@ struct DiveListView: View {
                             }
                             Button(action: {
                                 editMode = .active
-                                batchExportURL = nil
                             }) {
                                 Label("Select Dives", systemImage: "checkmark.circle")
                             }
@@ -156,6 +148,13 @@ struct DiveListView: View {
                 }
             } message: {
                 Text("This action cannot be undone.")
+            }
+            .sheet(isPresented: $showBatchShareSheet, onDismiss: {
+                exitEditMode()
+            }) {
+                if let batchExportURL {
+                    ActivityViewController(activityItems: [batchExportURL])
+                }
             }
             #endif
             .safeAreaInset(edge: .top) {
@@ -360,9 +359,17 @@ struct DiveListView: View {
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("divelog-export-\(selectedDiveIDs.count)-dives.json")
             try data.write(to: url)
             batchExportURL = url
+            showBatchShareSheet = true
         } catch {
             errorMessage = "Failed to export dives: \(error.localizedDescription)"
         }
+    }
+
+    private func exitEditMode() {
+        editMode = .inactive
+        selectedDiveIDs.removeAll()
+        batchExportURL = nil
+        showBatchShareSheet = false
     }
     #endif
 
@@ -479,3 +486,15 @@ struct DiveRowView: View {
         return "\(minutes) min"
     }
 }
+
+#if os(iOS)
+struct ActivityViewController: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+#endif
