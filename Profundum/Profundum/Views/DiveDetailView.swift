@@ -18,7 +18,7 @@ struct DiveDetailView: View {
     @State private var surfaceIntervalSec: Int64?
     @State private var formulaResults: [(name: String, value: Double)] = []
     @State private var errorMessage: String?
-    @State private var exportedJSON: Data?
+    @State private var exportFileURL: URL?
 
     var onDiveUpdated: (() -> Void)?
 
@@ -123,27 +123,27 @@ struct DiveDetailView: View {
         .toolbar {
             #if os(iOS)
             ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 16) {
-                    if let exportedJSON {
-                        ShareLink(item: exportedJSON, preview: SharePreview("Dive Export", image: Image(systemName: "doc.text"))) {
-                            Image(systemName: "square.and.arrow.up")
-                        }
-                    } else {
-                        Button {
-                            generateExport()
-                        } label: {
-                            Image(systemName: "square.and.arrow.up")
-                        }
+                if let exportFileURL {
+                    ShareLink(item: exportFileURL) {
+                        Image(systemName: "square.and.arrow.up")
                     }
-                    Button("Edit") {
-                        showEditSheet = true
+                } else {
+                    Button {
+                        generateExport()
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
                     }
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Edit") {
+                    showEditSheet = true
                 }
             }
             #else
             ToolbarItem {
-                if let exportedJSON {
-                    ShareLink(item: exportedJSON, preview: SharePreview("Dive Export", image: Image(systemName: "doc.text"))) {
+                if let exportFileURL {
+                    ShareLink(item: exportFileURL) {
                         Image(systemName: "square.and.arrow.up")
                     }
                 } else {
@@ -554,7 +554,11 @@ struct DiveDetailView: View {
     private func generateExport() {
         do {
             let exportService = ExportService(database: appState.database)
-            exportedJSON = try exportService.exportDives(ids: [dive.id])
+            let data = try exportService.exportDives(ids: [dive.id])
+            let dateStr = formatDate(dive.startTimeUnix).replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-").replacingOccurrences(of: " ", with: "_")
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("dive-\(dateStr).json")
+            try data.write(to: url)
+            exportFileURL = url
         } catch {
             errorMessage = "Failed to export dive: \(error.localizedDescription)"
         }

@@ -79,6 +79,14 @@ struct SettingsView: View {
                     LabeledContent("Version", value: "1.0.0")
                     LabeledContent("Build", value: "1")
                 }
+
+                #if DEBUG
+                Section("Debug") {
+                    Button("Test Error Alert") {
+                        errorMessage = "This is a test error alert. Error handling is working correctly."
+                    }
+                }
+                #endif
             }
             .navigationTitle("Settings")
             .task {
@@ -154,8 +162,7 @@ enum ExportFormat: String, CaseIterable {
 struct ExportSheet: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var appState: AppState
-    @State private var exportData: Data?
-    @State private var showShareSheet = false
+    @State private var exportFileURL: URL?
     @State private var errorMessage: String?
     @State private var selectedFormat: ExportFormat = .json
 
@@ -184,18 +191,17 @@ struct ExportSheet: View {
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 40)
                 .onChange(of: selectedFormat) { _, _ in
-                    exportData = nil
+                    exportFileURL = nil
                 }
 
                 Button("Export") {
                     generateExport()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(exportData != nil)
+                .disabled(exportFileURL != nil)
 
-                if let exportData {
-                    let fileName = selectedFormat == .json ? "divelog-export.json" : "divelog-export.csv"
-                    ShareLink(item: exportData, preview: SharePreview(fileName, image: Image(systemName: "doc.text"))) {
+                if let exportFileURL {
+                    ShareLink(item: exportFileURL) {
                         Label("Share Export", systemImage: "square.and.arrow.up")
                     }
                     .buttonStyle(.bordered)
@@ -226,12 +232,17 @@ struct ExportSheet: View {
     private func generateExport() {
         do {
             let exportService = ExportService(database: appState.database)
+            let ext = selectedFormat == .json ? "json" : "csv"
+            let data: Data
             switch selectedFormat {
             case .json:
-                exportData = try exportService.exportAll()
+                data = try exportService.exportAll()
             case .csv:
-                exportData = try exportService.exportDivesAsCSV(ids: [])
+                data = try exportService.exportDivesAsCSV(ids: [])
             }
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("divelog-export.\(ext)")
+            try data.write(to: url)
+            exportFileURL = url
         } catch {
             errorMessage = "Export failed: \(error.localizedDescription)"
         }
