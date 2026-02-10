@@ -20,7 +20,7 @@ public final class ExportService: Sendable {
                 description: description,
                 devices: try Device.fetchAll(db),
                 sites: try Site.fetchAll(db),
-                buddies: try Buddy.fetchAll(db),
+                buddies: try Teammate.fetchAll(db),
                 equipment: try Equipment.fetchAll(db),
                 formulas: try Formula.fetchAll(db),
                 dives: try fetchDivesWithRelations(db)
@@ -36,54 +36,40 @@ public final class ExportService: Sendable {
 
     private func fetchDivesWithRelations(_ db: Database) throws -> [ExportDive] {
         let dives = try Dive.fetchAll(db)
+        guard !dives.isEmpty else { return [] }
 
-        return try dives.map { dive in
-            let tags = try DiveTag
-                .filter(Column("dive_id") == dive.id)
-                .fetchAll(db)
-                .map { $0.tag }
+        // Bulk-fetch all relations (7 queries total, regardless of dive count)
+        let allTags = try DiveTag.fetchAll(db)
+        let allTeammates = try DiveTeammate.fetchAll(db)
+        let allEquipment = try DiveEquipment.fetchAll(db)
+        let allSamples = try DiveSample.order(Column("t_sec")).fetchAll(db)
+        let allSegments = try Segment.order(Column("start_t_sec")).fetchAll(db)
+        let allSegmentTags = try SegmentTag.fetchAll(db)
 
-            let buddyIds = try DiveBuddy
-                .filter(Column("dive_id") == dive.id)
-                .fetchAll(db)
-                .map { $0.buddyId }
+        // Group by dive_id in memory
+        let tagsByDive = Dictionary(grouping: allTags, by: \.diveId)
+        let teammatesByDive = Dictionary(grouping: allTeammates, by: \.diveId)
+        let equipmentByDive = Dictionary(grouping: allEquipment, by: \.diveId)
+        let samplesByDive = Dictionary(grouping: allSamples, by: \.diveId)
+        let segmentsByDive = Dictionary(grouping: allSegments, by: \.diveId)
+        let segTagsBySegment = Dictionary(grouping: allSegmentTags, by: \.segmentId)
 
-            let equipmentIds = try DiveEquipment
-                .filter(Column("dive_id") == dive.id)
-                .fetchAll(db)
-                .map { $0.equipmentId }
-
-            let samples = try DiveSample
-                .filter(Column("dive_id") == dive.id)
-                .order(Column("t_sec"))
-                .fetchAll(db)
-
-            let segments = try fetchSegmentsWithTags(db, diveId: dive.id)
+        return dives.map { dive in
+            let segments = (segmentsByDive[dive.id] ?? []).map { segment in
+                ExportSegment(
+                    segment: segment,
+                    tags: (segTagsBySegment[segment.id] ?? []).map(\.tag)
+                )
+            }
 
             return ExportDive(
                 dive: dive,
-                tags: tags,
-                buddyIds: buddyIds,
-                equipmentIds: equipmentIds,
-                samples: samples,
+                tags: (tagsByDive[dive.id] ?? []).map(\.tag),
+                buddyIds: (teammatesByDive[dive.id] ?? []).map(\.teammateId),
+                equipmentIds: (equipmentByDive[dive.id] ?? []).map(\.equipmentId),
+                samples: samplesByDive[dive.id] ?? [],
                 segments: segments
             )
-        }
-    }
-
-    private func fetchSegmentsWithTags(_ db: Database, diveId: String) throws -> [ExportSegment] {
-        let segments = try Segment
-            .filter(Column("dive_id") == diveId)
-            .order(Column("start_t_sec"))
-            .fetchAll(db)
-
-        return try segments.map { segment in
-            let tags = try SegmentTag
-                .filter(Column("segment_id") == segment.id)
-                .fetchAll(db)
-                .map { $0.tag }
-
-            return ExportSegment(segment: segment, tags: tags)
         }
     }
 
@@ -138,9 +124,9 @@ public final class ExportService: Sendable {
                     try DiveTag(diveId: exportDive.dive.id, tag: tag).insert(db)
                 }
 
-                // Buddies
-                for buddyId in exportDive.buddyIds {
-                    try DiveBuddy(diveId: exportDive.dive.id, buddyId: buddyId).insert(db)
+                // Teammates
+                for teammateId in exportDive.buddyIds {
+                    try DiveTeammate(diveId: exportDive.dive.id, teammateId: teammateId).insert(db)
                 }
 
                 // Equipment
@@ -178,7 +164,7 @@ public struct ExportData: Codable, Sendable {
     public let description: String?
     public let devices: [Device]
     public let sites: [Site]
-    public let buddies: [Buddy]
+    public let buddies: [Teammate]
     public let equipment: [Equipment]
     public let formulas: [Formula]
     public let dives: [ExportDive]

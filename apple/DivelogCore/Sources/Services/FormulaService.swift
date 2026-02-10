@@ -48,6 +48,12 @@ public final class FormulaService: Sendable {
         return try DivelogCompute.evaluateFormula(expression, variables: variables)
     }
 
+    /// Evaluate a formula for a dive using pre-fetched stats (avoids redundant sample load).
+    public func evaluateFormulaForDive(_ expression: String, dive: Dive, stats: DiveStats) throws -> Double {
+        let variables = FormulaVariables.fromDive(dive, stats: stats)
+        return try DivelogCompute.evaluateFormula(expression, variables: variables)
+    }
+
     /// Evaluate a formula for a specific segment.
     public func evaluateFormulaForSegment(_ expression: String, segmentId: String) throws -> Double {
         let (segment, samples) = try database.dbQueue.read { db in
@@ -181,6 +187,10 @@ public enum FormulaVariables {
     public static let diveVariables: [String] = [
         "max_depth_m",
         "avg_depth_m",
+        "weighted_avg_depth_m",
+        "max_depth_ft",
+        "avg_depth_ft",
+        "weighted_avg_depth_ft",
         "bottom_time_sec",
         "bottom_time_min",
         "cns_percent",
@@ -195,12 +205,15 @@ public enum FormulaVariables {
         "total_time_min",
         "deco_time_sec",
         "deco_time_min",
-        "weighted_avg_depth_m",
         "min_temp_c",
         "max_temp_c",
         "avg_temp_c",
+        "min_temp_f",
+        "max_temp_f",
+        "avg_temp_f",
         "gas_switch_count",
         "max_ceiling_m",
+        "max_ceiling_ft",
         "max_gf99",
         "descent_rate_m_min",
         "ascent_rate_m_min",
@@ -214,8 +227,12 @@ public enum FormulaVariables {
         "duration_min",
         "max_depth_m",
         "avg_depth_m",
+        "max_depth_ft",
+        "avg_depth_ft",
         "min_temp_c",
         "max_temp_c",
+        "min_temp_f",
+        "max_temp_f",
         "deco_time_sec",
         "deco_time_min",
         "sample_count",
@@ -256,6 +273,8 @@ public enum FormulaVariables {
         vars["descent_rate_m_min"] = Double(stats.descentRateMMin)
         vars["ascent_rate_m_min"] = Double(stats.ascentRateMMin)
 
+        UnitFormatter.addImperialVariables(to: &vars)
+
         return vars
     }
 
@@ -277,6 +296,8 @@ public enum FormulaVariables {
         vars["deco_time_sec"] = Double(stats.decoTimeSec)
         vars["deco_time_min"] = Double(stats.decoTimeSec) / 60.0
         vars["sample_count"] = Double(stats.sampleCount)
+
+        UnitFormatter.addImperialVariables(to: &vars)
 
         return vars
     }

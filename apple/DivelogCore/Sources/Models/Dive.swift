@@ -20,6 +20,27 @@ public struct Dive: Identifiable, Equatable, Hashable, Sendable {
     public var o2RateLMin: Float?
     public var o2TankFactor: Float?
     public var siteId: String?
+    /// Dive number as reported by the dive computer.
+    public var computerDiveNumber: Int?
+    /// Fingerprint blob from the dive computer, used for deduplication.
+    /// Deprecated: use `dive_source_fingerprints` table instead. Kept for backwards compat.
+    public var fingerprint: Data?
+    public var notes: String?
+    public var minTempC: Float?
+    public var maxTempC: Float?
+    public var avgTempC: Float?
+    public var endGf99: Float?
+    public var gfLow: Int?
+    public var gfHigh: Int?
+    public var decoModel: String?
+    public var salinity: String?
+    public var surfacePressureBar: Float?
+    public var lat: Double?
+    public var lon: Double?
+    public var groupId: String?
+    public var environment: String?
+    public var visibility: String?
+    public var weather: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -38,7 +59,25 @@ public struct Dive: Identifiable, Equatable, Hashable, Sendable {
         o2RateCuftMin: Float? = nil,
         o2RateLMin: Float? = nil,
         o2TankFactor: Float? = nil,
-        siteId: String? = nil
+        siteId: String? = nil,
+        computerDiveNumber: Int? = nil,
+        fingerprint: Data? = nil,
+        notes: String? = nil,
+        minTempC: Float? = nil,
+        maxTempC: Float? = nil,
+        avgTempC: Float? = nil,
+        endGf99: Float? = nil,
+        gfLow: Int? = nil,
+        gfHigh: Int? = nil,
+        decoModel: String? = nil,
+        salinity: String? = nil,
+        surfacePressureBar: Float? = nil,
+        lat: Double? = nil,
+        lon: Double? = nil,
+        groupId: String? = nil,
+        environment: String? = nil,
+        visibility: String? = nil,
+        weather: String? = nil
     ) {
         self.id = id
         self.deviceId = deviceId
@@ -57,6 +96,24 @@ public struct Dive: Identifiable, Equatable, Hashable, Sendable {
         self.o2RateLMin = o2RateLMin
         self.o2TankFactor = o2TankFactor
         self.siteId = siteId
+        self.computerDiveNumber = computerDiveNumber
+        self.fingerprint = fingerprint
+        self.notes = notes
+        self.minTempC = minTempC
+        self.maxTempC = maxTempC
+        self.avgTempC = avgTempC
+        self.endGf99 = endGf99
+        self.gfLow = gfLow
+        self.gfHigh = gfHigh
+        self.decoModel = decoModel
+        self.salinity = salinity
+        self.surfacePressureBar = surfacePressureBar
+        self.lat = lat
+        self.lon = lon
+        self.groupId = groupId
+        self.environment = environment
+        self.visibility = visibility
+        self.weather = weather
     }
 }
 
@@ -83,6 +140,24 @@ extension Dive: Codable, FetchableRecord, PersistableRecord {
         case o2RateLMin = "o2_rate_l_min"
         case o2TankFactor = "o2_tank_factor"
         case siteId = "site_id"
+        case computerDiveNumber = "computer_dive_number"
+        case fingerprint
+        case notes
+        case minTempC = "min_temp_c"
+        case maxTempC = "max_temp_c"
+        case avgTempC = "avg_temp_c"
+        case endGf99 = "end_gf99"
+        case gfLow = "gf_low"
+        case gfHigh = "gf_high"
+        case decoModel = "deco_model"
+        case salinity
+        case surfacePressureBar = "surface_pressure_bar"
+        case lat
+        case lon
+        case groupId = "group_id"
+        case environment
+        case visibility
+        case weather
     }
 }
 
@@ -92,7 +167,7 @@ extension Dive {
     static let samples = hasMany(DiveSample.self)
     static let segments = hasMany(Segment.self)
     static let tags = hasMany(DiveTag.self)
-    static let diveBuddies = hasMany(DiveBuddy.self)
+    static let diveTeammates = hasMany(DiveTeammate.self)
     static let diveEquipment = hasMany(DiveEquipment.self)
     static let device = belongsTo(Device.self)
     static let site = belongsTo(Site.self)
@@ -133,23 +208,24 @@ extension DiveTag: Codable, FetchableRecord, PersistableRecord {
     }
 }
 
-/// Junction table for dive-buddy relationships.
-public struct DiveBuddy: Equatable, Sendable {
+/// Junction table for dive-teammate relationships.
+public struct DiveTeammate: Equatable, Sendable {
     public var diveId: String
-    public var buddyId: String
+    public var teammateId: String
 
-    public init(diveId: String, buddyId: String) {
+    public init(diveId: String, teammateId: String) {
         self.diveId = diveId
-        self.buddyId = buddyId
+        self.teammateId = teammateId
     }
 }
 
-extension DiveBuddy: Codable, FetchableRecord, PersistableRecord {
+extension DiveTeammate: Codable, FetchableRecord, PersistableRecord {
+    // Keep table name as "dive_buddies" for backwards compatibility
     public static let databaseTableName = "dive_buddies"
 
     enum CodingKeys: String, CodingKey {
         case diveId = "dive_id"
-        case buddyId = "buddy_id"
+        case teammateId = "buddy_id"  // Column name kept for backwards compatibility
     }
 }
 

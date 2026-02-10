@@ -74,3 +74,4 @@ coverage/
 *.tmp
 *.temp
 *.log
+tmp_logs/

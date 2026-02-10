@@ -28,8 +28,8 @@ public final class SampleDataService: Sendable {
         // Create sites
         let sites = try createSampleSites()
 
-        // Create buddies
-        let buddies = try createSampleBuddies()
+        // Create teammates
+        let teammates = try createSampleTeammates()
 
         // Create equipment
         let equipment = try createSampleEquipment()
@@ -38,7 +38,7 @@ public final class SampleDataService: Sendable {
         try createSampleDives(
             devices: devices,
             sites: sites,
-            buddies: buddies,
+            teammates: teammates,
             equipment: equipment
         )
     }
@@ -162,33 +162,36 @@ public final class SampleDataService: Sendable {
         }
     }
 
-    private func createSampleBuddies() throws -> [Buddy] {
-        let buddies = [
-            Buddy(
-                id: "buddy-sarah",
+    private func createSampleTeammates() throws -> [Teammate] {
+        let teammates = [
+            Teammate(
+                id: "teammate-sarah",
                 displayName: "Sarah Chen",
                 contact: "sarah@example.com",
-                notes: "Cave instructor, GUE Tech 2"
+                certificationLevel: "GUE Tech 2, Cave Instructor",
+                notes: "Primary cave diving partner"
             ),
-            Buddy(
-                id: "buddy-mike",
+            Teammate(
+                id: "teammate-mike",
                 displayName: "Mike Rodriguez",
                 contact: nil,
-                notes: "Wreck diving buddy, experienced with stage bottles"
+                certificationLevel: "TDI Advanced Trimix",
+                notes: "Wreck diving teammate, experienced with stage bottles"
             ),
-            Buddy(
-                id: "buddy-emma",
+            Teammate(
+                id: "teammate-emma",
                 displayName: "Emma Thompson",
                 contact: "emma.t@example.com",
+                certificationLevel: "PADI Rescue Diver",
                 notes: "Underwater photographer"
             ),
         ]
 
-        for buddy in buddies {
-            try diveService.saveBuddy(buddy)
+        for teammate in teammates {
+            try diveService.saveTeammate(teammate)
         }
 
-        return buddies
+        return teammates
     }
 
     private func createSampleEquipment() throws -> [Equipment] {
@@ -237,7 +240,7 @@ public final class SampleDataService: Sendable {
     private func createSampleDives(
         devices: [Device],
         sites: [Site],
-        buddies: [Buddy],
+        teammates: [Teammate],
         equipment: [Equipment]
     ) throws {
         let now = Date()
@@ -249,7 +252,7 @@ public final class SampleDataService: Sendable {
             id: "dive-001",
             device: devices.first { $0.id == "device-petrel3" }!,
             site: sites.first { $0.id == "site-ginnie" }!,
-            buddies: [buddies.first { $0.id == "buddy-sarah" }!],
+            teammates: [teammates.first { $0.id == "teammate-sarah" }!],
             equipment: [
                 equipment.first { $0.id == "equip-jj" }!,
                 equipment.first { $0.id == "equip-al80" }!,
@@ -264,7 +267,7 @@ public final class SampleDataService: Sendable {
             id: "dive-002",
             device: devices.first { $0.id == "device-descent" }!,
             site: sites.first { $0.id == "site-eagle" }!,
-            buddies: [buddies.first { $0.id == "buddy-emma" }!],
+            teammates: [teammates.first { $0.id == "teammate-emma" }!],
             equipment: [],
             startTime: dive2Start
         )
@@ -275,9 +278,9 @@ public final class SampleDataService: Sendable {
             id: "dive-003",
             device: devices.first { $0.id == "device-perdix2" }!,
             site: sites.first { $0.id == "site-doria" }!,
-            buddies: [
-                buddies.first { $0.id == "buddy-sarah" }!,
-                buddies.first { $0.id == "buddy-mike" }!,
+            teammates: [
+                teammates.first { $0.id == "teammate-sarah" }!,
+                teammates.first { $0.id == "teammate-mike" }!,
             ],
             equipment: [
                 equipment.first { $0.id == "equip-drysuit" }!,
@@ -292,7 +295,7 @@ public final class SampleDataService: Sendable {
             id: "dive-004",
             device: devices.first { $0.id == "device-descent" }!,
             site: sites.first { $0.id == "site-blue-heron" }!,
-            buddies: [buddies.first { $0.id == "buddy-emma" }!],
+            teammates: [teammates.first { $0.id == "teammate-emma" }!],
             equipment: [equipment.first { $0.id == "equip-light" }!],
             startTime: dive4Start
         )
@@ -303,7 +306,7 @@ public final class SampleDataService: Sendable {
             id: "dive-005",
             device: devices.first { $0.id == "device-petrel3" }!,
             site: sites.first { $0.id == "site-ginnie" }!,
-            buddies: [buddies.first { $0.id == "buddy-sarah" }!],
+            teammates: [teammates.first { $0.id == "teammate-sarah" }!],
             equipment: [
                 equipment.first { $0.id == "equip-jj" }!,
                 equipment.first { $0.id == "equip-al80" }!,
@@ -319,7 +322,7 @@ public final class SampleDataService: Sendable {
         id: String,
         device: Device,
         site: Site,
-        buddies: [Buddy],
+        teammates: [Teammate],
         equipment: [Equipment],
         startTime: Date
     ) throws {
@@ -345,7 +348,7 @@ public final class SampleDataService: Sendable {
         try diveService.saveDive(
             dive,
             tags: ["cave", "ccr", "training"],
-            buddyIds: buddies.map(\.id),
+            teammateIds: teammates.map(\.id),
             equipmentIds: equipment.map(\.id)
         )
 
@@ -358,7 +361,7 @@ public final class SampleDataService: Sendable {
         id: String,
         device: Device,
         site: Site,
-        buddies: [Buddy],
+        teammates: [Teammate],
         equipment: [Equipment],
         startTime: Date
     ) throws {
@@ -384,7 +387,7 @@ public final class SampleDataService: Sendable {
         try diveService.saveDive(
             dive,
             tags: ["reef", "photography"],
-            buddyIds: buddies.map(\.id),
+            teammateIds: teammates.map(\.id),
             equipmentIds: equipment.map(\.id)
         )
 
@@ -396,7 +399,7 @@ public final class SampleDataService: Sendable {
         id: String,
         device: Device,
         site: Site,
-        buddies: [Buddy],
+        teammates: [Teammate],
         equipment: [Equipment],
         startTime: Date
     ) throws {
@@ -422,7 +425,7 @@ public final class SampleDataService: Sendable {
         try diveService.saveDive(
             dive,
             tags: ["wreck", "technical", "trimix", "deep"],
-            buddyIds: buddies.map(\.id),
+            teammateIds: teammates.map(\.id),
             equipmentIds: equipment.map(\.id)
         )
 
@@ -434,7 +437,7 @@ public final class SampleDataService: Sendable {
         id: String,
         device: Device,
         site: Site,
-        buddies: [Buddy],
+        teammates: [Teammate],
         equipment: [Equipment],
         startTime: Date
     ) throws {
@@ -460,7 +463,7 @@ public final class SampleDataService: Sendable {
         try diveService.saveDive(
             dive,
             tags: ["night", "shore", "macro"],
-            buddyIds: buddies.map(\.id),
+            teammateIds: teammates.map(\.id),
             equipmentIds: equipment.map(\.id)
         )
 

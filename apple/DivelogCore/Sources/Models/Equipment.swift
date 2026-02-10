@@ -8,6 +8,7 @@ public struct Equipment: Identifiable, Equatable, Hashable, Sendable {
     public var kind: String
     public var serialNumber: String?
     public var serviceIntervalDays: Int?
+    public var lastServiceDate: Int64?
     public var notes: String?
 
     public init(
@@ -16,6 +17,7 @@ public struct Equipment: Identifiable, Equatable, Hashable, Sendable {
         kind: String,
         serialNumber: String? = nil,
         serviceIntervalDays: Int? = nil,
+        lastServiceDate: Int64? = nil,
         notes: String? = nil
     ) {
         self.id = id
@@ -23,6 +25,7 @@ public struct Equipment: Identifiable, Equatable, Hashable, Sendable {
         self.kind = kind
         self.serialNumber = serialNumber
         self.serviceIntervalDays = serviceIntervalDays
+        self.lastServiceDate = lastServiceDate
         self.notes = notes
     }
 }
@@ -38,6 +41,7 @@ extension Equipment: Codable, FetchableRecord, PersistableRecord {
         case kind
         case serialNumber = "serial_number"
         case serviceIntervalDays = "service_interval_days"
+        case lastServiceDate = "last_service_date"
         case notes
     }
 }

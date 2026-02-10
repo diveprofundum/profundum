@@ -11,7 +11,7 @@
 @_exported import struct Foundation.UUID
 public typealias DivelogDevice = Device
 public typealias DivelogSite = Site
-public typealias DivelogBuddy = Buddy
+public typealias DivelogTeammate = Teammate
 public typealias DivelogEquipment = Equipment
 public typealias DivelogDive = Dive
 public typealias DivelogDiveSample = DiveSample

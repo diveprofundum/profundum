@@ -29,8 +29,29 @@ cd apple/DivelogCore && swift build
 cd apple/DivelogCore && swift test
 ```
 
+### Makefile (root)
+```bash
+make test              # Run Rust + Swift tests (xcframework rebuilt automatically)
+make lint              # cargo fmt --check + clippy
+make xcframework       # Build DivelogCompute XCFramework
+make swift-bindings    # Regenerate UniFFI Swift bindings
+make version-check     # Verify VERSION, Cargo.toml, Xcode project are in sync
+make version-sync V=0.2.0  # Set new version and sync to all manifests
+make verify            # Check XCFramework integrity
+make clean             # Clean all build artifacts
+make help              # Show all available targets
+```
+
 ### CI Pipeline
-The project uses GitLab CI with stages: lint → test → ui → perf. See `.gitlab-ci.yml`.
+GitHub Actions (`.github/workflows/ci.yml`) with path-filtered jobs:
+- **`rust-lint`** / **`rust-test`** — triggered by changes to `core/**`
+- **`swift-test`** — triggered by changes to `core/**`, `apple/**`, or `Profundum/**` (runs on macOS, rebuilds xcframework)
+- **`version-check`** — ensures VERSION file matches all manifests
+
+### Versioning
+Single version for the entire monorepo. Source of truth: `VERSION` file at root.
+- `make version-sync V=X.Y.Z` updates VERSION, Cargo.toml, and Xcode MARKETING_VERSION
+- `make version-check` verifies consistency (also runs in CI)
 
 ## Architecture
 
@@ -39,7 +60,7 @@ The project uses GitLab CI with stages: lint → test → ui → perf. See `.git
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Swift Layer (Native)                                       │
-│  ├── SwiftUI Views (apps/macos/, apps/ios/)                 │
+│  ├── SwiftUI Views (Profundum/ multiplatform app)            │
 │  ├── GRDB Storage (all CRUD, queries, migrations)           │
 │  ├── Native Models (Codable, FetchableRecord)               │
 │  └── CoreBluetooth (platform BLE)                           │
@@ -68,7 +89,7 @@ The Rust layer is a minimal, stateless compute library:
 
 Swift owns all storage, domain models, and CRUD operations:
 
-- **Sources/Models/**: GRDB Record types (Device, Dive, DiveSample, Site, Buddy, Equipment, Segment, Formula, Settings)
+- **Sources/Models/**: GRDB Record types (Device, Dive, DiveSample, DiveWithSite, DiveSourceFingerprint, GasMix, Site, Teammate, Equipment, Segment, Formula, Settings, PredefinedDiveTag)
 - **Sources/Database/**:
   - `DivelogDatabase.swift`: GRDB DatabaseQueue wrapper with migrations
   - `DiveQuery.swift`: Type-safe query builder for dive filtering/pagination
@@ -76,8 +97,19 @@ Swift owns all storage, domain models, and CRUD operations:
   - `DiveService.swift`: Main CRUD operations for all entity types
   - `FormulaService.swift`: Formula validation, evaluation, and computed stats
   - `ExportService.swift`: JSON export/import functionality
+  - `ShearwaterCloudImportService.swift`: Shearwater Cloud .db import with multi-computer merge
+  - `DiveComputerImportService.swift`: BLE dive computer import via libdivecomputer
+  - `DiveDataMapper.swift`: Pure mapping from libdivecomputer parsed data to domain models
+  - `DiveDownloadService.swift`: Protocol + factory for runtime dive download capability
+- **Sources/DiveComputer/**:
+  - `BLETransport.swift`: Protocol abstracting CoreBluetooth for testability
+  - `IOStreamBridge.swift`: Bridges BLETransport → libdivecomputer dc_custom_cbs_t
+  - `DCDescriptorList.swift`: Device descriptor matching via dc_descriptor_filter
+  - `KnownDevices.swift`: Static list of known dive computer BLE names
 - **Sources/RustBridge/**:
-  - `DivelogCompute.swift`: Swift interface to Rust compute (placeholder, awaiting UniFFI integration)
+  - `DivelogCompute.swift`: Swift namespace wrapping UniFFI-generated free functions
+  - `Generated/divelog_compute.swift`: UniFFI-generated Swift bindings (types + FFI calls)
+  - `Generated/divelog_computeFFI.h`: C header for the FFI interface
 
 ### FFI Boundary
 
@@ -112,18 +144,22 @@ Key indices for performance:
 
 Variables available for dive formulas:
 - `max_depth_m`, `avg_depth_m`, `weighted_avg_depth_m`
+- `max_depth_ft`, `avg_depth_ft`, `weighted_avg_depth_ft` (imperial equivalents)
 - `bottom_time_sec`, `bottom_time_min`, `total_time_sec`, `total_time_min`
 - `deco_time_sec`, `deco_time_min`
 - `cns_percent`, `otu`, `is_ccr`, `deco_required`
 - `min_temp_c`, `max_temp_c`, `avg_temp_c`
-- `gas_switch_count`, `max_ceiling_m`, `max_gf99`
+- `min_temp_f`, `max_temp_f`, `avg_temp_f` (imperial equivalents)
+- `gas_switch_count`, `max_ceiling_m`, `max_ceiling_ft`, `max_gf99`
 - `descent_rate_m_min`, `ascent_rate_m_min`
 - `o2_consumed_psi`, `o2_consumed_bar`, `o2_rate_cuft_min`, `o2_rate_l_min`
 
 Variables available for segment formulas:
 - `start_t_sec`, `end_t_sec`, `duration_sec`, `duration_min`
 - `max_depth_m`, `avg_depth_m`
+- `max_depth_ft`, `avg_depth_ft` (imperial equivalents)
 - `min_temp_c`, `max_temp_c`
+- `min_temp_f`, `max_temp_f` (imperial equivalents)
 - `deco_time_sec`, `deco_time_min`, `sample_count`
 
 ## Key Constraints
@@ -136,20 +172,30 @@ Variables available for segment formulas:
 
 ## Project Phase
 
-Currently in **Phase 1 (hybrid architecture)**:
-- ✅ Rust compute core (formula parsing, metrics computation)
-- ✅ Swift GRDB storage layer (models, migrations, services)
-- ✅ Swift compute bridge (placeholder, ready for UniFFI integration)
-- ⏳ UniFFI binding generation and XCFramework packaging
-- ⏳ SwiftUI app implementation
+**Completed:**
+- ✅ Phase 1: Hybrid architecture — Rust compute core, Swift GRDB storage, models, services
+- ✅ Phase 2: Performance & batch APIs — batch operations, calculated fields, DiveStats
+- ✅ Phase 3: Dive computer import — Shearwater Cloud import, libdivecomputer binary parsing, multi-computer merge
+- ✅ Phase 4: Multiplatform SwiftUI app (Profundum/) — iOS + macOS with shared views
+- ✅ Phase 5: Swift Charts migration — DepthProfileChart & PPO2Chart using `import Charts` with interactive scrub
+- ✅ Phase 6: Accessibility pass — VoiceOver support for StatCard, charts, filter chips, dive rows, badges, GPS
+- ✅ Phase 7: UniFFI build automation — root Makefile, verify-xcframework.sh, docs/uniffi-build.md
+- ✅ Phase 8: Test coverage expansion — 37 Shearwater import tests (error handling, edge cases, stress, merge)
+
+**In progress / next:**
+- ⏳ GitHub repo setup (CI workflow written, needs repo creation + first push)
+- ⏳ UI features: dive editing polish, export/share UI, formula management UI
+- ⏳ Multi-platform: Android/Kotlin, Web/TypeScript, Windows/Desktop (scaffolded in `apps/`)
 
 ## Directory Structure
 
 ```
 divelog/
+├── Makefile                  # Root build automation (xcframework, test, clean)
 ├── core/                     # Rust compute core
 │   ├── Cargo.toml
 │   ├── build.rs
+│   ├── build-xcframework.sh  # XCFramework build script
 │   └── src/
 │       ├── lib.rs            # FFI entry point
 │       ├── error.rs          # FormulaError
@@ -159,14 +205,24 @@ divelog/
 ├── apple/
 │   └── DivelogCore/          # Swift Package
 │       ├── Package.swift
-│       └── Sources/
-│           ├── Models/       # GRDB Record types
-│           ├── Database/     # DivelogDatabase, DiveQuery
-│           ├── Services/     # DiveService, FormulaService, ExportService
-│           └── RustBridge/   # DivelogCompute interface
-├── apps/
-│   ├── macos/               # macOS SwiftUI (placeholder)
-│   └── ios/                 # iOS SwiftUI (placeholder)
+│       ├── Sources/
+│       │   ├── Models/       # GRDB Record types
+│       │   ├── Database/     # DivelogDatabase, DiveQuery
+│       │   ├── Services/     # DiveService, ShearwaterCloudImportService, etc.
+│       │   ├── DiveComputer/ # BLETransport, IOStreamBridge, DCDescriptorList
+│       │   └── RustBridge/   # DivelogCompute interface + Generated/
+│       └── Tests/            # XCTest suites (DivelogCoreTests, ShearwaterCloudImportTests, etc.)
+├── Profundum/                # Multiplatform SwiftUI app (iOS + macOS)
+│   └── Profundum/
+│       ├── ProfundumApp.swift
+│       ├── Views/            # All SwiftUI views (Swift Charts, accessibility)
+│       ├── BLE/              # CoreBluetooth integration
+│       └── Helpers/          # App utilities
+├── libdivecomputer/          # libdivecomputer submodule + XCFramework build
+├── scripts/
+│   └── verify-xcframework.sh # XCFramework integrity checker
+├── docs/                     # Architecture, design, build docs
+│   └── uniffi-build.md       # UniFFI pipeline documentation
 └── schema/
     └── schema.sql           # Reference schema (implemented in Swift)
 ```

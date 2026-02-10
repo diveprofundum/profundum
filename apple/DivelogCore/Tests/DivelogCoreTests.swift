@@ -49,16 +49,17 @@ final class DivelogCoreTests: XCTestCase {
         XCTAssertNil(retrieved)
     }
 
-    // MARK: - Buddy Tests
+    // MARK: - Teammate Tests
 
-    func testSaveAndGetBuddy() throws {
-        let buddy = Buddy(displayName: "John Doe", contact: "john@example.com")
+    func testSaveAndGetTeammate() throws {
+        let teammate = Teammate(displayName: "John Doe", contact: "john@example.com", certificationLevel: "Advanced Open Water")
 
-        try diveService.saveBuddy(buddy)
-        let retrieved = try diveService.getBuddy(id: buddy.id)
+        try diveService.saveTeammate(teammate)
+        let retrieved = try diveService.getTeammate(id: teammate.id)
 
         XCTAssertNotNil(retrieved)
         XCTAssertEqual(retrieved?.displayName, "John Doe")
+        XCTAssertEqual(retrieved?.certificationLevel, "Advanced Open Water")
     }
 
     // MARK: - Site Tests
@@ -95,7 +96,7 @@ final class DivelogCoreTests: XCTestCase {
             otu: 25.0
         )
 
-        try diveService.saveDive(dive, tags: ["training", "deep"], buddyIds: [], equipmentIds: [])
+        try diveService.saveDive(dive, tags: ["training", "deep"], teammateIds: [], equipmentIds: [])
         let retrieved = try diveService.getDive(id: dive.id)
 
         XCTAssertNotNil(retrieved)
@@ -285,9 +286,9 @@ final class DivelogCoreTests: XCTestCase {
         XCTAssertEqual(sites.count, 4)
         XCTAssertTrue(sites.contains { $0.name == "Ginnie Springs - Ballroom" })
 
-        // Check buddies were created
-        let buddies = try diveService.listBuddies()
-        XCTAssertEqual(buddies.count, 3)
+        // Check teammates were created
+        let teammates = try diveService.listTeammates()
+        XCTAssertEqual(teammates.count, 3)
 
         // Check dives were created
         let dives = try diveService.listDives()
@@ -377,5 +378,351 @@ final class DivelogCoreTests: XCTestCase {
         devices = try diveService.listDevices(includeArchived: false)
         XCTAssertEqual(devices.count, 1)
         XCTAssertTrue(devices.first!.isActive)
+    }
+
+    // MARK: - Dive Computer Field Tests
+
+    func testDeviceDiveComputerFields() throws {
+        let device = Device(
+            model: "Shearwater Perdix",
+            serialNumber: "SN99",
+            firmwareVersion: "2.0",
+            vendorId: 0x1234,
+            productId: 0x5678,
+            bleUuid: "FE25C237-0ECE-443C-B0AA-E02033E7029D"
+        )
+        try diveService.saveDevice(device)
+
+        let retrieved = try diveService.getDevice(id: device.id)
+        XCTAssertNotNil(retrieved)
+        XCTAssertEqual(retrieved?.vendorId, 0x1234)
+        XCTAssertEqual(retrieved?.productId, 0x5678)
+        XCTAssertEqual(retrieved?.bleUuid, "FE25C237-0ECE-443C-B0AA-E02033E7029D")
+    }
+
+    func testDeviceWithoutDiveComputerFields() throws {
+        let device = Device(model: "Manual", serialNumber: "SN0", firmwareVersion: "1.0")
+        try diveService.saveDevice(device)
+
+        let retrieved = try diveService.getDevice(id: device.id)
+        XCTAssertNotNil(retrieved)
+        XCTAssertNil(retrieved?.vendorId)
+        XCTAssertNil(retrieved?.productId)
+        XCTAssertNil(retrieved?.bleUuid)
+    }
+
+    func testDiveFingerprintRoundTrip() throws {
+        let device = Device(model: "Test", serialNumber: "SN", firmwareVersion: "1.0")
+        try diveService.saveDevice(device)
+
+        let fingerprint = Data([0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04])
+        let dive = Dive(
+            deviceId: device.id,
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 25.0,
+            avgDepthM: 15.0,
+            bottomTimeSec: 2400,
+            computerDiveNumber: 42,
+            fingerprint: fingerprint
+        )
+
+        try diveService.saveDive(dive)
+        let retrieved = try diveService.getDive(id: dive.id)
+
+        XCTAssertNotNil(retrieved)
+        XCTAssertEqual(retrieved?.computerDiveNumber, 42)
+        XCTAssertEqual(retrieved?.fingerprint, fingerprint)
+    }
+
+    // MARK: - Equipment Service Date Tests
+
+    func testEquipmentWithServiceDate() throws {
+        let lastService = Int64(Date().timeIntervalSince1970) - (30 * 24 * 3600) // 30 days ago
+        let equipment = Equipment(
+            name: "Primary Reg",
+            kind: "Regulator",
+            serviceIntervalDays: 365,
+            lastServiceDate: lastService
+        )
+        try diveService.saveEquipment(equipment)
+
+        let retrieved = try diveService.getEquipment(id: equipment.id)
+        XCTAssertNotNil(retrieved)
+        XCTAssertEqual(retrieved?.name, "Primary Reg")
+        XCTAssertEqual(retrieved?.serviceIntervalDays, 365)
+        XCTAssertEqual(retrieved?.lastServiceDate, lastService)
+    }
+
+    func testEquipmentWithoutServiceDate() throws {
+        let equipment = Equipment(
+            name: "Backup Light",
+            kind: "Light"
+        )
+        try diveService.saveEquipment(equipment)
+
+        let retrieved = try diveService.getEquipment(id: equipment.id)
+        XCTAssertNotNil(retrieved)
+        XCTAssertEqual(retrieved?.name, "Backup Light")
+        XCTAssertNil(retrieved?.serviceIntervalDays)
+        XCTAssertNil(retrieved?.lastServiceDate)
+    }
+
+    func testDiveWithoutFingerprint() throws {
+        let device = Device(model: "Test", serialNumber: "SN", firmwareVersion: "1.0")
+        try diveService.saveDevice(device)
+
+        let dive = Dive(
+            deviceId: device.id,
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 20.0,
+            avgDepthM: 12.0,
+            bottomTimeSec: 2000
+        )
+
+        try diveService.saveDive(dive)
+        let retrieved = try diveService.getDive(id: dive.id)
+
+        XCTAssertNotNil(retrieved)
+        XCTAssertNil(retrieved?.computerDiveNumber)
+        XCTAssertNil(retrieved?.fingerprint)
+    }
+
+    // MARK: - UnitFormatter Tests
+
+    func testDepthConversion() {
+        let meters: Float = 10.0
+        let feet = UnitFormatter.depth(meters, unit: .feet)
+        XCTAssertEqual(feet, 32.8084, accuracy: 0.01)
+
+        // Identity
+        XCTAssertEqual(UnitFormatter.depth(meters, unit: .meters), meters)
+    }
+
+    func testDepthRoundTrip() {
+        let original: Float = 30.0
+        let feet = UnitFormatter.depth(original, unit: .feet)
+        let backToMeters = UnitFormatter.depthToMetric(feet, from: .feet)
+        XCTAssertEqual(backToMeters, original, accuracy: 0.01)
+    }
+
+    func testTemperatureConversion() {
+        let celsius: Float = 20.0
+        let fahrenheit = UnitFormatter.temperature(celsius, unit: .fahrenheit)
+        XCTAssertEqual(fahrenheit, 68.0, accuracy: 0.01)
+
+        // Identity
+        XCTAssertEqual(UnitFormatter.temperature(celsius, unit: .celsius), celsius)
+    }
+
+    func testTemperatureRoundTrip() {
+        let original: Float = 16.0
+        let fahrenheit = UnitFormatter.temperature(original, unit: .fahrenheit)
+        let backToCelsius = UnitFormatter.temperatureToMetric(fahrenheit, from: .fahrenheit)
+        XCTAssertEqual(backToCelsius, original, accuracy: 0.01)
+    }
+
+    func testPressureConversion() {
+        let bar: Float = 200.0
+        let psi = UnitFormatter.pressure(bar, unit: .psi)
+        XCTAssertEqual(psi, 2900.76, accuracy: 0.1)
+
+        // Identity
+        XCTAssertEqual(UnitFormatter.pressure(bar, unit: .bar), bar)
+    }
+
+    func testFormatDepth() {
+        XCTAssertEqual(UnitFormatter.formatDepth(30.0, unit: .meters), "30.0 m")
+        XCTAssertEqual(UnitFormatter.formatDepth(10.0, unit: .feet), "32.8 ft")
+    }
+
+    func testFormatDepthCompact() {
+        XCTAssertEqual(UnitFormatter.formatDepthCompact(30.0, unit: .meters), "30.0m")
+        XCTAssertEqual(UnitFormatter.formatDepthCompact(10.0, unit: .feet), "32.8ft")
+    }
+
+    func testFormatTemperature() {
+        XCTAssertEqual(UnitFormatter.formatTemperature(20.0, unit: .celsius), "20.0\u{00B0}C")
+        XCTAssertEqual(UnitFormatter.formatTemperature(20.0, unit: .fahrenheit), "68.0\u{00B0}F")
+    }
+
+    func testUnitLabels() {
+        XCTAssertEqual(UnitFormatter.depthLabel(.meters), "m")
+        XCTAssertEqual(UnitFormatter.depthLabel(.feet), "ft")
+        XCTAssertEqual(UnitFormatter.temperatureLabel(.celsius), "\u{00B0}C")
+        XCTAssertEqual(UnitFormatter.temperatureLabel(.fahrenheit), "\u{00B0}F")
+        XCTAssertEqual(UnitFormatter.pressureLabel(.bar), "bar")
+        XCTAssertEqual(UnitFormatter.pressureLabel(.psi), "psi")
+    }
+
+    func testO2Formatting() {
+        // PSI mode: uses cuft/min
+        XCTAssertEqual(UnitFormatter.formatO2Rate(cuftMin: 0.45, lMin: 12.7, unit: .psi), "0.45 cuft/min")
+        XCTAssertEqual(UnitFormatter.formatO2Consumed(psi: 1500, bar: 103, unit: .psi), "1500 psi")
+
+        // Bar mode: uses l/min
+        XCTAssertEqual(UnitFormatter.formatO2Rate(cuftMin: 0.45, lMin: 12.7, unit: .bar), "12.70 l/min")
+        XCTAssertEqual(UnitFormatter.formatO2Consumed(psi: 1500, bar: 103, unit: .bar), "103 bar")
+
+        // Nil values
+        XCTAssertNil(UnitFormatter.formatO2Rate(cuftMin: nil, lMin: nil, unit: .psi))
+        XCTAssertNil(UnitFormatter.formatO2Consumed(psi: nil, bar: nil, unit: .bar))
+    }
+
+    // MARK: - Imperial Formula Variables
+
+    func testAddImperialVariables() {
+        var vars: [String: Double] = [
+            "max_depth_m": 30.0,
+            "avg_depth_m": 18.0,
+            "weighted_avg_depth_m": 20.0,
+            "max_ceiling_m": 3.0,
+            "min_temp_c": 16.0,
+            "max_temp_c": 22.0,
+            "avg_temp_c": 19.0,
+        ]
+
+        UnitFormatter.addImperialVariables(to: &vars)
+
+        XCTAssertEqual(vars["max_depth_ft"]!, 30.0 * 3.28084, accuracy: 0.01)
+        XCTAssertEqual(vars["avg_depth_ft"]!, 18.0 * 3.28084, accuracy: 0.01)
+        XCTAssertEqual(vars["weighted_avg_depth_ft"]!, 20.0 * 3.28084, accuracy: 0.01)
+        XCTAssertEqual(vars["max_ceiling_ft"]!, 3.0 * 3.28084, accuracy: 0.01)
+        XCTAssertEqual(vars["min_temp_f"]!, 60.8, accuracy: 0.1)
+        XCTAssertEqual(vars["max_temp_f"]!, 71.6, accuracy: 0.1)
+        XCTAssertEqual(vars["avg_temp_f"]!, 66.2, accuracy: 0.1)
+
+        // Original values unchanged
+        XCTAssertEqual(vars["max_depth_m"], 30.0)
+    }
+
+    // MARK: - Settings Unit Persistence
+
+    func testSettingsWithUnitPreferences() throws {
+        let settings = Settings(
+            depthUnit: .feet,
+            temperatureUnit: .fahrenheit,
+            pressureUnit: .psi
+        )
+        try diveService.saveSettings(settings)
+
+        let loaded = try diveService.getSettings()
+        XCTAssertNotNil(loaded)
+        XCTAssertEqual(loaded?.depthUnit, .feet)
+        XCTAssertEqual(loaded?.temperatureUnit, .fahrenheit)
+        XCTAssertEqual(loaded?.pressureUnit, .psi)
+    }
+
+    func testSettingsDefaultsToMetric() throws {
+        let settings = Settings()
+        try diveService.saveSettings(settings)
+
+        let loaded = try diveService.getSettings()
+        XCTAssertNotNil(loaded)
+        XCTAssertEqual(loaded?.depthUnit, .meters)
+        XCTAssertEqual(loaded?.temperatureUnit, .celsius)
+        XCTAssertEqual(loaded?.pressureUnit, .bar)
+    }
+
+    func testSettingsNullColumnsDefaultToMetric() throws {
+        // Insert a row with NULL unit columns (simulating pre-migration data)
+        try database.dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT INTO settings (id, time_format) VALUES ('test_null', 'HhMmSs')
+            """)
+        }
+
+        let loaded = try database.dbQueue.read { db in
+            try Settings.fetchOne(db, key: "test_null")
+        }
+
+        XCTAssertNotNil(loaded)
+        XCTAssertEqual(loaded?.depthUnit, .meters)
+        XCTAssertEqual(loaded?.temperatureUnit, .celsius)
+        XCTAssertEqual(loaded?.pressureUnit, .bar)
+    }
+
+    // MARK: - Batch Detail Loading
+
+    func testGetDiveDetail() throws {
+        let device = Device(model: "Detail Test", serialNumber: "DT01", firmwareVersion: "1.0")
+        try diveService.saveDevice(device)
+
+        let dive = Dive(
+            deviceId: device.id,
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            isCcr: true
+        )
+        try diveService.saveDive(dive, tags: ["deep", "ccr"], teammateIds: [], equipmentIds: [])
+
+        // Add samples
+        let samples = [
+            DiveSample(diveId: dive.id, tSec: 0, depthM: 0.0, tempC: 22.0),
+            DiveSample(diveId: dive.id, tSec: 60, depthM: 15.0, tempC: 20.0),
+            DiveSample(diveId: dive.id, tSec: 120, depthM: 30.0, tempC: 18.0),
+        ]
+        try diveService.saveSamples(samples)
+
+        // Add gas mixes
+        try diveService.saveGasMixes([
+            GasMix(diveId: dive.id, mixIndex: 0, o2Fraction: 0.21, heFraction: 0.35),
+        ])
+
+        // Add source fingerprint
+        try diveService.saveSourceFingerprints([
+            DiveSourceFingerprint(diveId: dive.id, deviceId: device.id, fingerprint: Data([0x01, 0x02]))
+        ])
+
+        let detail = try diveService.getDiveDetail(diveId: dive.id)
+
+        XCTAssertEqual(detail.samples.count, 3)
+        XCTAssertEqual(detail.tags.count, 2)
+        XCTAssertTrue(detail.tags.contains("deep"))
+        XCTAssertTrue(detail.tags.contains("ccr"))
+        XCTAssertEqual(detail.gasMixes.count, 1)
+        XCTAssertEqual(detail.gasMixes.first?.heFraction, 0.35)
+        XCTAssertEqual(detail.sourceFingerprints.count, 1)
+        XCTAssertEqual(detail.sourceDeviceNames.count, 1)
+        XCTAssertTrue(detail.sourceDeviceNames.first?.contains("Detail Test") ?? false)
+    }
+
+    // MARK: - Surface Interval
+
+    func testSurfaceInterval() throws {
+        let device = Device(model: "SI Test", serialNumber: "SI01", firmwareVersion: "1.0")
+        try diveService.saveDevice(device)
+
+        let dive1 = Dive(
+            deviceId: device.id,
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,     // ends at t+3600
+            maxDepthM: 20.0,
+            avgDepthM: 12.0,
+            bottomTimeSec: 2400
+        )
+        let dive2 = Dive(
+            deviceId: device.id,
+            startTimeUnix: 1700007200,   // starts at t+7200 → SI = 7200 - 3600 = 3600
+            endTimeUnix: 1700010800,
+            maxDepthM: 15.0,
+            avgDepthM: 10.0,
+            bottomTimeSec: 2000
+        )
+
+        try diveService.saveDive(dive1)
+        try diveService.saveDive(dive2)
+
+        // Surface interval before dive2 should be 3600 seconds (1 hour)
+        let si = try diveService.surfaceInterval(beforeDive: dive2)
+        XCTAssertEqual(si, 3600)
+
+        // First dive has no surface interval
+        let siFirst = try diveService.surfaceInterval(beforeDive: dive1)
+        XCTAssertNil(siFirst)
     }
 }

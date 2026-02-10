@@ -1,0 +1,3 @@
+[submodule "libdivecomputer/src"]
+	path = libdivecomputer/src
+	url = https://github.com/libdivecomputer/libdivecomputer.git

@@ -11,7 +11,7 @@ public struct DiveQuery: Sendable {
     public var decoRequired: Bool?
     public var tagAny: [String]
     public var siteId: String?
-    public var buddyId: String?
+    public var teammateId: String?
     public var limit: Int?
     public var offset: Int?
 
@@ -24,7 +24,7 @@ public struct DiveQuery: Sendable {
         decoRequired: Bool? = nil,
         tagAny: [String] = [],
         siteId: String? = nil,
-        buddyId: String? = nil,
+        teammateId: String? = nil,
         limit: Int? = 50,
         offset: Int? = nil
     ) {
@@ -36,7 +36,7 @@ public struct DiveQuery: Sendable {
         self.decoRequired = decoRequired
         self.tagAny = tagAny
         self.siteId = siteId
-        self.buddyId = buddyId
+        self.teammateId = teammateId
         self.limit = limit
         self.offset = offset
     }
@@ -74,9 +74,9 @@ public struct DiveQuery: Sendable {
             request = request.filter(Column("site_id") == siteId)
         }
 
-        // Buddy filter (via join)
-        if let buddyId {
-            request = request.joining(required: Dive.diveBuddies.filter(Column("buddy_id") == buddyId))
+        // Teammate filter (via join)
+        if let teammateId {
+            request = request.joining(required: Dive.diveTeammates.filter(Column("buddy_id") == teammateId))
         }
 
         // Tag filter (any of the tags)
@@ -93,6 +93,61 @@ public struct DiveQuery: Sendable {
         }
 
         return request
+    }
+
+    /// Build a GRDB request that includes site names (avoids N+1).
+    public func requestWithSites() -> QueryInterfaceRequest<DiveWithSite> {
+        var request = Dive
+            .annotated(withOptional: Dive.site.select(Column("name").forKey("siteName")))
+
+        // Time range filter
+        if let min = startTimeMin {
+            request = request.filter(Column("start_time_unix") >= min)
+        }
+        if let max = startTimeMax {
+            request = request.filter(Column("start_time_unix") <= max)
+        }
+
+        // Depth filter
+        if let min = minDepthM {
+            request = request.filter(Column("max_depth_m") >= min)
+        }
+        if let max = maxDepthM {
+            request = request.filter(Column("max_depth_m") <= max)
+        }
+
+        // Boolean filters
+        if let ccr = isCcr {
+            request = request.filter(Column("is_ccr") == ccr)
+        }
+        if let deco = decoRequired {
+            request = request.filter(Column("deco_required") == deco)
+        }
+
+        // Site filter
+        if let siteId {
+            request = request.filter(Column("site_id") == siteId)
+        }
+
+        // Teammate filter (via join)
+        if let teammateId {
+            request = request.joining(required: Dive.diveTeammates.filter(Column("buddy_id") == teammateId))
+        }
+
+        // Tag filter (any of the tags)
+        if !tagAny.isEmpty {
+            request = request.joining(required: Dive.tags.filter(tagAny.contains(Column("tag"))))
+        }
+
+        // Sort by date descending (most recent first)
+        request = request.order(Column("start_time_unix").desc)
+
+        // Pagination
+        if let limit {
+            request = request.limit(limit, offset: offset ?? 0)
+        }
+
+        return request.asRequest(of: DiveWithSite.self)
     }
 }
 
@@ -119,9 +174,9 @@ extension DiveQuery {
         DiveQuery(siteId: siteId, limit: limit)
     }
 
-    /// Query for dives with a specific buddy.
-    public static func withBuddy(_ buddyId: String, limit: Int = 50) -> DiveQuery {
-        DiveQuery(buddyId: buddyId, limit: limit)
+    /// Query for dives with a specific teammate.
+    public static func withTeammate(_ teammateId: String, limit: Int = 50) -> DiveQuery {
+        DiveQuery(teammateId: teammateId, limit: limit)
     }
 
     /// Query for dives with any of the specified tags.

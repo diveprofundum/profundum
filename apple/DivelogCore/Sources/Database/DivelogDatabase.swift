@@ -10,13 +10,21 @@ public final class DivelogDatabase: Sendable {
     /// - Parameter path: Path to the SQLite database file. Use `:memory:` for in-memory database.
     public init(path: String) throws {
         var config = Configuration()
-        #if DEBUG
+        let isMemory = path == ":memory:"
         config.prepareDatabase { db in
+            #if DEBUG
             db.trace { print("SQL: \($0)") }
+            #endif
+            if !isMemory {
+                try db.execute(sql: """
+                    PRAGMA journal_mode = WAL;
+                    PRAGMA synchronous = NORMAL;
+                    PRAGMA mmap_size = 67108864;
+                """)
+            }
         }
-        #endif
 
-        if path == ":memory:" {
+        if isMemory {
             dbQueue = try DatabaseQueue(configuration: config)
         } else {
             dbQueue = try DatabaseQueue(path: path, configuration: config)
@@ -185,6 +193,144 @@ public final class DivelogDatabase: Sendable {
         migrator.registerMigration("002_device_soft_delete") { db in
             try db.execute(sql: """
                 ALTER TABLE devices ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1;
+            """)
+        }
+
+        // Migration 3: Add certification_level to buddies (now called teammates in UI)
+        migrator.registerMigration("003_teammate_certification") { db in
+            try db.execute(sql: """
+                ALTER TABLE buddies ADD COLUMN certification_level TEXT;
+            """)
+        }
+
+        // Migration 4: Add dive computer import columns
+        migrator.registerMigration("004_dive_computer_columns") { db in
+            try db.execute(sql: """
+                ALTER TABLE devices ADD COLUMN vendor_id INTEGER;
+                ALTER TABLE devices ADD COLUMN product_id INTEGER;
+                ALTER TABLE devices ADD COLUMN ble_uuid TEXT;
+                ALTER TABLE dives ADD COLUMN computer_dive_number INTEGER;
+                ALTER TABLE dives ADD COLUMN fingerprint BLOB;
+                CREATE INDEX IF NOT EXISTS idx_dives_fingerprint ON dives(fingerprint);
+            """)
+        }
+
+        // Migration 5: Add last_service_date to equipment
+        migrator.registerMigration("005_equipment_service_date") { db in
+            try db.execute(sql: """
+                ALTER TABLE equipment ADD COLUMN last_service_date INTEGER;
+            """)
+        }
+
+        // Migration 6: Add unit preferences and appearance mode to settings
+        migrator.registerMigration("006_unit_preferences") { db in
+            try db.execute(sql: """
+                ALTER TABLE settings ADD COLUMN depth_unit TEXT;
+                ALTER TABLE settings ADD COLUMN temperature_unit TEXT;
+                ALTER TABLE settings ADD COLUMN pressure_unit TEXT;
+                ALTER TABLE settings ADD COLUMN appearance_mode TEXT;
+            """)
+        }
+
+        // Migration 7: Expanded CCR data, multi-device samples, gas mixes, source fingerprints
+        migrator.registerMigration("007_expanded_ccr_data") { db in
+            // 7a. New columns on dives
+            try db.execute(sql: """
+                ALTER TABLE dives ADD COLUMN notes TEXT;
+                ALTER TABLE dives ADD COLUMN min_temp_c REAL;
+                ALTER TABLE dives ADD COLUMN max_temp_c REAL;
+                ALTER TABLE dives ADD COLUMN avg_temp_c REAL;
+                ALTER TABLE dives ADD COLUMN end_gf99 REAL;
+                ALTER TABLE dives ADD COLUMN gf_low INTEGER;
+                ALTER TABLE dives ADD COLUMN gf_high INTEGER;
+                ALTER TABLE dives ADD COLUMN deco_model TEXT;
+                ALTER TABLE dives ADD COLUMN salinity TEXT;
+                ALTER TABLE dives ADD COLUMN surface_pressure_bar REAL;
+                ALTER TABLE dives ADD COLUMN lat REAL;
+                ALTER TABLE dives ADD COLUMN lon REAL;
+                ALTER TABLE dives ADD COLUMN group_id TEXT;
+                ALTER TABLE dives ADD COLUMN environment TEXT;
+                ALTER TABLE dives ADD COLUMN visibility TEXT;
+                ALTER TABLE dives ADD COLUMN weather TEXT;
+            """)
+
+            // 7b. Rebuild samples table with id PK and new columns
+            try db.execute(sql: """
+                CREATE TABLE samples_new (
+                    id TEXT PRIMARY KEY,
+                    dive_id TEXT NOT NULL,
+                    device_id TEXT,
+                    t_sec INTEGER NOT NULL,
+                    depth_m REAL NOT NULL,
+                    temp_c REAL NOT NULL,
+                    setpoint_ppo2 REAL,
+                    ceiling_m REAL,
+                    gf99 REAL,
+                    ppo2_1 REAL,
+                    ppo2_2 REAL,
+                    ppo2_3 REAL,
+                    cns REAL,
+                    tank_pressure_1_bar REAL,
+                    tank_pressure_2_bar REAL,
+                    tts_sec INTEGER,
+                    ndl_sec INTEGER,
+                    deco_stop_depth_m REAL,
+                    rbt_sec INTEGER,
+                    gasmix_index INTEGER,
+                    FOREIGN KEY (dive_id) REFERENCES dives(id) ON DELETE CASCADE,
+                    FOREIGN KEY (device_id) REFERENCES devices(id)
+                );
+                INSERT INTO samples_new (id, dive_id, t_sec, depth_m, temp_c, setpoint_ppo2, ceiling_m, gf99)
+                    SELECT lower(hex(randomblob(16))), dive_id, t_sec, depth_m, temp_c, setpoint_ppo2, ceiling_m, gf99
+                    FROM samples;
+                DROP TABLE samples;
+                ALTER TABLE samples_new RENAME TO samples;
+                CREATE INDEX idx_samples_dive ON samples(dive_id);
+                CREATE INDEX idx_samples_device ON samples(device_id);
+            """)
+
+            // 7c. Gas mixes table
+            try db.execute(sql: """
+                CREATE TABLE gas_mixes (
+                    id TEXT PRIMARY KEY,
+                    dive_id TEXT NOT NULL,
+                    mix_index INTEGER NOT NULL,
+                    o2_fraction REAL NOT NULL,
+                    he_fraction REAL NOT NULL,
+                    usage TEXT,
+                    FOREIGN KEY (dive_id) REFERENCES dives(id) ON DELETE CASCADE
+                );
+                CREATE INDEX idx_gas_mixes_dive ON gas_mixes(dive_id);
+            """)
+
+            // 7d. Dive source fingerprints table
+            try db.execute(sql: """
+                CREATE TABLE dive_source_fingerprints (
+                    id TEXT PRIMARY KEY,
+                    dive_id TEXT NOT NULL,
+                    device_id TEXT NOT NULL,
+                    fingerprint BLOB NOT NULL,
+                    source_type TEXT NOT NULL DEFAULT 'shearwater_cloud',
+                    FOREIGN KEY (dive_id) REFERENCES dives(id) ON DELETE CASCADE,
+                    FOREIGN KEY (device_id) REFERENCES devices(id)
+                );
+                CREATE INDEX idx_dsf_fingerprint ON dive_source_fingerprints(fingerprint);
+                CREATE INDEX idx_dsf_dive ON dive_source_fingerprints(dive_id);
+            """)
+
+            // Migrate existing fingerprints to new table
+            try db.execute(sql: """
+                INSERT INTO dive_source_fingerprints (id, dive_id, device_id, fingerprint, source_type)
+                    SELECT lower(hex(randomblob(16))), id, device_id, fingerprint, 'shearwater_cloud'
+                    FROM dives WHERE fingerprint IS NOT NULL;
+            """)
+        }
+
+        // Migration 8: Additional indices for common FK lookups
+        migrator.registerMigration("008_additional_indices") { db in
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS idx_dives_site_id ON dives(site_id);
+                CREATE INDEX IF NOT EXISTS idx_dives_device_id ON dives(device_id);
             """)
         }
 

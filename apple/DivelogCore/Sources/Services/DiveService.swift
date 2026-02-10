@@ -98,29 +98,29 @@ public final class DiveService: Sendable {
         }
     }
 
-    // MARK: - Buddy Operations
+    // MARK: - Teammate Operations
 
-    public func saveBuddy(_ buddy: Buddy) throws {
+    public func saveTeammate(_ teammate: Teammate) throws {
         try database.dbQueue.write { db in
-            try buddy.save(db)
+            try teammate.save(db)
         }
     }
 
-    public func getBuddy(id: String) throws -> Buddy? {
+    public func getTeammate(id: String) throws -> Teammate? {
         try database.dbQueue.read { db in
-            try Buddy.fetchOne(db, key: id)
+            try Teammate.fetchOne(db, key: id)
         }
     }
 
-    public func listBuddies() throws -> [Buddy] {
+    public func listTeammates() throws -> [Teammate] {
         try database.dbQueue.read { db in
-            try Buddy.fetchAll(db)
+            try Teammate.fetchAll(db)
         }
     }
 
-    public func deleteBuddy(id: String) throws -> Bool {
+    public func deleteTeammate(id: String) throws -> Bool {
         try database.dbQueue.write { db in
-            try Buddy.deleteOne(db, key: id)
+            try Teammate.deleteOne(db, key: id)
         }
     }
 
@@ -152,7 +152,7 @@ public final class DiveService: Sendable {
 
     // MARK: - Dive Operations
 
-    public func saveDive(_ dive: Dive, tags: [String] = [], buddyIds: [String] = [], equipmentIds: [String] = []) throws {
+    public func saveDive(_ dive: Dive, tags: [String] = [], teammateIds: [String] = [], equipmentIds: [String] = []) throws {
         try database.dbQueue.write { db in
             try dive.save(db)
 
@@ -162,10 +162,10 @@ public final class DiveService: Sendable {
                 try DiveTag(diveId: dive.id, tag: tag).insert(db)
             }
 
-            // Update buddies
-            try DiveBuddy.filter(Column("dive_id") == dive.id).deleteAll(db)
-            for buddyId in buddyIds {
-                try DiveBuddy(diveId: dive.id, buddyId: buddyId).insert(db)
+            // Update teammates
+            try DiveTeammate.filter(Column("dive_id") == dive.id).deleteAll(db)
+            for teammateId in teammateIds {
+                try DiveTeammate(diveId: dive.id, teammateId: teammateId).insert(db)
             }
 
             // Update equipment
@@ -188,9 +188,129 @@ public final class DiveService: Sendable {
         }
     }
 
+    /// List dives with their site names in a single query (avoids N+1).
+    public func listDivesWithSites(query: DiveQuery = DiveQuery()) throws -> [DiveWithSite] {
+        try database.dbQueue.read { db in
+            try query.requestWithSites().fetchAll(db)
+        }
+    }
+
     public func deleteDive(id: String) throws -> Bool {
         try database.dbQueue.write { db in
             try Dive.deleteOne(db, key: id)
+        }
+    }
+
+    /// Get all teammate IDs for a specific dive.
+    public func getTeammateIds(diveId: String) throws -> [String] {
+        try database.dbQueue.read { db in
+            try Row
+                .fetchAll(db, sql: "SELECT buddy_id FROM dive_buddies WHERE dive_id = ?", arguments: [diveId])
+                .map { $0["buddy_id"] as String }
+        }
+    }
+
+    /// Get all equipment IDs for a specific dive.
+    public func getEquipmentIds(diveId: String) throws -> [String] {
+        try database.dbQueue.read { db in
+            try Row
+                .fetchAll(db, sql: "SELECT equipment_id FROM dive_equipment WHERE dive_id = ?", arguments: [diveId])
+                .map { $0["equipment_id"] as String }
+        }
+    }
+
+    /// Get all tags for a specific dive.
+    public func getTags(diveId: String) throws -> [String] {
+        try database.dbQueue.read { db in
+            try DiveTag
+                .filter(Column("dive_id") == diveId)
+                .fetchAll(db)
+                .map(\.tag)
+        }
+    }
+
+    // MARK: - Batch Detail Loading
+
+    /// All relations for a single dive, loaded in one read transaction.
+    public struct DiveDetail: Sendable {
+        public let samples: [DiveSample]
+        public let tags: [String]
+        public let gasMixes: [GasMix]
+        public let teammateIds: [String]
+        public let equipmentIds: [String]
+        public let sourceFingerprints: [DiveSourceFingerprint]
+        public let sourceDeviceNames: [String]
+    }
+
+    /// Load all dive relations in a single read transaction (eliminates N+1 queries).
+    public func getDiveDetail(diveId: String) throws -> DiveDetail {
+        try database.dbQueue.read { db in
+            let samples = try DiveSample
+                .filter(Column("dive_id") == diveId)
+                .order(Column("t_sec"))
+                .fetchAll(db)
+
+            let tags = try DiveTag
+                .filter(Column("dive_id") == diveId)
+                .fetchAll(db)
+                .map(\.tag)
+
+            let gasMixes = try GasMix
+                .filter(Column("dive_id") == diveId)
+                .order(Column("mix_index"))
+                .fetchAll(db)
+
+            let teammateIds = try Row
+                .fetchAll(db, sql: "SELECT buddy_id FROM dive_buddies WHERE dive_id = ?", arguments: [diveId])
+                .map { $0["buddy_id"] as String }
+
+            let equipmentIds = try Row
+                .fetchAll(db, sql: "SELECT equipment_id FROM dive_equipment WHERE dive_id = ?", arguments: [diveId])
+                .map { $0["equipment_id"] as String }
+
+            let sourceFingerprints = try DiveSourceFingerprint
+                .filter(Column("dive_id") == diveId)
+                .fetchAll(db)
+
+            // Batch-fetch device names for all source fingerprint device IDs
+            let deviceIds = Array(Set(sourceFingerprints.map(\.deviceId)))
+            var sourceDeviceNames: [String] = []
+            if !deviceIds.isEmpty {
+                let devices = try Device
+                    .filter(deviceIds.contains(Column("id")))
+                    .fetchAll(db)
+                sourceDeviceNames = devices.map { device in
+                    device.serialNumber != "unknown"
+                        ? "\(device.model) (\(device.serialNumber))"
+                        : device.model
+                }
+            }
+
+            return DiveDetail(
+                samples: samples,
+                tags: tags,
+                gasMixes: gasMixes,
+                teammateIds: teammateIds,
+                equipmentIds: equipmentIds,
+                sourceFingerprints: sourceFingerprints,
+                sourceDeviceNames: sourceDeviceNames
+            )
+        }
+    }
+
+    // MARK: - Surface Interval
+
+    /// Calculate the surface interval before a dive (time since previous dive ended).
+    /// Returns nil if this is the first dive or no previous dive exists.
+    public func surfaceInterval(beforeDive dive: Dive) throws -> Int64? {
+        try database.dbQueue.read { db in
+            let row = try Row.fetchOne(db, sql: """
+                SELECT end_time_unix FROM dives
+                WHERE end_time_unix <= ? AND id != ?
+                ORDER BY end_time_unix DESC LIMIT 1
+            """, arguments: [dive.startTimeUnix, dive.id])
+            guard let prevEnd = row?["end_time_unix"] as Int64? else { return nil }
+            return dive.startTimeUnix - prevEnd
         }
     }
 
@@ -216,6 +336,57 @@ public final class DiveService: Sendable {
     public func deleteSamples(diveId: String) throws -> Int {
         try database.dbQueue.write { db in
             try DiveSample.filter(Column("dive_id") == diveId).deleteAll(db)
+        }
+    }
+
+    // MARK: - Gas Mix Operations
+
+    public func saveGasMixes(_ mixes: [GasMix]) throws {
+        try database.dbQueue.write { db in
+            for mix in mixes {
+                try mix.save(db)
+            }
+        }
+    }
+
+    public func getGasMixes(diveId: String) throws -> [GasMix] {
+        try database.dbQueue.read { db in
+            try GasMix
+                .filter(Column("dive_id") == diveId)
+                .order(Column("mix_index"))
+                .fetchAll(db)
+        }
+    }
+
+    public func deleteGasMixes(diveId: String) throws -> Int {
+        try database.dbQueue.write { db in
+            try GasMix.filter(Column("dive_id") == diveId).deleteAll(db)
+        }
+    }
+
+    // MARK: - Source Fingerprint Operations
+
+    public func saveSourceFingerprints(_ fps: [DiveSourceFingerprint]) throws {
+        try database.dbQueue.write { db in
+            for fp in fps {
+                try fp.save(db)
+            }
+        }
+    }
+
+    public func getSourceFingerprints(diveId: String) throws -> [DiveSourceFingerprint] {
+        try database.dbQueue.read { db in
+            try DiveSourceFingerprint
+                .filter(Column("dive_id") == diveId)
+                .fetchAll(db)
+        }
+    }
+
+    public func findDiveByFingerprint(_ fingerprint: Data) throws -> DiveSourceFingerprint? {
+        try database.dbQueue.read { db in
+            try DiveSourceFingerprint
+                .filter(Column("fingerprint") == fingerprint)
+                .fetchOne(db)
         }
     }
 

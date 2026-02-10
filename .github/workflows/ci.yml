@@ -1,0 +1,146 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────
+  # Detect which components changed to skip unnecessary jobs
+  # ─────────────────────────────────────────────────────────
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      swift: ${{ steps.filter.outputs.swift }}
+      app: ${{ steps.filter.outputs.app }}
+      ci: ${{ steps.filter.outputs.ci }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'core/**'
+              - 'Cargo.toml'
+              - 'VERSION'
+            swift:
+              - 'apple/**'
+              - 'VERSION'
+            app:
+              - 'Profundum/**'
+            ci:
+              - '.github/workflows/**'
+              - 'Makefile'
+              - 'scripts/**'
+
+  # ─────────────────────────────────────────────────────────
+  # Rust: lint + test (Linux, fast)
+  # ─────────────────────────────────────────────────────────
+  rust-lint:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core -> target
+
+      - name: Check formatting
+        run: cargo fmt --check
+        working-directory: core
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+        working-directory: core
+
+  rust-test:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core -> target
+
+      - name: Run tests
+        run: cargo test
+        working-directory: core
+
+  # ─────────────────────────────────────────────────────────
+  # Swift: build + test (macOS)
+  # Runs when Rust OR Swift sources change, since Swift
+  # links the Rust XCFramework.
+  # ─────────────────────────────────────────────────────────
+  swift-test:
+    needs: [changes, rust-test]
+    # Run if Rust, Swift, app, or CI files changed.
+    # Also always run on push to main for safety.
+    if: |
+      always() &&
+      (needs.rust-test.result == 'success' || needs.rust-test.result == 'skipped') &&
+      (
+        needs.changes.outputs.rust == 'true' ||
+        needs.changes.outputs.swift == 'true' ||
+        needs.changes.outputs.app == 'true' ||
+        needs.changes.outputs.ci == 'true'
+      )
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core -> target
+
+      - name: Cache Swift SPM
+        uses: actions/cache@v4
+        with:
+          path: apple/DivelogCore/.build
+          key: spm-${{ runner.os }}-${{ hashFiles('apple/DivelogCore/Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Build XCFramework
+        run: make xcframework
+
+      - name: Run Swift tests
+        run: cd apple/DivelogCore && swift test
+
+  # ─────────────────────────────────────────────────────────
+  # Version check: ensure VERSION file, Cargo.toml, and
+  # Xcode project are in sync.
+  # ─────────────────────────────────────────────────────────
+  version-check:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.swift == 'true' || needs.changes.outputs.app == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check version consistency
+        run: make version-check
