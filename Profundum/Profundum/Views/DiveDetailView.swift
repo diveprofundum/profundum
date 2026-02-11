@@ -130,6 +130,7 @@ struct DiveDetailView: View {
                 Button("Edit") {
                     showEditSheet = true
                 }
+                .accessibilityIdentifier("editDiveButton")
             }
             #else
             ToolbarItem {
@@ -149,6 +150,7 @@ struct DiveDetailView: View {
                 Button("Edit") {
                     showEditSheet = true
                 }
+                .accessibilityIdentifier("editDiveButton")
             }
             #endif
         }
@@ -312,6 +314,7 @@ struct DiveDetailView: View {
                 .cornerRadius(12)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(depthChartAccessibilityLabel)
+                .accessibilityIdentifier("depthProfileChart")
         }
     }
 

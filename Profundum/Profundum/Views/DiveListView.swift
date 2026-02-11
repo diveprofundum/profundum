@@ -70,6 +70,7 @@ struct DiveListView: View {
                             .buttonStyle(.bordered)
                         }
                     }
+                    .accessibilityIdentifier("emptyState")
                 } else {
                     diveList
                 }
@@ -237,11 +238,13 @@ struct DiveListView: View {
         }
         .listStyle(.plain)
         .environment(\.editMode, $editMode)
+        .accessibilityIdentifier("diveList")
         #else
         List {
             diveListContent
         }
         .listStyle(.plain)
+        .accessibilityIdentifier("diveList")
         #endif
     }
 
@@ -280,6 +283,7 @@ struct DiveListView: View {
                 }
                 .padding(.horizontal)
             }
+            .accessibilityIdentifier("filterBar")
             .padding(.vertical, 8)
             .background(.bar)
 
