@@ -18,8 +18,14 @@ final class DiveTypeTagTests: XCTestCase {
     }
 
     func testAutoActivityTags() {
-        XCTAssertEqual(PredefinedDiveTag.autoActivityTags(decoRequired: true), [.deco])
-        XCTAssertEqual(PredefinedDiveTag.autoActivityTags(decoRequired: false), [.rec])
+        // OC deco → deco tag
+        XCTAssertEqual(PredefinedDiveTag.autoActivityTags(isCcr: false, decoRequired: true), [.deco])
+        // OC non-deco → rec tag
+        XCTAssertEqual(PredefinedDiveTag.autoActivityTags(isCcr: false, decoRequired: false), [.rec])
+        // CCR deco → deco tag
+        XCTAssertEqual(PredefinedDiveTag.autoActivityTags(isCcr: true, decoRequired: true), [.deco])
+        // CCR non-deco → no activity tag (CCR is not "rec")
+        XCTAssertEqual(PredefinedDiveTag.autoActivityTags(isCcr: true, decoRequired: false), [])
     }
 
     func testCategoryPartition() {
@@ -207,7 +213,7 @@ final class DiveTypeTagTests: XCTestCase {
                 SELECT id, 'deco' FROM dives WHERE deco_required = 1;
 
                 INSERT OR IGNORE INTO dive_tags (dive_id, tag)
-                SELECT id, 'rec' FROM dives WHERE deco_required = 0;
+                SELECT id, 'rec' FROM dives WHERE is_ccr = 0 AND deco_required = 0;
             """)
         }
 
@@ -218,7 +224,7 @@ final class DiveTypeTagTests: XCTestCase {
 
         let d2Tags = try diveService.getTags(diveId: "d2")
         XCTAssertTrue(d2Tags.contains("ccr"), "CCR dive should get ccr tag")
-        XCTAssertTrue(d2Tags.contains("rec"), "Non-deco CCR dive should get rec tag")
+        XCTAssertFalse(d2Tags.contains("rec"), "CCR non-deco dive should NOT get rec tag")
 
         let d3Tags = try diveService.getTags(diveId: "d3")
         XCTAssertTrue(d3Tags.contains("oc"), "OC dive should get oc tag")

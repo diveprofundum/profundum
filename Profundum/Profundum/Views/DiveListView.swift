@@ -417,6 +417,19 @@ struct DiveRowView: View {
 
     private var dive: Dive { diveWithSite.dive }
 
+    /// Badges for notable dive properties shown in the list row.
+    /// OC Rec is the default and doesn't need a badge.
+    private var rowBadges: [(text: String, color: Color)] {
+        var badges: [(String, Color)] = []
+        if dive.isCcr {
+            badges.append(("CCR", .blue))
+        }
+        if dive.decoRequired {
+            badges.append(("Deco", .orange))
+        }
+        return badges
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -432,6 +445,16 @@ struct DiveRowView: View {
                 }
 
                 Spacer()
+
+                ForEach(rowBadges, id: \.text) { badge in
+                    Text(badge.text)
+                        .font(.caption)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(badge.color.opacity(0.2))
+                        .foregroundColor(badge.color)
+                        .cornerRadius(4)
+                }
             }
 
             HStack(spacing: 16) {

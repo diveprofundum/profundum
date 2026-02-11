@@ -32,6 +32,11 @@ struct NewDiveSheet: View {
     @State private var newCustomTag = ""
     @State private var savedCustomTags: [String] = []
 
+    /// Custom tags from previous dives that aren't already added to this dive.
+    private var unselectedCustomTags: [String] {
+        savedCustomTags.filter { !customTags.contains($0) }
+    }
+
     // Teammates
     @State private var teammates: [Teammate] = []
     @State private var selectedTeammateIds: Set<String> = []
@@ -139,7 +144,7 @@ struct NewDiveSheet: View {
                 } else {
                     // New dive: set initial tags from toggles
                     selectedDiveTypeTag = PredefinedDiveTag.diveTypeTag(isCcr: isCCR)
-                    for tag in PredefinedDiveTag.autoActivityTags(decoRequired: decoRequired) {
+                    for tag in PredefinedDiveTag.autoActivityTags(isCcr: isCCR, decoRequired: decoRequired) {
                         selectedActivityTags.insert(tag)
                     }
                 }
@@ -334,14 +339,13 @@ struct NewDiveSheet: View {
             }
 
             // Recent custom tags as suggestion chips
-            let unselectedCustom = savedCustomTags.filter { !customTags.contains($0) }
-            if !unselectedCustom.isEmpty {
+            if !unselectedCustomTags.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Recent Tags")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    FlowLayout(spacing: 6) {
-                        ForEach(unselectedCustom, id: \.self) { tag in
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 80))], spacing: 8) {
+                        ForEach(unselectedCustomTags, id: \.self) { tag in
                             Button {
                                 if !customTags.contains(tag) {
                                     customTags.append(tag)
@@ -369,7 +373,7 @@ struct NewDiveSheet: View {
             }
 
             if !customTags.isEmpty {
-                FlowLayout(spacing: 6) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 80))], spacing: 8) {
                     ForEach(customTags, id: \.self) { tag in
                         Button {
                             customTags.removeAll { $0 == tag }

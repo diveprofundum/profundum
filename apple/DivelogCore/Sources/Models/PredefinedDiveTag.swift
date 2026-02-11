@@ -83,8 +83,15 @@ public enum PredefinedDiveTag: String, CaseIterable, Sendable {
     }
 
     /// Returns the activity tags to auto-apply based on dive properties.
-    public static func autoActivityTags(decoRequired: Bool) -> [PredefinedDiveTag] {
-        [decoRequired ? .deco : .rec]
+    /// Rec is only auto-applied for OC non-deco dives; CCR dives get no automatic activity tag.
+    public static func autoActivityTags(isCcr: Bool, decoRequired: Bool) -> [PredefinedDiveTag] {
+        if decoRequired {
+            return [.deco]
+        } else if !isCcr {
+            return [.rec]
+        } else {
+            return []
+        }
     }
 
     /// Display name for UI presentation.
