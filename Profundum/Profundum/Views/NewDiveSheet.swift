@@ -318,8 +318,16 @@ struct NewDiveSheet: View {
                         ) {
                             if selectedActivityTags.contains(tag) {
                                 selectedActivityTags.remove(tag)
+                                // Sync decoRequired toggle when removing deco/rec
+                                if tag == .deco { decoRequired = false }
                             } else {
                                 selectedActivityTags.insert(tag)
+                                // Sync decoRequired toggle when adding deco/rec
+                                if tag == .deco {
+                                    decoRequired = true
+                                } else if tag == .rec {
+                                    decoRequired = false
+                                }
                             }
                         }
                     }

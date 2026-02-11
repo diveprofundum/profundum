@@ -334,7 +334,7 @@ public final class DivelogDatabase: Sendable {
             """)
         }
 
-        // Migration 9: Backfill dive-type tags (oc_rec, ccr, oc_deco) on existing dives
+        // Migration 9: Backfill breathing-system (oc, ccr) and activity (rec, deco) tags on existing dives
         migrator.registerMigration("009_backfill_type_tags") { db in
             try db.execute(sql: """
                 INSERT OR IGNORE INTO dive_tags (dive_id, tag)

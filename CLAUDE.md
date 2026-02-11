@@ -130,7 +130,7 @@ namespace divelog_compute {
 
 The schema (implemented in Swift GRDB migrations 001–009) models technical diving with CCR support:
 - Dives track CNS/OTU, setpoint, O2 consumption rates, deco status
-- Dive tags include stored dive-type tags (oc_rec, ccr, oc_deco) and activity/custom tags
+- Dive tags include breathing-system tags (oc, ccr) and activity tags (rec, deco, cave, etc.) plus user custom tags
 - Samples include depth, temp, setpoint_ppo2, ceiling_m, gf99
 - Segments are first-class entities for analyzing portions of a dive
 - Formulas enable user-defined calculated fields (e.g., `deco_time_min / bottom_time_min`)

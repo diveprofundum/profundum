@@ -127,8 +127,10 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
             let chunk = data.subdata(in: offset..<(offset + chunkSize))
 
             if Self.enableLogging {
+                let n = chunkIndex + 1
+                let tot = data.count
                 bleLog.info(
-                    "WRITE chunk \(chunkIndex + 1)/\(totalChunks): \(chunkSize) bytes (total \(data.count), offset \(offset))"
+                    "WRITE chunk \(n)/\(totalChunks): \(chunkSize)B (total \(tot), offset \(offset))"
                 )
             }
 
