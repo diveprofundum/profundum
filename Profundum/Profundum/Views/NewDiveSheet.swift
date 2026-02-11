@@ -135,14 +135,12 @@ struct NewDiveSheet: View {
                 }
             }
             .onChange(of: isCCR) { _, _ in
-                selectedDiveTypeTag = PredefinedDiveTag.diveTypeTag(
-                    isCcr: isCCR, decoRequired: decoRequired
-                )
+                let newTag = PredefinedDiveTag.diveTypeTag(isCcr: isCCR, decoRequired: decoRequired)
+                if selectedDiveTypeTag != newTag { selectedDiveTypeTag = newTag }
             }
             .onChange(of: decoRequired) { _, _ in
-                selectedDiveTypeTag = PredefinedDiveTag.diveTypeTag(
-                    isCcr: isCCR, decoRequired: decoRequired
-                )
+                let newTag = PredefinedDiveTag.diveTypeTag(isCcr: isCCR, decoRequired: decoRequired)
+                if selectedDiveTypeTag != newTag { selectedDiveTypeTag = newTag }
             }
             .alert(
                 "Error",
@@ -315,13 +313,14 @@ struct NewDiveSheet: View {
             }
 
             // Recent custom tags as suggestion chips
-            if !savedCustomTags.isEmpty {
+            let unselectedCustom = savedCustomTags.filter { !customTags.contains($0) }
+            if !unselectedCustom.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Recent Tags")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     FlowLayout(spacing: 6) {
-                        ForEach(savedCustomTags.filter { !customTags.contains($0) }, id: \.self) { tag in
+                        ForEach(unselectedCustom, id: \.self) { tag in
                             Button {
                                 if !customTags.contains(tag) {
                                     customTags.append(tag)

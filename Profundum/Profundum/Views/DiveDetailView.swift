@@ -26,7 +26,7 @@ struct DiveDetailView: View {
 
     private var predefinedTags: [PredefinedDiveTag] {
         tags.compactMap { PredefinedDiveTag(fromTag: $0) }
-            .sorted { $0.category == .diveType && $1.category != .diveType }
+            .sorted { ($0.category == .diveType ? 0 : 1) < ($1.category == .diveType ? 0 : 1) }
     }
 
     private var customTags: [String] {

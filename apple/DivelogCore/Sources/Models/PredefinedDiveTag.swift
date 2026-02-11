@@ -2,6 +2,8 @@ import Foundation
 import SwiftUI
 
 /// Dive type filters based on dive properties (computed, not stored as tags).
+/// NOTE: Display names and colors parallel PredefinedDiveTag's dive-type cases.
+/// If a new dive type is added, update both enums.
 public enum DiveTypeFilter: String, CaseIterable, Sendable {
     case ccr
     case ocDeco = "oc_deco"
@@ -57,7 +59,7 @@ public enum PredefinedDiveTag: String, CaseIterable, Sendable {
     case technical
 
     /// Tag category for UI grouping.
-    public enum Category: Sendable {
+    public enum Category: Equatable, Sendable {
         case diveType
         case activity
     }
@@ -73,14 +75,12 @@ public enum PredefinedDiveTag: String, CaseIterable, Sendable {
     }
 
     /// All dive-type tags.
-    public static var diveTypeCases: [PredefinedDiveTag] {
+    public static let diveTypeCases: [PredefinedDiveTag] =
         allCases.filter { $0.category == .diveType }
-    }
 
     /// All activity/environment tags.
-    public static var activityCases: [PredefinedDiveTag] {
+    public static let activityCases: [PredefinedDiveTag] =
         allCases.filter { $0.category == .activity }
-    }
 
     /// Returns the appropriate dive-type tag for a dive's properties.
     public static func diveTypeTag(isCcr: Bool, decoRequired: Bool) -> PredefinedDiveTag {

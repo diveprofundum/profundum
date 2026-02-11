@@ -417,15 +417,6 @@ struct DiveRowView: View {
 
     private var dive: Dive { diveWithSite.dive }
 
-    private var diveTypeBadge: (text: String, color: Color)? {
-        if dive.isCcr {
-            return ("CCR", .blue)
-        } else if dive.decoRequired {
-            return ("OC Deco", .orange)
-        }
-        return nil
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -441,16 +432,6 @@ struct DiveRowView: View {
                 }
 
                 Spacer()
-
-                if let badge = diveTypeBadge {
-                    Text(badge.text)
-                        .font(.caption)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(badge.color.opacity(0.2))
-                        .foregroundColor(badge.color)
-                        .cornerRadius(4)
-                }
             }
 
             HStack(spacing: 16) {
