@@ -67,11 +67,14 @@ final class DiveListUITests: XCTestCase {
         ccrChip.assertExists()
         ccrChip.tap()
 
-        // List should update — may have fewer items (only CCR dives)
-        sleep(1) // Allow filter to apply
-        let filteredCount = app.collectionViews["diveList"].cells.count
+        // List should update — wait for cell count to change
+        let list = app.collectionViews["diveList"]
+        let filtered = NSPredicate { _, _ in list.cells.count < initialCellCount }
+        let filterApplied = expectation(for: filtered, evaluatedWith: nil)
+        wait(for: [filterApplied], timeout: 5)
+
+        let filteredCount = list.cells.count
         XCTAssertGreaterThan(filteredCount, 0, "Expected at least one CCR dive")
-        XCTAssertLessThanOrEqual(filteredCount, initialCellCount)
 
         // Clear button should appear — may be offscreen in the horizontal
         // filter ScrollView, so scroll it into view first
@@ -86,9 +89,9 @@ final class DiveListUITests: XCTestCase {
         clearButton.tap()
 
         // List should restore
-        sleep(1)
-        let restoredCount = app.collectionViews["diveList"].cells.count
-        XCTAssertEqual(restoredCount, initialCellCount, "Expected list to restore after clearing filters")
+        let restored = NSPredicate { _, _ in list.cells.count == initialCellCount }
+        let filtersCleared = expectation(for: restored, evaluatedWith: nil)
+        wait(for: [filtersCleared], timeout: 5)
     }
 
     @MainActor
@@ -104,12 +107,9 @@ final class DiveListUITests: XCTestCase {
         searchField.tap()
         searchField.typeText("Andrea")
 
-        // Wait for debounce (300ms) + rendering
-        sleep(1)
-
-        // Andrea Doria dive should be visible
+        // Wait for debounce (300ms) + rendering, then verify result
         let andrea = app.staticTexts["Andrea Doria"]
-        andrea.assertExists(timeout: 3)
+        andrea.assertExists(timeout: 5)
     }
 
     @MainActor
@@ -127,7 +127,7 @@ final class DiveListUITests: XCTestCase {
             addButton.assertExists()
             addButton.tap()
         } else {
-            // macOS: direct plus button in toolbar
+            // macOS: direct plus button in toolbar (untested — positional index is fragile)
             let plusButton = app.navigationBars.buttons.element(boundBy: 0)
             plusButton.tap()
         }
@@ -160,15 +160,14 @@ final class DiveListUITests: XCTestCase {
 
         // Tap the Delete button
         let deleteButton = app.buttons["Delete"]
-        if deleteButton.waitForExistence(timeout: 2) {
-            deleteButton.tap()
+        deleteButton.assertExists(timeout: 2)
+        deleteButton.tap()
 
-            // Wait for deletion animation
-            sleep(1)
+        // Wait for deletion animation
+        sleep(1)
 
-            let newCount = list.cells.count
-            XCTAssertEqual(newCount, initialCount - 1, "Expected one fewer dive after deletion")
-        }
+        let newCount = list.cells.count
+        XCTAssertEqual(newCount, initialCount - 1, "Expected one fewer dive after deletion")
         #else
         throw XCTSkip("Swipe-to-delete is iOS only")
         #endif

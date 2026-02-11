@@ -20,7 +20,7 @@ final class NewDiveSheetUITests: XCTestCase {
             menuButton.tap()
             app.buttons["Add Dive"].assertExists().tap()
         } else {
-            // macOS: direct toolbar button
+            // macOS: direct toolbar button (untested — positional index is fragile)
             app.navigationBars.buttons.element(boundBy: 0).tap()
         }
 

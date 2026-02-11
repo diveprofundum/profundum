@@ -30,17 +30,4 @@ extension XCUIElement {
         return self
     }
 
-    /// Assert this element does NOT exist after waiting briefly.
-    func assertNotExists(
-        timeout: TimeInterval = 2,
-        _ message: String? = nil,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        let msg = message ?? "Expected element \(debugDescription) to not exist"
-        // Wait a moment then check non-existence
-        if waitForExistence(timeout: timeout) {
-            XCTFail(msg, file: file, line: line)
-        }
-    }
 }

@@ -119,7 +119,8 @@ final class NavigationFlowUITests: XCTestCase {
                 try app.performAccessibilityAudit(shouldIgnore)
             } catch {
                 let nsError = error as NSError
-                if nsError.code == -56 {
+                let auditTimeoutCode = -56
+                if nsError.code == auditTimeoutCode {
                     // Audit timeout — log but don't fail
                     print("Accessibility audit timed out on \(label) — skipping")
                 } else {

@@ -13,7 +13,7 @@ final class ProfundumUITests: XCTestCase {
         app.launch()
 
         // Verify all 4 tabs exist
-        XCTAssertTrue(app.tabBars.buttons["Dives"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.tabBars.buttons["Log"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.tabBars.buttons["Library"].exists)
         XCTAssertTrue(app.tabBars.buttons["Sync"].exists)
         XCTAssertTrue(app.tabBars.buttons["Settings"].exists)
@@ -22,7 +22,7 @@ final class ProfundumUITests: XCTestCase {
         app.tabBars.buttons["Library"].tap()
         app.tabBars.buttons["Sync"].tap()
         app.tabBars.buttons["Settings"].tap()
-        app.tabBars.buttons["Dives"].tap()
+        app.tabBars.buttons["Log"].tap()
     }
 
     @MainActor
