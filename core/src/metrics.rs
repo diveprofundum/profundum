@@ -276,24 +276,39 @@ impl DiveStats {
         }
     }
 
+    /// Computes average descent and ascent rates in m/min.
+    ///
+    /// Descent is measured from surface to first arrival at max depth; ascent from
+    /// last departure from max depth to surface. Bottom time at max depth is
+    /// excluded from both calculations.
     fn compute_rates(samples: &[SampleInput]) -> (f32, f32) {
         if samples.len() < 2 {
             return (0.0, 0.0);
         }
 
-        // Find max depth index
-        let max_idx = samples
+        let max_depth = samples
             .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.depth_m.partial_cmp(&b.depth_m).unwrap())
-            .map(|(i, _)| i)
+            .map(|s| s.depth_m)
+            .fold(f32::NEG_INFINITY, f32::max);
+
+        let first_max_idx = samples
+            .iter()
+            .position(|s| s.depth_m == max_depth)
             .unwrap_or(0);
 
-        // Descent rate: from start to max depth
-        let descent_rate = if max_idx > 0 {
-            let dt_min = (samples[max_idx].t_sec - samples[0].t_sec) as f32 / 60.0;
+        let last_max_idx = samples.len()
+            - 1
+            - samples
+                .iter()
+                .rev()
+                .position(|s| s.depth_m == max_depth)
+                .unwrap_or(0);
+
+        // Descent: surface → first arrival at max depth
+        let descent_rate = if first_max_idx > 0 {
+            let dt_min = (samples[first_max_idx].t_sec - samples[0].t_sec) as f32 / 60.0;
             if dt_min > 0.0 {
-                samples[max_idx].depth_m / dt_min
+                samples[first_max_idx].depth_m / dt_min
             } else {
                 0.0
             }
@@ -301,12 +316,12 @@ impl DiveStats {
             0.0
         };
 
-        // Ascent rate: from max depth to end
-        let ascent_rate = if max_idx < samples.len() - 1 {
+        // Ascent: last departure from max depth → surface
+        let ascent_rate = if last_max_idx < samples.len() - 1 {
             let last = samples.last().unwrap();
-            let dt_min = (last.t_sec - samples[max_idx].t_sec) as f32 / 60.0;
+            let dt_min = (last.t_sec - samples[last_max_idx].t_sec) as f32 / 60.0;
             if dt_min > 0.0 {
-                (samples[max_idx].depth_m - last.depth_m) / dt_min
+                (samples[last_max_idx].depth_m - last.depth_m) / dt_min
             } else {
                 0.0
             }
@@ -525,8 +540,10 @@ mod tests {
         assert_eq!(stats.max_gf99, 80.0);
         assert_eq!(stats.gas_switch_count, 0); // all gasmix_index are None
         assert_eq!(stats.depth_class, DepthClass::Deep);
-        assert!(stats.descent_rate_m_min > 0.0);
-        assert!(stats.ascent_rate_m_min > 0.0);
+        // Descent: 30m over 5 min (first max at t=300) = 6.0 m/min
+        assert!((stats.descent_rate_m_min - 6.0).abs() < 0.01);
+        // Ascent: 30m over 15 min (last max at t=600, end at t=1500) = 2.0 m/min
+        assert!((stats.ascent_rate_m_min - 2.0).abs() < 0.01);
     }
 
     #[test]
@@ -621,6 +638,176 @@ mod tests {
         ];
         let stats = DiveStats::compute(&dive, &samples);
         assert_eq!(stats.gas_switch_count, 2);
+    }
+
+    #[test]
+    fn test_rates_single_sample() {
+        let samples = vec![SampleInput {
+            t_sec: 0,
+            depth_m: 10.0,
+            temp_c: 20.0,
+            setpoint_ppo2: None,
+            ceiling_m: None,
+            gf99: None,
+            gasmix_index: None,
+        }];
+        let (descent, ascent) = DiveStats::compute_rates(&samples);
+        assert_eq!(descent, 0.0);
+        assert_eq!(ascent, 0.0);
+    }
+
+    #[test]
+    fn test_rates_no_bottom_time() {
+        // Max depth only at one sample — no flat bottom
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+            },
+            SampleInput {
+                t_sec: 300,
+                depth_m: 30.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+            },
+            SampleInput {
+                t_sec: 900,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+            },
+        ];
+        let (descent, ascent) = DiveStats::compute_rates(&samples);
+        // 30m / 5min = 6.0 m/min
+        assert!((descent - 6.0).abs() < 0.01);
+        // 30m / 10min = 3.0 m/min
+        assert!((ascent - 3.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_rates_max_at_start() {
+        // Max depth at t=0 → descent 0.0, ascent computed
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 20.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+            },
+            SampleInput {
+                t_sec: 600,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+            },
+        ];
+        let (descent, ascent) = DiveStats::compute_rates(&samples);
+        assert_eq!(descent, 0.0);
+        // 20m / 10min = 2.0 m/min
+        assert!((ascent - 2.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_rates_max_at_end() {
+        // Max depth at last sample → descent computed, ascent 0.0
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+            },
+            SampleInput {
+                t_sec: 600,
+                depth_m: 20.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+            },
+        ];
+        let (descent, ascent) = DiveStats::compute_rates(&samples);
+        // 20m / 10min = 2.0 m/min
+        assert!((descent - 2.0).abs() < 0.01);
+        assert_eq!(ascent, 0.0);
+    }
+
+    #[test]
+    fn test_rates_multi_level_dive() {
+        // Profile: 0→20m→10m→30m→0m — rates should be based on 30m max
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+            },
+            SampleInput {
+                t_sec: 120,
+                depth_m: 20.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+            },
+            SampleInput {
+                t_sec: 300,
+                depth_m: 10.0,
+                temp_c: 19.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+            },
+            SampleInput {
+                t_sec: 600,
+                depth_m: 30.0,
+                temp_c: 16.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+            },
+            SampleInput {
+                t_sec: 1200,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+            },
+        ];
+        let (descent, ascent) = DiveStats::compute_rates(&samples);
+        // Descent: 30m / 10min = 3.0 m/min (surface to first 30m at t=600)
+        assert!((descent - 3.0).abs() < 0.01);
+        // Ascent: 30m / 10min = 3.0 m/min (last 30m at t=600 to surface at t=1200)
+        assert!((ascent - 3.0).abs() < 0.01);
     }
 
     #[test]
