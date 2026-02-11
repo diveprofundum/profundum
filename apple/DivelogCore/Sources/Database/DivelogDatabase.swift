@@ -341,10 +341,13 @@ public final class DivelogDatabase: Sendable {
                 SELECT id, 'ccr' FROM dives WHERE is_ccr = 1;
 
                 INSERT OR IGNORE INTO dive_tags (dive_id, tag)
-                SELECT id, 'oc_deco' FROM dives WHERE is_ccr = 0 AND deco_required = 1;
+                SELECT id, 'oc' FROM dives WHERE is_ccr = 0;
 
                 INSERT OR IGNORE INTO dive_tags (dive_id, tag)
-                SELECT id, 'oc_rec' FROM dives WHERE is_ccr = 0 AND deco_required = 0;
+                SELECT id, 'deco' FROM dives WHERE deco_required = 1;
+
+                INSERT OR IGNORE INTO dive_tags (dive_id, tag)
+                SELECT id, 'rec' FROM dives WHERE deco_required = 0;
             """)
         }
 

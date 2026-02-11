@@ -26,7 +26,7 @@ struct NewDiveSheet: View {
     @State private var newSiteName = ""
 
     // Tags
-    @State private var selectedDiveTypeTag: PredefinedDiveTag = .ocRec
+    @State private var selectedDiveTypeTag: PredefinedDiveTag = .oc
     @State private var selectedActivityTags: Set<PredefinedDiveTag> = []
     @State private var customTags: [String] = []
     @State private var newCustomTag = ""
@@ -121,26 +121,42 @@ struct NewDiveSheet: View {
                                 selectedActivityTags.insert(predefined)
                             }
                         } else {
-                            customTags.append(tag)
+                            // Handle legacy tags from before the taxonomy change
+                            if tag == "oc_rec" {
+                                selectedDiveTypeTag = .oc
+                                selectedActivityTags.insert(.rec)
+                            } else if tag == "oc_deco" {
+                                selectedDiveTypeTag = .oc
+                                selectedActivityTags.insert(.deco)
+                            } else {
+                                customTags.append(tag)
+                            }
                         }
                     }
 
                     selectedTeammateIds = Set(editingTeammateIds)
                     selectedEquipmentIds = Set(editingEquipmentIds)
                 } else {
-                    // New dive: set initial dive type tag from toggles
-                    selectedDiveTypeTag = PredefinedDiveTag.diveTypeTag(
-                        isCcr: isCCR, decoRequired: decoRequired
-                    )
+                    // New dive: set initial tags from toggles
+                    selectedDiveTypeTag = PredefinedDiveTag.diveTypeTag(isCcr: isCCR)
+                    for tag in PredefinedDiveTag.autoActivityTags(decoRequired: decoRequired) {
+                        selectedActivityTags.insert(tag)
+                    }
                 }
             }
-            .onChange(of: isCCR) { _, _ in
-                let newTag = PredefinedDiveTag.diveTypeTag(isCcr: isCCR, decoRequired: decoRequired)
+            .onChange(of: isCCR) { _, newValue in
+                let newTag = PredefinedDiveTag.diveTypeTag(isCcr: newValue)
                 if selectedDiveTypeTag != newTag { selectedDiveTypeTag = newTag }
             }
-            .onChange(of: decoRequired) { _, _ in
-                let newTag = PredefinedDiveTag.diveTypeTag(isCcr: isCCR, decoRequired: decoRequired)
-                if selectedDiveTypeTag != newTag { selectedDiveTypeTag = newTag }
+            .onChange(of: decoRequired) { _, newValue in
+                // Swap rec/deco activity tags to match toggle
+                if newValue {
+                    selectedActivityTags.remove(.rec)
+                    selectedActivityTags.insert(.deco)
+                } else {
+                    selectedActivityTags.remove(.deco)
+                    selectedActivityTags.insert(.rec)
+                }
             }
             .alert(
                 "Error",
@@ -271,9 +287,9 @@ struct NewDiveSheet: View {
 
     private var tagsSection: some View {
         Section("Tags") {
-            // Dive Type (mutually exclusive)
+            // Breathing System (mutually exclusive)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Dive Type")
+                Text("Breathing System")
                     .font(.caption)
                     .foregroundColor(.secondary)
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 80))], spacing: 8) {
@@ -283,9 +299,7 @@ struct NewDiveSheet: View {
                             isSelected: selectedDiveTypeTag == tag
                         ) {
                             selectedDiveTypeTag = tag
-                            // Sync toggles with type tag
                             isCCR = tag == .ccr
-                            decoRequired = tag == .ocDeco
                         }
                     }
                 }
@@ -585,7 +599,6 @@ struct NewDiveSheet: View {
             if predefined.category == .diveType {
                 selectedDiveTypeTag = predefined
                 isCCR = predefined == .ccr
-                decoRequired = predefined == .ocDeco
             } else {
                 selectedActivityTags.insert(predefined)
             }
