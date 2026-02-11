@@ -11,6 +11,24 @@ struct DiscoveredDevice: Identifiable {
     var lastSeen: Date
 }
 
+/// Manages BLE scanning, connection, and service/characteristic discovery for
+/// dive computers.
+///
+/// ## Thread Safety
+///
+/// `BLEScanner` is an `ObservableObject` whose `@Published` properties and
+/// mutable state (`isConnecting`, `pendingKnownComputer`) are only mutated
+/// on the **MainActor**. CoreBluetooth delegate callbacks arrive on an
+/// unspecified queue (`CBCentralManager(delegate:queue: nil)` → main queue),
+/// but all state mutations are dispatched to `@MainActor` via `Task`.
+///
+/// `pendingKnownComputer` is `nonisolated(unsafe)` because it is read from
+/// nonisolated delegate callbacks. Safety is ensured by:
+/// 1. Writes only happen on the MainActor (in `connect()`, `disconnect()`, and
+///    delegate `Task { @MainActor ... }` blocks).
+/// 2. `isConnecting` prevents concurrent `connect()` calls, so the value
+///    cannot change while connection callbacks are in flight.
+/// 3. Delegate callbacks capture the value into a local `let` before dispatching.
 class BLEScanner: NSObject, ObservableObject {
     @Published var managerState: CBManagerState = .unknown
     @Published var discoveredDevices: [DiscoveredDevice] = []
@@ -20,6 +38,9 @@ class BLEScanner: NSObject, ObservableObject {
     /// The known dive computer matched during scan (available after connection).
     @Published var connectedKnownComputer: KnownDiveComputer?
 
+    /// Guards against overlapping `connect()` calls. MainActor-isolated.
+    private var isConnecting = false
+
     private var centralManager: CBCentralManager!
     /// Strong references to peripherals (CoreBluetooth doesn't retain them).
     private var peripherals: [UUID: CBPeripheral] = [:]
@@ -27,6 +48,7 @@ class BLEScanner: NSObject, ObservableObject {
     /// Accessed from nonisolated CBPeripheralDelegate callbacks; safe because
     /// it is only written on the main actor before connection and read from
     /// CoreBluetooth callbacks that fire sequentially after connection.
+    /// See class-level doc comment for the full thread safety rationale.
     nonisolated(unsafe) private var pendingKnownComputer: KnownDiveComputer?
 
     override init() {
@@ -50,6 +72,8 @@ class BLEScanner: NSObject, ObservableObject {
     }
 
     func connect(_ peripheral: CBPeripheral) {
+        guard !isConnecting else { return }
+        isConnecting = true
         stopScanning()
         // Find the matching known computer for characteristic discovery
         if let device = discoveredDevices.first(where: { $0.peripheral.identifier == peripheral.identifier }) {
@@ -59,6 +83,7 @@ class BLEScanner: NSObject, ObservableObject {
     }
 
     func disconnect() {
+        isConnecting = false
         if let t = transport {
             try? t.close()
         }
@@ -132,7 +157,7 @@ extension BLEScanner: CBCentralManagerDelegate {
         _ central: CBCentralManager,
         didConnect peripheral: CBPeripheral
     ) {
-        // After GATT connection, discover services for data transfer
+        // Capture before dispatching to MainActor
         let knownComputer = pendingKnownComputer
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -155,6 +180,7 @@ extension BLEScanner: CBCentralManagerDelegate {
         error: Error?
     ) {
         Task { @MainActor [weak self] in
+            self?.isConnecting = false
             self?.connectedPeripheral = nil
             self?.pendingKnownComputer = nil
         }
@@ -168,6 +194,7 @@ extension BLEScanner: CBCentralManagerDelegate {
         let disconnectedId = peripheral.identifier
         Task { @MainActor [weak self] in
             guard let self else { return }
+            self.isConnecting = false
             if self.connectedPeripheral?.identifier == disconnectedId {
                 if let t = self.transport {
                     try? t.close()
@@ -189,6 +216,7 @@ extension BLEScanner: CBPeripheralDelegate {
     ) {
         guard error == nil, let services = peripheral.services else { return }
 
+        // Capture before iterating — pendingKnownComputer is nonisolated(unsafe)
         let knownComputer = pendingKnownComputer
 
         for service in services {
@@ -208,6 +236,7 @@ extension BLEScanner: CBPeripheralDelegate {
     ) {
         guard error == nil, let characteristics = service.characteristics else { return }
 
+        // Capture before use — pendingKnownComputer is nonisolated(unsafe)
         let knownComputer = pendingKnownComputer
 
         // Find the data transfer characteristic
@@ -227,6 +256,7 @@ extension BLEScanner: CBPeripheralDelegate {
 
         Task { @MainActor [weak self] in
             guard let self else { return }
+            self.isConnecting = false
             let bleTransport = BLEPeripheralTransport(
                 peripheral: peripheral,
                 characteristic: characteristic

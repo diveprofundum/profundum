@@ -29,9 +29,17 @@ public enum TraceOperation: Sendable {
 /// ```
 /// IOStreamBridge → TracingBLETransport → BLEPeripheralTransport
 /// ```
+///
+/// ## Thread Safety
+///
+/// Marked `@unchecked Sendable` because mutable state (`_entries`) is protected
+/// by an `NSLock`. All I/O methods delegate to `inner` (which has its own
+/// synchronization) and then append to `_entries` under the lock. The `entries`
+/// accessor also acquires the lock, so snapshots are safe to read from any thread.
 public final class TracingBLETransport: BLETransport, @unchecked Sendable {
     private let inner: BLETransport
     private let startTime: Date
+    /// Protects `_entries`. Acquired for every append and every snapshot read.
     private let lock = NSLock()
     private var _entries: [TransportTraceEntry] = []
 

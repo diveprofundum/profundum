@@ -62,7 +62,15 @@ import LibDivecomputerFFI
 /// Orchestrates the libdivecomputer download sequence:
 /// `dc_context_new -> IOStreamBridge.open -> dc_device_open -> dc_device_foreach -> parse`.
 ///
-/// All operations run on a dedicated serial queue, never the Swift cooperative thread pool.
+/// ## Thread Safety
+///
+/// Marked `@unchecked Sendable` because the class itself is stateless — it holds
+/// only a serial `DispatchQueue`. All mutable state lives in stack-local variables
+/// inside `performDownload()`, which runs synchronously on the serial queue via
+/// `queue.sync`. The `onDive`, `onProgress`, and `onCancel` callbacks are invoked
+/// on this same serial queue (from within `dc_device_foreach`), so callback
+/// closures that capture external mutable state must ensure their own
+/// synchronization (see `ImportCounts`).
 public final class DiveDownloadService: DiveDownloader, @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.divelog.download", qos: .userInitiated)
 

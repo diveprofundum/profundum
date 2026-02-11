@@ -10,6 +10,17 @@ private let bleLog = Logger(subsystem: "com.divelog.profundum", category: "BLETr
 /// All I/O is synchronous (blocking) via `DispatchSemaphore`, suitable for
 /// libdivecomputer's blocking read/write expectations. All blocking happens on
 /// dedicated dispatch queues, never the cooperative thread pool.
+///
+/// ## Thread Safety
+///
+/// Marked `@unchecked Sendable` because mutable state is protected manually:
+///
+/// - **`lock`** (`NSLock`) guards all mutable state: `readBuffer`, `lastError`,
+///   and `isClosed`. Every read or write of these properties acquires the lock.
+/// - **Semaphores** (`readSemaphore`, `writeSemaphore`, `writeReadySemaphore`)
+///   are signalled *after* releasing the lock to unblock waiting threads safely.
+/// - **Callers** must not call `read`/`write` from the main actor or the Swift
+///   cooperative thread pool — use a dedicated `DispatchQueue`.
 final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable {
     /// Set to `true` to enable detailed BLE-level logging via os_log.
     static var enableLogging = false
@@ -20,9 +31,11 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
     /// `.writeWithoutResponse` is required by most BLE dive computers (Shearwater, etc.).
     private let writeType: CBCharacteristicWriteType
 
-    /// Internal buffer for data received via BLE notifications.
+    /// Guards all mutable state: `readBuffer`, `lastError`, `isClosed`.
+    private let lock = NSLock()
+
+    /// Internal buffer for data received via BLE notifications. Protected by `lock`.
     private var readBuffer = Data()
-    private let bufferLock = NSLock()
 
     /// Semaphore signalled when new data arrives from `didUpdateValueFor`.
     private let readSemaphore = DispatchSemaphore(value: 0)
@@ -33,10 +46,10 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
     /// Semaphore signalled when the peripheral is ready for another `.withoutResponse` write.
     private let writeReadySemaphore = DispatchSemaphore(value: 0)
 
-    /// Last error reported by the peripheral delegate.
+    /// Last error reported by the peripheral delegate. Protected by `lock`.
     private var lastError: Error?
 
-    /// Whether the transport has been closed.
+    /// Whether the transport has been closed. Protected by `lock`.
     private var isClosed = false
 
     var deviceName: String? {
@@ -70,7 +83,12 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
     }
 
     func read(count: Int, timeout: TimeInterval) throws -> Data {
-        guard !isClosed else { throw DiveComputerError.disconnected }
+        lock.lock()
+        if isClosed {
+            lock.unlock()
+            throw DiveComputerError.disconnected
+        }
+        lock.unlock()
 
         let deadline: DispatchTime = timeout == .infinity
             ? .distantFuture
@@ -81,14 +99,14 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         // drained all at once but the semaphore retains extra signals.
         while true {
             // Check if we already have buffered data
-            bufferLock.lock()
+            lock.lock()
             if !readBuffer.isEmpty {
                 let deliverable = readBuffer.prefix(count)
                 readBuffer = Data(readBuffer.dropFirst(deliverable.count))
-                bufferLock.unlock()
+                lock.unlock()
                 return Data(deliverable)
             }
-            bufferLock.unlock()
+            lock.unlock()
 
             // No data available — wait for a notification
             let result = readSemaphore.wait(timeout: deadline)
@@ -96,10 +114,15 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
                 throw DiveComputerError.timeout
             }
 
-            guard !isClosed else { throw DiveComputerError.disconnected }
+            lock.lock()
+            let closed = isClosed
+            let error = lastError
+            if error != nil { lastError = nil }
+            lock.unlock()
 
-            if let error = lastError {
-                lastError = nil
+            if closed { throw DiveComputerError.disconnected }
+
+            if let error {
                 throw DiveComputerError.libdivecomputer(
                     status: -1,
                     message: error.localizedDescription
@@ -112,7 +135,12 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
     }
 
     func write(_ data: Data, timeout: TimeInterval) throws {
-        guard !isClosed else { throw DiveComputerError.disconnected }
+        lock.lock()
+        if isClosed {
+            lock.unlock()
+            throw DiveComputerError.disconnected
+        }
+        lock.unlock()
 
         // Chunk writes to the peripheral's MTU to avoid silent truncation.
         let mtu = peripheral.maximumWriteValueLength(for: writeType)
@@ -121,7 +149,12 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         var chunkIndex = 0
 
         while offset < data.count {
-            guard !isClosed else { throw DiveComputerError.disconnected }
+            lock.lock()
+            if isClosed {
+                lock.unlock()
+                throw DiveComputerError.disconnected
+            }
+            lock.unlock()
 
             let chunkSize = min(mtu, data.count - offset)
             let chunk = data.subdata(in: offset..<(offset + chunkSize))
@@ -144,7 +177,10 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
                     if result == .timedOut {
                         throw DiveComputerError.timeout
                     }
-                    guard !isClosed else { throw DiveComputerError.disconnected }
+                    lock.lock()
+                    let closed = isClosed
+                    lock.unlock()
+                    if closed { throw DiveComputerError.disconnected }
                 }
                 peripheral.writeValue(chunk, for: characteristic, type: .withoutResponse)
             } else {
@@ -157,8 +193,13 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
                 if result == .timedOut {
                     throw DiveComputerError.timeout
                 }
-                if let error = lastError {
-                    lastError = nil
+
+                lock.lock()
+                let error = lastError
+                if error != nil { lastError = nil }
+                lock.unlock()
+
+                if let error {
                     throw DiveComputerError.libdivecomputer(
                         status: -1,
                         message: error.localizedDescription
@@ -172,22 +213,24 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
     }
 
     func purge() throws {
-        bufferLock.lock()
+        lock.lock()
         readBuffer = Data()
-        bufferLock.unlock()
+        lock.unlock()
     }
 
     func close() throws {
-        guard !isClosed else { return }
+        lock.lock()
+        guard !isClosed else {
+            lock.unlock()
+            return
+        }
         isClosed = true
+        readBuffer = Data()
+        lock.unlock()
 
         if characteristic.isNotifying {
             peripheral.setNotifyValue(false, for: characteristic)
         }
-
-        bufferLock.lock()
-        readBuffer = Data()
-        bufferLock.unlock()
 
         // Unblock any waiting reads/writes
         readSemaphore.signal()
@@ -208,7 +251,9 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
             if Self.enableLogging {
                 bleLog.error("NOTIFY error: \(error.localizedDescription)")
             }
+            lock.lock()
             lastError = error
+            lock.unlock()
             readSemaphore.signal()
             return
         }
@@ -219,9 +264,9 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
             bleLog.info("NOTIFY received: \(value.count) bytes")
         }
 
-        bufferLock.lock()
+        lock.lock()
         readBuffer.append(value)
-        bufferLock.unlock()
+        lock.unlock()
 
         readSemaphore.signal()
     }
@@ -232,7 +277,9 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
         error: Error?
     ) {
         if let error {
+            lock.lock()
             lastError = error
+            lock.unlock()
         }
         writeSemaphore.signal()
     }

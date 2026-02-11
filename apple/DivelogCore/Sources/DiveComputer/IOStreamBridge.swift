@@ -8,6 +8,16 @@ import LibDivecomputerFFI
 /// All libdivecomputer calls happen on a dedicated `DispatchQueue`, never the
 /// Swift cooperative thread pool. The bridge simply forwards read/write calls
 /// to the transport synchronously.
+///
+/// ## Thread Safety
+///
+/// `IOStreamBridge` is not `Sendable`-conforming because it is owned and used
+/// exclusively by `DiveDownloadService`'s serial queue. The C callback free
+/// functions access `transport` and `currentTimeout` via an `Unmanaged` pointer,
+/// but all callbacks are invoked by libdivecomputer on the same serial queue
+/// that called `dc_device_open` / `dc_device_foreach`, so no concurrent access
+/// occurs. The `fileprivate` access level on stored properties is required so
+/// the free functions (in the same file) can reach them.
 public final class IOStreamBridge {
     fileprivate let transport: BLETransport
     fileprivate var currentTimeout: TimeInterval = 10.0
