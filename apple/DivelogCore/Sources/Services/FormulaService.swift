@@ -144,7 +144,8 @@ public final class FormulaService: Sendable {
                 tempC: sample.tempC,
                 setpointPpo2: sample.setpointPpo2,
                 ceilingM: sample.ceilingM,
-                gf99: sample.gf99
+                gf99: sample.gf99,
+                gasmixIndex: sample.gasmixIndex.map { Int32($0) }
             )
         }
 
@@ -159,7 +160,8 @@ public final class FormulaService: Sendable {
                 tempC: sample.tempC,
                 setpointPpo2: sample.setpointPpo2,
                 ceilingM: sample.ceilingM,
-                gf99: sample.gf99
+                gf99: sample.gf99,
+                gasmixIndex: sample.gasmixIndex.map { Int32($0) }
             )
         }
 

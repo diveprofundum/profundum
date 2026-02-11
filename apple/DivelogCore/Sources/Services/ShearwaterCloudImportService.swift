@@ -1,6 +1,13 @@
 import Foundation
 import GRDB
 
+/// Key for deduplicating gas mixes by composition and usage.
+private struct GasMixKey: Hashable {
+    let o2: Int   // o2Fraction * 1000 as integer for reliable hashing
+    let he: Int   // heFraction * 1000 as integer for reliable hashing
+    let usage: String?
+}
+
 /// Result of a Shearwater Cloud `.db` file import.
 public struct ShearwaterCloudImportResult: Equatable, Sendable {
     public var totalDivesInFile: Int
@@ -287,9 +294,18 @@ public final class ShearwaterCloudImportService: Sendable {
             }
 
             if let existingFpRecord = existingFp {
-                // Partial merge: add new samples and fingerprints to existing dive
+                // Partial merge: add new samples, fingerprints, and gas mixes to existing dive
                 let existingDiveId = existingFpRecord.diveId
                 try database.dbQueue.write { db in
+                    // Build seen-set from existing gas mixes for this dive
+                    let existingMixes = try GasMix
+                        .filter(Column("dive_id") == existingDiveId)
+                        .fetchAll(db)
+                    var seenMixes = Set<GasMixKey>(existingMixes.map {
+                        GasMixKey(o2: Int($0.o2Fraction * 1000), he: Int($0.heFraction * 1000), usage: $0.usage)
+                    })
+                    var nextMixIndex = (existingMixes.map(\.mixIndex).max() ?? -1) + 1
+
                     for ir in group {
                         // Skip if this specific fingerprint already exists
                         let fpExists = try DiveSourceFingerprint
@@ -332,6 +348,23 @@ public final class ShearwaterCloudImportService: Sendable {
                                 rbtSec: sample.rbtSec,
                                 gasmixIndex: sample.gasmixIndex
                             ).insert(db)
+                        }
+
+                        // Insert new unique gas mixes from this device
+                        for mix in parsedInfo.gasMixes {
+                            let key = GasMixKey(o2: Int(mix.o2Fraction * 1000),
+                                                he: Int(mix.heFraction * 1000),
+                                                usage: mix.usage)
+                            if seenMixes.insert(key).inserted {
+                                try GasMix(
+                                    diveId: existingDiveId,
+                                    mixIndex: nextMixIndex,
+                                    o2Fraction: mix.o2Fraction,
+                                    heFraction: mix.heFraction,
+                                    usage: mix.usage
+                                ).insert(db)
+                                nextMixIndex += 1
+                            }
                         }
 
                         divesMerged += 1
@@ -473,12 +506,7 @@ public final class ShearwaterCloudImportService: Sendable {
 
                 // Insert source fingerprints + samples from each device
                 // Collect gas mixes across all devices, deduplicating by (o2, he, usage)
-                struct MixKey: Hashable {
-                    let o2: Int  // o2Fraction * 1000 as integer for reliable hashing
-                    let he: Int
-                    let usage: String?
-                }
-                var seenMixes = Set<MixKey>()
+                var seenMixes = Set<GasMixKey>()
                 var uniqueMixes: [ParsedGasMix] = []
 
                 for pr in parseResults {
@@ -513,9 +541,9 @@ public final class ShearwaterCloudImportService: Sendable {
                     }
 
                     for mix in pr.parsedInfo.gasMixes {
-                        let key = MixKey(o2: Int(mix.o2Fraction * 1000),
-                                         he: Int(mix.heFraction * 1000),
-                                         usage: mix.usage)
+                        let key = GasMixKey(o2: Int(mix.o2Fraction * 1000),
+                                            he: Int(mix.heFraction * 1000),
+                                            usage: mix.usage)
                         if seenMixes.insert(key).inserted {
                             uniqueMixes.append(mix)
                         }

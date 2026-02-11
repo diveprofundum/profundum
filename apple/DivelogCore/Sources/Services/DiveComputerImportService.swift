@@ -1,6 +1,13 @@
 import Foundation
 import GRDB
 
+/// Key for deduplicating gas mixes by composition and usage.
+private struct GasMixKey: Hashable {
+    let o2: Int   // o2Fraction * 1000 as integer for reliable hashing
+    let he: Int   // heFraction * 1000 as integer for reliable hashing
+    let usage: String?
+}
+
 /// Service for importing dives from a dive computer.
 ///
 /// All libdivecomputer operations run on a dedicated serial queue,
@@ -59,6 +66,20 @@ public final class DiveComputerImportService: Sendable {
 
         let (dive, samples, gasMixes) = DiveDataMapper.toDive(parsed, deviceId: deviceId)
 
+        // Deduplicate gas mixes by (o2, he, usage)
+        var seenMixes = Set<GasMixKey>()
+        var uniqueMixes: [GasMix] = []
+        for mix in gasMixes {
+            let key = GasMixKey(o2: Int(mix.o2Fraction * 1000), he: Int(mix.heFraction * 1000), usage: mix.usage)
+            if seenMixes.insert(key).inserted {
+                uniqueMixes.append(mix)
+            }
+        }
+        // Re-index sequentially
+        for i in uniqueMixes.indices {
+            uniqueMixes[i].mixIndex = i
+        }
+
         try database.dbQueue.write { db in
             // Double-check inside the transaction to avoid TOCTOU races
             if let fp = dive.fingerprint {
@@ -72,7 +93,7 @@ public final class DiveComputerImportService: Sendable {
             for sample in samples {
                 try sample.insert(db)
             }
-            for mix in gasMixes {
+            for mix in uniqueMixes {
                 try mix.insert(db)
             }
         }

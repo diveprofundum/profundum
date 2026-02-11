@@ -580,8 +580,8 @@ final class FormulaServiceTests: XCTestCase {
         let stats = DivelogCompute.computeDiveStats(
             dive: DiveInput(startTimeUnix: 1700000000, endTimeUnix: 1700003600, bottomTimeSec: 3000),
             samples: [
-                SampleInput(tSec: 0, depthM: 0.0, tempC: 22.0, setpointPpo2: nil, ceilingM: nil, gf99: nil),
-                SampleInput(tSec: 300, depthM: 30.0, tempC: 16.0, setpointPpo2: nil, ceilingM: nil, gf99: nil),
+                SampleInput(tSec: 0, depthM: 0.0, tempC: 22.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil),
+                SampleInput(tSec: 300, depthM: 30.0, tempC: 16.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil),
             ]
         )
 
@@ -610,9 +610,9 @@ final class FormulaServiceTests: XCTestCase {
             startTSec: 60,
             endTSec: 300,
             samples: [
-                SampleInput(tSec: 60, depthM: 10.0, tempC: 20.0, setpointPpo2: nil, ceilingM: nil, gf99: nil),
-                SampleInput(tSec: 180, depthM: 25.0, tempC: 18.0, setpointPpo2: nil, ceilingM: nil, gf99: nil),
-                SampleInput(tSec: 300, depthM: 15.0, tempC: 19.0, setpointPpo2: nil, ceilingM: nil, gf99: nil),
+                SampleInput(tSec: 60, depthM: 10.0, tempC: 20.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil),
+                SampleInput(tSec: 180, depthM: 25.0, tempC: 18.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil),
+                SampleInput(tSec: 300, depthM: 15.0, tempC: 19.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil),
             ]
         )
 
@@ -636,8 +636,8 @@ final class FormulaServiceTests: XCTestCase {
         let stats = DivelogCompute.computeDiveStats(
             dive: DiveInput(startTimeUnix: 1700000000, endTimeUnix: 1700003600, bottomTimeSec: 3000),
             samples: [
-                SampleInput(tSec: 0, depthM: 0.0, tempC: 22.0, setpointPpo2: nil, ceilingM: nil, gf99: nil),
-                SampleInput(tSec: 300, depthM: 30.0, tempC: 16.0, setpointPpo2: nil, ceilingM: nil, gf99: nil),
+                SampleInput(tSec: 0, depthM: 0.0, tempC: 22.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil),
+                SampleInput(tSec: 300, depthM: 30.0, tempC: 16.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil),
             ]
         )
 

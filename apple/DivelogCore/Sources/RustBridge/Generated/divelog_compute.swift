@@ -867,16 +867,18 @@ public struct SampleInput {
     public var setpointPpo2: Float?
     public var ceilingM: Float?
     public var gf99: Float?
+    public var gasmixIndex: Int32?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(tSec: Int32, depthM: Float, tempC: Float, setpointPpo2: Float?, ceilingM: Float?, gf99: Float?) {
+    public init(tSec: Int32, depthM: Float, tempC: Float, setpointPpo2: Float?, ceilingM: Float?, gf99: Float?, gasmixIndex: Int32?) {
         self.tSec = tSec
         self.depthM = depthM
         self.tempC = tempC
         self.setpointPpo2 = setpointPpo2
         self.ceilingM = ceilingM
         self.gf99 = gf99
+        self.gasmixIndex = gasmixIndex
     }
 }
 
@@ -902,6 +904,9 @@ extension SampleInput: Equatable, Hashable {
         if lhs.gf99 != rhs.gf99 {
             return false
         }
+        if lhs.gasmixIndex != rhs.gasmixIndex {
+            return false
+        }
         return true
     }
 
@@ -912,6 +917,7 @@ extension SampleInput: Equatable, Hashable {
         hasher.combine(setpointPpo2)
         hasher.combine(ceilingM)
         hasher.combine(gf99)
+        hasher.combine(gasmixIndex)
     }
 }
 
@@ -928,7 +934,8 @@ public struct FfiConverterTypeSampleInput: FfiConverterRustBuffer {
                 tempC: FfiConverterFloat.read(from: &buf), 
                 setpointPpo2: FfiConverterOptionFloat.read(from: &buf), 
                 ceilingM: FfiConverterOptionFloat.read(from: &buf), 
-                gf99: FfiConverterOptionFloat.read(from: &buf)
+                gf99: FfiConverterOptionFloat.read(from: &buf), 
+                gasmixIndex: FfiConverterOptionInt32.read(from: &buf)
         )
     }
 
@@ -939,6 +946,7 @@ public struct FfiConverterTypeSampleInput: FfiConverterRustBuffer {
         FfiConverterOptionFloat.write(value.setpointPpo2, into: &buf)
         FfiConverterOptionFloat.write(value.ceilingM, into: &buf)
         FfiConverterOptionFloat.write(value.gf99, into: &buf)
+        FfiConverterOptionInt32.write(value.gasmixIndex, into: &buf)
     }
 }
 
@@ -1241,6 +1249,30 @@ extension FormulaError: Equatable, Hashable {}
 extension FormulaError: Foundation.LocalizedError {
     public var errorDescription: String? {
         String(reflecting: self)
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionInt32: FfiConverterRustBuffer {
+    typealias SwiftType = Int32?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterInt32.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterInt32.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
     }
 }
 

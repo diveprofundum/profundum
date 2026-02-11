@@ -664,4 +664,61 @@ final class DiveComputerTests: XCTestCase {
         let single = Data([0x00])
         XCTAssertEqual(single.hexDump, "00")
     }
+
+    // MARK: - Gas Mix Dedup Tests
+
+    func testSaveImportedDiveDeduplicatesGasMixes() throws {
+        let device = Device(model: "Test", serialNumber: "SN", firmwareVersion: "1.0")
+        try diveService.saveDevice(device)
+
+        let parsed = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            fingerprint: Data([0xDE, 0xAD]),
+            gasMixes: [
+                ParsedGasMix(index: 0, o2Fraction: 0.21, heFraction: 0.0),
+                ParsedGasMix(index: 1, o2Fraction: 0.21, heFraction: 0.0),  // duplicate
+                ParsedGasMix(index: 2, o2Fraction: 0.50, heFraction: 0.0, usage: "oxygen"),
+            ]
+        )
+
+        try importService.saveImportedDive(parsed, deviceId: device.id)
+
+        let dives = try diveService.listDives()
+        let mixes = try diveService.getGasMixes(diveId: dives.first!.id)
+        XCTAssertEqual(mixes.count, 2, "Duplicate gas mixes should be removed")
+        XCTAssertEqual(mixes[0].o2Fraction, 0.21)
+        XCTAssertEqual(mixes[1].o2Fraction, 0.50)
+        // Verify sequential re-indexing
+        XCTAssertEqual(mixes[0].mixIndex, 0)
+        XCTAssertEqual(mixes[1].mixIndex, 1)
+    }
+
+    func testGetGasMixesDeduplicatesAtReadTime() throws {
+        let device = Device(model: "Test", serialNumber: "SN", firmwareVersion: "1.0")
+        try diveService.saveDevice(device)
+
+        let dive = Dive(
+            deviceId: device.id,
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000
+        )
+        try diveService.saveDive(dive)
+
+        // Manually insert duplicate gas mixes (simulating pre-fix data)
+        try diveService.saveGasMixes([
+            GasMix(diveId: dive.id, mixIndex: 0, o2Fraction: 0.21, heFraction: 0.0),
+            GasMix(diveId: dive.id, mixIndex: 1, o2Fraction: 0.21, heFraction: 0.0),
+            GasMix(diveId: dive.id, mixIndex: 2, o2Fraction: 0.32, heFraction: 0.0, usage: "none"),
+        ])
+
+        let mixes = try diveService.getGasMixes(diveId: dive.id)
+        XCTAssertEqual(mixes.count, 2, "Read-time dedup should remove duplicates")
+    }
 }

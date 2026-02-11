@@ -65,6 +65,8 @@ pub struct SampleInput {
     pub ceiling_m: Option<f32>,
     /// GF99 value (optional)
     pub gf99: Option<f32>,
+    /// Gas mix index (identifies which gas is being breathed)
+    pub gasmix_index: Option<i32>,
 }
 
 /// Computed statistics for a dive.
@@ -125,9 +127,9 @@ impl DiveStats {
         let mut max_ceiling_m: f32 = 0.0;
         let mut max_gf99: f32 = 0.0;
 
-        // Gas switch detection
+        // Gas switch detection (by gasmix_index changes)
         let mut gas_switch_count: u32 = 0;
-        let mut prev_setpoint: Option<f32> = None;
+        let mut prev_gasmix_index: Option<i32> = None;
 
         // Bottom time (depth > 3m)
         let mut bottom_time_sec: i32 = 0;
@@ -183,14 +185,14 @@ impl DiveStats {
                 }
             }
 
-            // Gas switch detection
-            if let Some(setpoint) = sample.setpoint_ppo2 {
-                if let Some(prev) = prev_setpoint {
-                    if (setpoint - prev).abs() > 0.05 {
+            // Gas switch detection: count changes in gasmix_index
+            if let Some(idx) = sample.gasmix_index {
+                if let Some(prev) = prev_gasmix_index {
+                    if idx != prev {
                         gas_switch_count += 1;
                     }
                 }
-                prev_setpoint = Some(setpoint);
+                prev_gasmix_index = Some(idx);
             }
 
             // Bottom time (below 3m threshold)
@@ -428,6 +430,7 @@ mod tests {
                 setpoint_ppo2: Some(1.0),
                 ceiling_m: Some(0.0),
                 gf99: Some(0.0),
+                gasmix_index: None,
             },
             SampleInput {
                 t_sec: 60,
@@ -436,6 +439,7 @@ mod tests {
                 setpoint_ppo2: Some(1.0),
                 ceiling_m: Some(0.0),
                 gf99: Some(20.0),
+                gasmix_index: None,
             },
             SampleInput {
                 t_sec: 120,
@@ -444,6 +448,7 @@ mod tests {
                 setpoint_ppo2: Some(1.3),
                 ceiling_m: Some(0.0),
                 gf99: Some(40.0),
+                gasmix_index: None,
             },
             SampleInput {
                 t_sec: 300,
@@ -452,6 +457,7 @@ mod tests {
                 setpoint_ppo2: Some(1.3),
                 ceiling_m: Some(3.0),
                 gf99: Some(60.0),
+                gasmix_index: None,
             },
             SampleInput {
                 t_sec: 600,
@@ -460,6 +466,7 @@ mod tests {
                 setpoint_ppo2: Some(1.3),
                 ceiling_m: Some(6.0),
                 gf99: Some(80.0),
+                gasmix_index: None,
             },
             SampleInput {
                 t_sec: 900,
@@ -468,6 +475,7 @@ mod tests {
                 setpoint_ppo2: Some(1.0),
                 ceiling_m: Some(3.0),
                 gf99: Some(70.0),
+                gasmix_index: None,
             },
             SampleInput {
                 t_sec: 1200,
@@ -476,6 +484,7 @@ mod tests {
                 setpoint_ppo2: Some(1.0),
                 ceiling_m: Some(0.0),
                 gf99: Some(50.0),
+                gasmix_index: None,
             },
             SampleInput {
                 t_sec: 1500,
@@ -484,6 +493,7 @@ mod tests {
                 setpoint_ppo2: Some(1.0),
                 ceiling_m: Some(0.0),
                 gf99: Some(30.0),
+                gasmix_index: None,
             },
         ]
     }
@@ -513,7 +523,7 @@ mod tests {
         assert!(stats.deco_time_sec > 0);
         assert_eq!(stats.max_ceiling_m, 6.0);
         assert_eq!(stats.max_gf99, 80.0);
-        assert_eq!(stats.gas_switch_count, 2); // 1.0 -> 1.3 -> 1.0
+        assert_eq!(stats.gas_switch_count, 0); // all gasmix_index are None
         assert_eq!(stats.depth_class, DepthClass::Deep);
         assert!(stats.descent_rate_m_min > 0.0);
         assert!(stats.ascent_rate_m_min > 0.0);
@@ -548,5 +558,132 @@ mod tests {
         assert_eq!(stats.duration_sec, 1000);
         assert_eq!(stats.sample_count, 0);
         assert_eq!(stats.max_depth_m, 0.0);
+    }
+
+    #[test]
+    fn test_gas_switch_count_by_gasmix_index() {
+        let dive = create_test_dive();
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: Some(0),
+            },
+            SampleInput {
+                t_sec: 60,
+                depth_m: 10.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: Some(0),
+            },
+            SampleInput {
+                t_sec: 120,
+                depth_m: 20.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: Some(1),
+            }, // switch 1
+            SampleInput {
+                t_sec: 300,
+                depth_m: 30.0,
+                temp_c: 16.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: Some(1),
+            },
+            SampleInput {
+                t_sec: 600,
+                depth_m: 20.0,
+                temp_c: 17.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: Some(0),
+            }, // switch 2
+            SampleInput {
+                t_sec: 900,
+                depth_m: 5.0,
+                temp_c: 19.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: Some(0),
+            },
+        ];
+        let stats = DiveStats::compute(&dive, &samples);
+        assert_eq!(stats.gas_switch_count, 2);
+    }
+
+    #[test]
+    fn test_gas_switch_count_setpoint_noise_ignored() {
+        // CCR dive with fluctuating setpoint but constant gasmix_index — no gas switches
+        let dive = create_test_dive();
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: Some(0.7),
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: Some(0),
+            },
+            SampleInput {
+                t_sec: 60,
+                depth_m: 10.0,
+                temp_c: 20.0,
+                setpoint_ppo2: Some(1.0),
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: Some(0),
+            },
+            SampleInput {
+                t_sec: 120,
+                depth_m: 20.0,
+                temp_c: 18.0,
+                setpoint_ppo2: Some(1.3),
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: Some(0),
+            },
+            SampleInput {
+                t_sec: 300,
+                depth_m: 30.0,
+                temp_c: 16.0,
+                setpoint_ppo2: Some(1.3),
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: Some(0),
+            },
+            SampleInput {
+                t_sec: 600,
+                depth_m: 20.0,
+                temp_c: 17.0,
+                setpoint_ppo2: Some(1.0),
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: Some(0),
+            },
+            SampleInput {
+                t_sec: 900,
+                depth_m: 5.0,
+                temp_c: 19.0,
+                setpoint_ppo2: Some(0.7),
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: Some(0),
+            },
+        ];
+        let stats = DiveStats::compute(&dive, &samples);
+        assert_eq!(stats.gas_switch_count, 0);
     }
 }
