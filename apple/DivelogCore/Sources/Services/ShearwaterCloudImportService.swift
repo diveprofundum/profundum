@@ -40,7 +40,10 @@ public final class ShearwaterCloudImportService: Sendable {
     ///   - path: Path to the Shearwater Cloud SQLite database file.
     ///   - progress: Optional callback `(current, total)` called after each dive is processed.
     /// - Returns: Import statistics.
-    public func importFromFile(at path: String, progress: ((Int, Int) -> Void)? = nil) throws -> ShearwaterCloudImportResult {
+    public func importFromFile(
+        at path: String,
+        progress: ((Int, Int) -> Void)? = nil
+    ) throws -> ShearwaterCloudImportResult {
         // Open the Shearwater DB read-only
         var config = Configuration()
         config.readonly = true
@@ -88,10 +91,9 @@ public final class ShearwaterCloudImportService: Sendable {
             }
 
             if let buddyField = stringFromRow(row, column: "Buddy"), !buddyField.isEmpty {
-                for name in buddyField.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }) {
-                    if !name.isEmpty {
-                        uniqueTeammateNames.insert(name)
-                    }
+                for name in buddyField.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) })
+                    where !name.isEmpty {
+                    uniqueTeammateNames.insert(name)
                 }
             }
         }
@@ -314,9 +316,16 @@ public final class ShearwaterCloudImportService: Sendable {
                         if fpExists { continue }
 
                         // Parse samples from this row
-                        let parsedInfo = self.parseRow(ir.row, dateFormatter: dateFormatter,
-                                                       calcValues: self.decodeJSON(ir.row["calculated_values_from_samples"] as DatabaseValue),
-                                                       metadata: self.decodeJSON(ir.row["data_bytes_2"] as DatabaseValue))
+                        let calcVals: CalculatedValues? = self.decodeJSON(
+                            ir.row["calculated_values_from_samples"] as DatabaseValue
+                        )
+                        let meta: DiveMetadata? = self.decodeJSON(
+                            ir.row["data_bytes_2"] as DatabaseValue
+                        )
+                        let parsedInfo = self.parseRow(
+                            ir.row, dateFormatter: dateFormatter,
+                            calcValues: calcVals, metadata: meta
+                        )
 
                         // Insert new fingerprint
                         try DiveSourceFingerprint(
@@ -388,10 +397,19 @@ public final class ShearwaterCloudImportService: Sendable {
             var parseResults: [RowParseResult] = []
 
             for ir in group {
-                let calcValues: CalculatedValues? = decodeJSON(ir.row["calculated_values_from_samples"] as DatabaseValue)
-                let metadata: DiveMetadata? = decodeJSON(ir.row["data_bytes_2"] as DatabaseValue)
-                let parsedInfo = parseRow(ir.row, dateFormatter: dateFormatter, calcValues: calcValues, metadata: metadata)
-                parseResults.append(RowParseResult(ir: ir, parsedInfo: parsedInfo))
+                let calcValues: CalculatedValues? = decodeJSON(
+                    ir.row["calculated_values_from_samples"] as DatabaseValue
+                )
+                let metadata: DiveMetadata? = decodeJSON(
+                    ir.row["data_bytes_2"] as DatabaseValue
+                )
+                let parsedInfo = parseRow(
+                    ir.row, dateFormatter: dateFormatter,
+                    calcValues: calcValues, metadata: metadata
+                )
+                parseResults.append(
+                    RowParseResult(ir: ir, parsedInfo: parsedInfo)
+                )
             }
 
             // Merge metadata across group
@@ -839,8 +857,8 @@ public final class ShearwaterCloudImportService: Sendable {
 }
 
 #if canImport(LibDivecomputerFFI)
-import LibDivecomputerFFI
 import CZlibHelper
+import LibDivecomputerFFI
 
 private func _parseBinaryDiveDataImpl(_ blob: Data) -> ParsedDive? {
     guard blob.count > 14 else { return nil }
@@ -1025,8 +1043,14 @@ private func _tryParseShearwaterBlob(_ blob: Data) -> ParsedDive? {
         }
 
         #if DEBUG
-        let ppo2Samples = sampleContext.samples.filter { $0.ppo2_1 != nil || $0.ppo2_2 != nil || $0.ppo2_3 != nil }.count
-        NSLog("[ShearwaterParse] PPO2 callbacks: \(sampleContext.ppo2CallbackCount), samples with PPO2: \(ppo2Samples)/\(sampleContext.samples.count), isCCR: \(isCcr)")
+        let ppo2Samples = sampleContext.samples.filter {
+            $0.ppo2_1 != nil || $0.ppo2_2 != nil || $0.ppo2_3 != nil
+        }.count
+        NSLog(
+            "[ShearwaterParse] PPO2 callbacks: \(sampleContext.ppo2CallbackCount), "
+            + "samples with PPO2: \(ppo2Samples)/\(sampleContext.samples.count), "
+            + "isCCR: \(isCcr)"
+        )
         #endif
 
         let endTimeUnix = startTimeUnix + Int64(diveTime)

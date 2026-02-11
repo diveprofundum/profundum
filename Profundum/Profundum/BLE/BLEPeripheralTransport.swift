@@ -60,7 +60,13 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
 
         if Self.enableLogging {
             let mtu = peripheral.maximumWriteValueLength(for: self.writeType)
-            bleLog.info("BLETransport init: writeType=\(self.writeType == .withoutResponse ? "withoutResponse" : "withResponse"), MTU=\(mtu), properties=\(String(describing: characteristic.properties.rawValue))")
+            let writeTypeName = self.writeType == .withoutResponse
+                ? "withoutResponse" : "withResponse"
+            let props = String(describing: characteristic.properties.rawValue)
+            bleLog.info(
+                "BLETransport init: writeType=\(writeTypeName), "
+                + "MTU=\(mtu), properties=\(props)"
+            )
         }
     }
 
@@ -122,7 +128,10 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
             let chunk = data.subdata(in: offset..<(offset + chunkSize))
 
             if Self.enableLogging {
-                bleLog.info("WRITE chunk \(chunkIndex + 1)/\(totalChunks): \(chunkSize) bytes (total \(data.count), offset \(offset))")
+                bleLog.info(
+                    "WRITE chunk \(chunkIndex + 1)/\(totalChunks): "
+                    + "\(chunkSize) bytes (total \(data.count), offset \(offset))"
+                )
             }
 
             if writeType == .withoutResponse {

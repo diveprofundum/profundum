@@ -1,4 +1,4 @@
-.PHONY: all test clean rust-test swift-test lint rust-lint swift-build \
+.PHONY: all test clean rust-test swift-test lint rust-lint swift-lint swift-build \
        xcframework swift-bindings libdivecomputer-xcframework verify help \
        version-check version-sync
 
@@ -31,6 +31,10 @@ rust-lint:
 	cd core && cargo fmt --check
 	cd core && cargo clippy --all-targets --all-features -- -D warnings
 
+# Lint Swift code
+swift-lint:
+	swiftlint lint --strict --config .swiftlint.yml
+
 # ──────────────────────────────────────────────────────────────
 # libdivecomputer (optional — only needed for BLE dive computer import)
 # ──────────────────────────────────────────────────────────────
@@ -57,7 +61,7 @@ swift-test: xcframework
 test: rust-test swift-test
 
 # Run all linters
-lint: rust-lint
+lint: rust-lint swift-lint
 
 # Verify XCFramework integrity
 verify:
@@ -100,7 +104,9 @@ help:
 	@echo "  make swift-test                 Run Swift package tests"
 	@echo ""
 	@echo "Quality targets:"
-	@echo "  make lint                       Run all linters (cargo fmt, clippy)"
+	@echo "  make lint                       Run all linters (Rust + Swift)"
+	@echo "  make rust-lint                  Run Rust linters (cargo fmt, clippy)"
+	@echo "  make swift-lint                 Run SwiftLint on Swift sources"
 	@echo "  make verify                     Verify XCFramework integrity"
 	@echo ""
 	@echo "Versioning:"

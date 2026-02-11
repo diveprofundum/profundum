@@ -1,6 +1,6 @@
-import SwiftUI
 import Charts
 import DivelogCore
+import SwiftUI
 
 struct DiveDetailView: View {
     @EnvironmentObject var appState: AppState
@@ -277,19 +277,44 @@ struct DiveDetailView: View {
 
             // Prefer dive model temps, fall back to computed stats
             if let minT = dive.minTempC {
-                StatCard(title: "Min Temp", value: UnitFormatter.formatTemperature(minT, unit: appState.temperatureUnit))
+                StatCard(
+                    title: "Min Temp",
+                    value: UnitFormatter.formatTemperature(
+                        minT, unit: appState.temperatureUnit
+                    )
+                )
             } else if let stats = stats {
-                StatCard(title: "Min Temp", value: UnitFormatter.formatTemperature(stats.minTempC, unit: appState.temperatureUnit))
+                StatCard(
+                    title: "Min Temp",
+                    value: UnitFormatter.formatTemperature(
+                        stats.minTempC, unit: appState.temperatureUnit
+                    )
+                )
             }
 
             if let maxT = dive.maxTempC {
-                StatCard(title: "Max Temp", value: UnitFormatter.formatTemperature(maxT, unit: appState.temperatureUnit))
+                StatCard(
+                    title: "Max Temp",
+                    value: UnitFormatter.formatTemperature(
+                        maxT, unit: appState.temperatureUnit
+                    )
+                )
             } else if let stats = stats {
-                StatCard(title: "Max Temp", value: UnitFormatter.formatTemperature(stats.maxTempC, unit: appState.temperatureUnit))
+                StatCard(
+                    title: "Max Temp",
+                    value: UnitFormatter.formatTemperature(
+                        stats.maxTempC, unit: appState.temperatureUnit
+                    )
+                )
             }
 
             if let avgT = dive.avgTempC {
-                StatCard(title: "Avg Temp", value: UnitFormatter.formatTemperature(avgT, unit: appState.temperatureUnit))
+                StatCard(
+                    title: "Avg Temp",
+                    value: UnitFormatter.formatTemperature(
+                        avgT, unit: appState.temperatureUnit
+                    )
+                )
             }
         }
     }
@@ -354,16 +379,35 @@ struct DiveDetailView: View {
                         StatCard(title: "Deco Time", value: "\(stats.decoTimeSec / 60) min")
                     }
                     if stats.descentRateMMin > 0 {
-                        StatCard(title: "Descent Rate", value: String(format: "%.1f %@/min", UnitFormatter.depth(stats.descentRateMMin, unit: appState.depthUnit), UnitFormatter.depthLabel(appState.depthUnit)))
+                        let descentVal = UnitFormatter.depth(
+                            stats.descentRateMMin, unit: appState.depthUnit
+                        )
+                        let descentLabel = UnitFormatter.depthLabel(appState.depthUnit)
+                        StatCard(
+                            title: "Descent Rate",
+                            value: String(format: "%.1f %@/min", descentVal, descentLabel)
+                        )
                     }
                     if stats.ascentRateMMin > 0 {
-                        StatCard(title: "Ascent Rate", value: String(format: "%.1f %@/min", UnitFormatter.depth(stats.ascentRateMMin, unit: appState.depthUnit), UnitFormatter.depthLabel(appState.depthUnit)))
+                        let ascentVal = UnitFormatter.depth(
+                            stats.ascentRateMMin, unit: appState.depthUnit
+                        )
+                        let ascentLabel = UnitFormatter.depthLabel(appState.depthUnit)
+                        StatCard(
+                            title: "Ascent Rate",
+                            value: String(format: "%.1f %@/min", ascentVal, ascentLabel)
+                        )
                     }
                     if stats.gasSwitchCount > 0 {
                         StatCard(title: "Gas Switches", value: "\(stats.gasSwitchCount)")
                     }
                     if stats.maxCeilingM > 0 {
-                        StatCard(title: "Max Ceiling", value: UnitFormatter.formatDepth(stats.maxCeilingM, unit: appState.depthUnit))
+                        StatCard(
+                            title: "Max Ceiling",
+                            value: UnitFormatter.formatDepth(
+                                stats.maxCeilingM, unit: appState.depthUnit
+                            )
+                        )
                     }
                     if stats.maxGf99 > 0 {
                         StatCard(title: "Max GF99", value: String(format: "%.0f%%", stats.maxGf99),
@@ -431,15 +475,27 @@ struct DiveDetailView: View {
             Text("CCR Information")
                 .font(.headline)
 
-            if dive.o2RateCuftMin != nil || dive.o2RateLMin != nil || dive.o2ConsumedPsi != nil || dive.o2ConsumedBar != nil {
+            let hasO2Data = dive.o2RateCuftMin != nil
+                || dive.o2RateLMin != nil
+                || dive.o2ConsumedPsi != nil
+                || dive.o2ConsumedBar != nil
+            if hasO2Data {
                 LazyVGrid(columns: [
                     GridItem(.flexible()),
                     GridItem(.flexible()),
                 ], spacing: 12) {
-                    if let formatted = UnitFormatter.formatO2Rate(cuftMin: dive.o2RateCuftMin, lMin: dive.o2RateLMin, unit: appState.pressureUnit) {
+                    if let formatted = UnitFormatter.formatO2Rate(
+                        cuftMin: dive.o2RateCuftMin,
+                        lMin: dive.o2RateLMin,
+                        unit: appState.pressureUnit
+                    ) {
                         StatCard(title: "O2 Rate", value: formatted)
                     }
-                    if let formatted = UnitFormatter.formatO2Consumed(psi: dive.o2ConsumedPsi, bar: dive.o2ConsumedBar, unit: appState.pressureUnit) {
+                    if let formatted = UnitFormatter.formatO2Consumed(
+                        psi: dive.o2ConsumedPsi,
+                        bar: dive.o2ConsumedBar,
+                        unit: appState.pressureUnit
+                    ) {
                         StatCard(title: "O2 Used", value: formatted)
                     }
                 }
@@ -555,7 +611,10 @@ struct DiveDetailView: View {
         do {
             let exportService = ExportService(database: appState.database)
             let data = try exportService.exportDives(ids: [dive.id])
-            let dateStr = formatDate(dive.startTimeUnix).replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-").replacingOccurrences(of: " ", with: "_")
+            let dateStr = formatDate(dive.startTimeUnix)
+                .replacingOccurrences(of: "/", with: "-")
+                .replacingOccurrences(of: ":", with: "-")
+                .replacingOccurrences(of: " ", with: "_")
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("dive-\(dateStr).json")
             try data.write(to: url)
             exportFileURL = url
@@ -640,7 +699,11 @@ private struct PPO2ChartData {
         for s in samples {
             let t = Float(s.tSec) / 60.0
             if let v = s.ppo2_1 {
-                points.append(PPO2DataPoint(timeMinutes: t, value: v, sensor: hasPer || s.ppo2_2 != nil || s.ppo2_3 != nil ? "S1" : "PPO2"))
+                let sensorLabel = hasPer || s.ppo2_2 != nil || s.ppo2_3 != nil
+                    ? "S1" : "PPO2"
+                points.append(PPO2DataPoint(
+                    timeMinutes: t, value: v, sensor: sensorLabel
+                ))
                 if v > maxP { maxP = v }
             }
             if let v = s.ppo2_2 {
@@ -693,7 +756,9 @@ struct PPO2Chart: View {
         guard let selectedTime else { return [] }
         let data = chartData
         // Find the closest time
-        guard let closestTime = data.dataPoints.min(by: { abs($0.timeMinutes - selectedTime) < abs($1.timeMinutes - selectedTime) })?.timeMinutes else {
+        guard let closestTime = data.dataPoints.min(by: {
+            abs($0.timeMinutes - selectedTime) < abs($1.timeMinutes - selectedTime)
+        })?.timeMinutes else {
             return []
         }
         return data.dataPoints.filter { abs($0.timeMinutes - closestTime) < 0.01 }
@@ -806,7 +871,7 @@ struct Badge: View {
 struct StatCard: View {
     let title: String
     let value: String
-    var color: Color? = nil
+    var color: Color?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {

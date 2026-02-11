@@ -1,6 +1,6 @@
+import DivelogCore
 import SwiftUI
 import UniformTypeIdentifiers
-import DivelogCore
 
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
@@ -29,7 +29,7 @@ struct SettingsView: View {
                         Text("HH:MM:SS").tag(TimeFormat.hhMmSs)
                         Text("MM:SS").tag(TimeFormat.mmSs)
                     }
-                    .onChange(of: timeFormat) { _, newValue in
+                    .onChange(of: timeFormat) { _, _ in
                         saveSettings()
                     }
                 }
@@ -102,7 +102,13 @@ struct SettingsView: View {
             ) { result in
                 handleImport(result)
             }
-            .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            .alert(
+                "Error",
+                isPresented: Binding(
+                    get: { errorMessage != nil },
+                    set: { if !$0 { errorMessage = nil } }
+                )
+            ) {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(errorMessage ?? "")
@@ -221,7 +227,13 @@ struct ExportSheet: View {
                     }
                 }
             }
-            .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            .alert(
+                "Error",
+                isPresented: Binding(
+                    get: { errorMessage != nil },
+                    set: { if !$0 { errorMessage = nil } }
+                )
+            ) {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(errorMessage ?? "")

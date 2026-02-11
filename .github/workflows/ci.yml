@@ -87,6 +87,25 @@ jobs:
         working-directory: core
 
   # ─────────────────────────────────────────────────────────
+  # Swift: lint (Linux, fast — catches style issues early)
+  # ─────────────────────────────────────────────────────────
+  swift-lint:
+    needs: changes
+    if: |
+      needs.changes.outputs.swift == 'true' ||
+      needs.changes.outputs.app == 'true' ||
+      needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SwiftLint
+        uses: norio-nomura/action-swiftlint@3.2.1
+
+      - name: Run SwiftLint
+        run: swiftlint lint --strict --config .swiftlint.yml
+
+  # ─────────────────────────────────────────────────────────
   # Swift: build + test (macOS)
   # Runs when Rust OR Swift sources change, since Swift
   # links the Rust XCFramework.

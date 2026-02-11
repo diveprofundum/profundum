@@ -1,6 +1,6 @@
-import SwiftUI
 import Charts
 import DivelogCore
+import SwiftUI
 
 struct DepthProfileChart: View {
     let samples: [DiveSample]

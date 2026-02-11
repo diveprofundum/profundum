@@ -1,5 +1,5 @@
-import SwiftUI
 import DivelogCore
+import SwiftUI
 
 /// A chip-style button for filtering by dive type (CCR, OC Deco, OC Rec).
 struct DiveTypeChipView: View {

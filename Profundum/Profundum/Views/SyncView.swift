@@ -1,7 +1,7 @@
-import SwiftUI
 import CoreBluetooth
-import UniformTypeIdentifiers
 import DivelogCore
+import SwiftUI
+import UniformTypeIdentifiers
 
 struct SyncView: View {
     @EnvironmentObject var appState: AppState
@@ -272,11 +272,19 @@ struct SyncView: View {
             if result.newDives > 0 || result.skippedDives > 0 {
                 VStack(spacing: 8) {
                     if result.newDives > 0 {
-                        Label("\(result.newDives) new dive\(result.newDives == 1 ? "" : "s") imported", systemImage: "plus.circle")
+                        let plural = result.newDives == 1 ? "" : "s"
+                        Label(
+                            "\(result.newDives) new dive\(plural) imported",
+                            systemImage: "plus.circle"
+                        )
                     }
                     if result.skippedDives > 0 {
-                        Label("\(result.skippedDives) duplicate\(result.skippedDives == 1 ? "" : "s") skipped", systemImage: "arrow.right.circle")
-                            .foregroundStyle(.secondary)
+                        let plural = result.skippedDives == 1 ? "" : "s"
+                        Label(
+                            "\(result.skippedDives) duplicate\(plural) skipped",
+                            systemImage: "arrow.right.circle"
+                        )
+                        .foregroundStyle(.secondary)
                     }
                 }
                 .font(.subheadline)
@@ -382,27 +390,51 @@ struct SyncView: View {
 
             VStack(spacing: 8) {
                 if result.divesImported > 0 {
-                    Label("\(result.divesImported) dive\(result.divesImported == 1 ? "" : "s") imported", systemImage: "plus.circle")
+                    let p = result.divesImported == 1 ? "" : "s"
+                    Label(
+                        "\(result.divesImported) dive\(p) imported",
+                        systemImage: "plus.circle"
+                    )
                 }
                 if result.divesSkipped > 0 {
-                    Label("\(result.divesSkipped) duplicate\(result.divesSkipped == 1 ? "" : "s") skipped", systemImage: "arrow.right.circle")
-                        .foregroundStyle(.secondary)
+                    let p = result.divesSkipped == 1 ? "" : "s"
+                    Label(
+                        "\(result.divesSkipped) duplicate\(p) skipped",
+                        systemImage: "arrow.right.circle"
+                    )
+                    .foregroundStyle(.secondary)
                 }
                 if result.devicesCreated > 0 {
-                    Label("\(result.devicesCreated) device\(result.devicesCreated == 1 ? "" : "s") created", systemImage: "cpu")
-                        .foregroundStyle(.secondary)
+                    let p = result.devicesCreated == 1 ? "" : "s"
+                    Label(
+                        "\(result.devicesCreated) device\(p) created",
+                        systemImage: "cpu"
+                    )
+                    .foregroundStyle(.secondary)
                 }
                 if result.sitesCreated > 0 {
-                    Label("\(result.sitesCreated) site\(result.sitesCreated == 1 ? "" : "s") created", systemImage: "mappin")
-                        .foregroundStyle(.secondary)
+                    let p = result.sitesCreated == 1 ? "" : "s"
+                    Label(
+                        "\(result.sitesCreated) site\(p) created",
+                        systemImage: "mappin"
+                    )
+                    .foregroundStyle(.secondary)
                 }
                 if result.teammatesCreated > 0 {
-                    Label("\(result.teammatesCreated) teammate\(result.teammatesCreated == 1 ? "" : "s") created", systemImage: "person.2")
-                        .foregroundStyle(.secondary)
+                    let p = result.teammatesCreated == 1 ? "" : "s"
+                    Label(
+                        "\(result.teammatesCreated) teammate\(p) created",
+                        systemImage: "person.2"
+                    )
+                    .foregroundStyle(.secondary)
                 }
                 if result.divesMerged > 0 {
-                    Label("\(result.divesMerged) dive\(result.divesMerged == 1 ? "" : "s") merged (multi-computer)", systemImage: "arrow.triangle.merge")
-                        .foregroundStyle(.secondary)
+                    let p = result.divesMerged == 1 ? "" : "s"
+                    Label(
+                        "\(result.divesMerged) dive\(p) merged (multi-computer)",
+                        systemImage: "arrow.triangle.merge"
+                    )
+                    .foregroundStyle(.secondary)
                 }
                 #if DEBUG
                 Label("PPO2 samples: \(result.samplesWithPpo2)", systemImage: "waveform.path.ecg")

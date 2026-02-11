@@ -1,0 +1,39 @@
+# SwiftLint configuration for Divelog
+# Aligned with existing code patterns and project conventions.
+
+included:
+  - apple/DivelogCore/Sources
+  - Profundum/Profundum
+
+excluded:
+  - .build
+  - DerivedData
+  - apple/DivelogCore/Sources/RustBridge/Generated  # UniFFI auto-generated code
+
+# ── Rule configuration ──────────────────────────────────────
+
+line_length:
+  warning: 120
+  error: 200
+
+# ── Disabled rules ──────────────────────────────────────────
+# These conflict with established project patterns.
+
+disabled_rules:
+  - trailing_comma                            # Project uses trailing commas in multi-line initializers
+  - identifier_name                           # GRDB CodingKeys use short names (id); libdivecomputer interop uses C-style names
+  - type_body_length                          # Data-heavy types (Dive has 43 properties, DiveDetailView is large)
+  - file_length                               # Several files exceed 400 lines due to data density
+  - function_body_length                      # SwiftUI body properties and migration blocks are inherently long
+  - large_tuple                               # Rust FFI returns (f32, f32) style tuples
+  - cyclomatic_complexity                     # Import services and BLE code have inherently complex multi-branch logic
+  - force_unwrapping                          # C interop (IOStreamBridge) and sample data factories use intentional force unwraps
+  - multiple_closures_with_trailing_closure   # Common SwiftUI pattern used extensively throughout views
+  - function_parameter_count                  # Data-creation functions (samples, downloads) naturally have many parameters
+
+# ── Opt-in rules ────────────────────────────────────────────
+
+opt_in_rules:
+  - empty_count              # Prefer .isEmpty over .count == 0
+  - closure_spacing          # Consistent closure brace spacing
+  - sorted_imports           # Keep imports alphabetical
