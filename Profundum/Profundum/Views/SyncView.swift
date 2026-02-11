@@ -191,14 +191,10 @@ struct SyncView: View {
                 }
             }
 
-            VStack(spacing: 2) {
-                Toggle("Full Sync", isOn: $forceFullSync)
-                    .font(.subheadline)
-                    .frame(maxWidth: 250)
-                Text("Downloads all dives instead of only new ones")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
+            Toggle("Full Sync", isOn: $forceFullSync)
+                .font(.subheadline)
+                .frame(maxWidth: 250)
+                .accessibilityHint("Downloads all dives instead of only new ones")
 
             HStack(spacing: 12) {
                 Button {
@@ -288,12 +284,14 @@ struct SyncView: View {
 
             HStack(spacing: 12) {
                 Button("Done") {
+                    forceFullSync = false
                     session.reset()
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
 
                 Button("Scan Again") {
+                    forceFullSync = false
                     session.reset()
                     session.startScan()
                 }
