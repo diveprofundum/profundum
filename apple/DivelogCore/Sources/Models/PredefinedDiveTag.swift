@@ -2,17 +2,16 @@ import Foundation
 import SwiftUI
 
 /// Dive type filters based on dive properties (computed, not stored as tags).
+/// Used in the list view filter bar to filter by breathing system.
 public enum DiveTypeFilter: String, CaseIterable, Sendable {
     case ccr
-    case ocDeco = "oc_deco"
-    case ocRec = "oc_rec"
+    case oc
 
     /// Display name for UI presentation.
     public var displayName: String {
         switch self {
         case .ccr: return "CCR"
-        case .ocDeco: return "OC Deco"
-        case .ocRec: return "OC Rec"
+        case .oc: return "OC"
         }
     }
 
@@ -20,8 +19,7 @@ public enum DiveTypeFilter: String, CaseIterable, Sendable {
     public var color: Color {
         switch self {
         case .ccr: return .blue
-        case .ocDeco: return .orange
-        case .ocRec: return .green
+        case .oc: return .green
         }
     }
 
@@ -30,17 +28,22 @@ public enum DiveTypeFilter: String, CaseIterable, Sendable {
         switch self {
         case .ccr:
             return dive.isCcr
-        case .ocDeco:
-            return !dive.isCcr && dive.decoRequired
-        case .ocRec:
-            return !dive.isCcr && !dive.decoRequired
+        case .oc:
+            return !dive.isCcr
         }
     }
 }
 
-/// Predefined dive tags for environment/activity filtering.
-/// These tags are stored in the dive_tags table.
+/// Predefined dive tags stored in the dive_tags table.
+/// Includes both breathing-system tags (mutually exclusive) and activity/environment tags.
 public enum PredefinedDiveTag: String, CaseIterable, Sendable {
+    // Breathing system tags (mutually exclusive)
+    case oc
+    case ccr
+
+    // Activity / environment tags
+    case rec
+    case deco
     case cave
     case wreck
     case reef
@@ -50,9 +53,54 @@ public enum PredefinedDiveTag: String, CaseIterable, Sendable {
     case training
     case technical
 
+    /// Tag category for UI grouping.
+    public enum Category: Equatable, Sendable {
+        case diveType
+        case activity
+    }
+
+    /// The category this tag belongs to.
+    public var category: Category {
+        switch self {
+        case .oc, .ccr:
+            return .diveType
+        case .rec, .deco, .cave, .wreck, .reef, .night, .shore, .deep, .training, .technical:
+            return .activity
+        }
+    }
+
+    /// All dive-type (breathing system) tags.
+    public static let diveTypeCases: [PredefinedDiveTag] =
+        allCases.filter { $0.category == .diveType }
+
+    /// All activity/environment tags.
+    public static let activityCases: [PredefinedDiveTag] =
+        allCases.filter { $0.category == .activity }
+
+    /// Returns the appropriate breathing-system tag for a dive's properties.
+    public static func diveTypeTag(isCcr: Bool) -> PredefinedDiveTag {
+        isCcr ? .ccr : .oc
+    }
+
+    /// Returns the activity tags to auto-apply based on dive properties.
+    /// Rec is only auto-applied for OC non-deco dives; CCR dives get no automatic activity tag.
+    public static func autoActivityTags(isCcr: Bool, decoRequired: Bool) -> [PredefinedDiveTag] {
+        if decoRequired {
+            return [.deco]
+        } else if !isCcr {
+            return [.rec]
+        } else {
+            return []
+        }
+    }
+
     /// Display name for UI presentation.
     public var displayName: String {
         switch self {
+        case .oc: return "OC"
+        case .ccr: return "CCR"
+        case .rec: return "Rec"
+        case .deco: return "Deco"
         case .cave: return "Cave"
         case .wreck: return "Wreck"
         case .reef: return "Reef"
@@ -67,6 +115,10 @@ public enum PredefinedDiveTag: String, CaseIterable, Sendable {
     /// Color for UI presentation.
     public var color: Color {
         switch self {
+        case .oc: return .green
+        case .ccr: return .blue
+        case .rec: return .mint
+        case .deco: return .orange
         case .cave: return .brown
         case .wreck: return .gray
         case .reef: return .cyan

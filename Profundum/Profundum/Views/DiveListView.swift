@@ -261,7 +261,7 @@ struct DiveListView: View {
                     Divider()
                         .frame(height: 20)
 
-                    ForEach(PredefinedDiveTag.allCases, id: \.self) { tag in
+                    ForEach(PredefinedDiveTag.activityCases, id: \.self) { tag in
                         TagChipView(
                             tag: tag,
                             isSelected: selectedTags.contains(tag)
@@ -417,13 +417,17 @@ struct DiveRowView: View {
 
     private var dive: Dive { diveWithSite.dive }
 
-    private var diveTypeBadge: (text: String, color: Color)? {
+    /// Badges for notable dive properties shown in the list row.
+    /// OC Rec is the default and doesn't need a badge.
+    private var rowBadges: [(text: String, color: Color)] {
+        var badges: [(String, Color)] = []
         if dive.isCcr {
-            return ("CCR", .blue)
-        } else if dive.decoRequired {
-            return ("OC Deco", .orange)
+            badges.append(("CCR", .blue))
         }
-        return nil
+        if dive.decoRequired {
+            badges.append(("Deco", .orange))
+        }
+        return badges
     }
 
     var body: some View {
@@ -442,7 +446,7 @@ struct DiveRowView: View {
 
                 Spacer()
 
-                if let badge = diveTypeBadge {
+                ForEach(rowBadges, id: \.text) { badge in
                     Text(badge.text)
                         .font(.caption)
                         .padding(.horizontal, 6)
@@ -486,6 +490,9 @@ struct DiveRowView: View {
         var label = "Dive on \(dateStr), \(depthStr), \(durationStr)"
         if let siteName = diveWithSite.siteName {
             label = "Dive on \(dateStr), \(siteName), \(depthStr), \(durationStr)"
+        }
+        if !rowBadges.isEmpty {
+            label += ", " + rowBadges.map(\.text).joined(separator: ", ")
         }
         return label
     }

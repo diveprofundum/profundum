@@ -334,6 +334,23 @@ public final class DivelogDatabase: Sendable {
             """)
         }
 
+        // Migration 9: Backfill breathing-system (oc, ccr) and activity (rec, deco) tags on existing dives
+        migrator.registerMigration("009_backfill_type_tags") { db in
+            try db.execute(sql: """
+                INSERT OR IGNORE INTO dive_tags (dive_id, tag)
+                SELECT id, 'ccr' FROM dives WHERE is_ccr = 1;
+
+                INSERT OR IGNORE INTO dive_tags (dive_id, tag)
+                SELECT id, 'oc' FROM dives WHERE is_ccr = 0;
+
+                INSERT OR IGNORE INTO dive_tags (dive_id, tag)
+                SELECT id, 'deco' FROM dives WHERE deco_required = 1;
+
+                INSERT OR IGNORE INTO dive_tags (dive_id, tag)
+                SELECT id, 'rec' FROM dives WHERE is_ccr = 0 AND deco_required = 0;
+            """)
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

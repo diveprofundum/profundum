@@ -232,6 +232,15 @@ public final class DiveService: Sendable {
         }
     }
 
+    /// Returns all custom (non-predefined) tags that have been used on any dive.
+    public func allCustomTags() throws -> [String] {
+        let predefinedRawValues = Set(PredefinedDiveTag.allCases.map(\.rawValue))
+        let allTags: [String] = try database.dbQueue.read { db in
+            try String.fetchAll(db, sql: "SELECT DISTINCT tag FROM dive_tags ORDER BY tag")
+        }
+        return allTags.filter { !predefinedRawValues.contains($0) }
+    }
+
     // MARK: - Batch Detail Loading
 
     /// All relations for a single dive, loaded in one read transaction.
