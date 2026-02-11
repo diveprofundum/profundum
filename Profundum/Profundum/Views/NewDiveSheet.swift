@@ -26,9 +26,11 @@ struct NewDiveSheet: View {
     @State private var newSiteName = ""
 
     // Tags
-    @State private var selectedTags: Set<PredefinedDiveTag> = []
+    @State private var selectedDiveTypeTag: PredefinedDiveTag = .ocRec
+    @State private var selectedActivityTags: Set<PredefinedDiveTag> = []
     @State private var customTags: [String] = []
     @State private var newCustomTag = ""
+    @State private var savedCustomTags: [String] = []
 
     // Teammates
     @State private var teammates: [Teammate] = []
@@ -89,6 +91,7 @@ struct NewDiveSheet: View {
                     sites = try appState.diveService.listSites()
                     teammates = try appState.diveService.listTeammates()
                     equipment = try appState.diveService.listEquipment()
+                    savedCustomTags = try appState.diveService.allCustomTags()
                 } catch {
                     errorMessage = "Failed to load form data: \(error.localizedDescription)"
                 }
@@ -112,7 +115,11 @@ struct NewDiveSheet: View {
 
                     for tag in editingTags {
                         if let predefined = PredefinedDiveTag(fromTag: tag) {
-                            selectedTags.insert(predefined)
+                            if predefined.category == .diveType {
+                                selectedDiveTypeTag = predefined
+                            } else {
+                                selectedActivityTags.insert(predefined)
+                            }
                         } else {
                             customTags.append(tag)
                         }
@@ -120,7 +127,22 @@ struct NewDiveSheet: View {
 
                     selectedTeammateIds = Set(editingTeammateIds)
                     selectedEquipmentIds = Set(editingEquipmentIds)
+                } else {
+                    // New dive: set initial dive type tag from toggles
+                    selectedDiveTypeTag = PredefinedDiveTag.diveTypeTag(
+                        isCcr: isCCR, decoRequired: decoRequired
+                    )
                 }
+            }
+            .onChange(of: isCCR) { _, _ in
+                selectedDiveTypeTag = PredefinedDiveTag.diveTypeTag(
+                    isCcr: isCCR, decoRequired: decoRequired
+                )
+            }
+            .onChange(of: decoRequired) { _, _ in
+                selectedDiveTypeTag = PredefinedDiveTag.diveTypeTag(
+                    isCcr: isCCR, decoRequired: decoRequired
+                )
             }
             .alert(
                 "Error",
@@ -251,16 +273,76 @@ struct NewDiveSheet: View {
 
     private var tagsSection: some View {
         Section("Tags") {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 80))], spacing: 8) {
-                ForEach(PredefinedDiveTag.allCases, id: \.self) { tag in
-                    TagChipView(
-                        tag: tag,
-                        isSelected: selectedTags.contains(tag)
-                    ) {
-                        if selectedTags.contains(tag) {
-                            selectedTags.remove(tag)
-                        } else {
-                            selectedTags.insert(tag)
+            // Dive Type (mutually exclusive)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Dive Type")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 80))], spacing: 8) {
+                    ForEach(PredefinedDiveTag.diveTypeCases, id: \.self) { tag in
+                        TagChipView(
+                            tag: tag,
+                            isSelected: selectedDiveTypeTag == tag
+                        ) {
+                            selectedDiveTypeTag = tag
+                            // Sync toggles with type tag
+                            isCCR = tag == .ccr
+                            decoRequired = tag == .ocDeco
+                        }
+                    }
+                }
+            }
+
+            // Activity tags (multi-select)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Activity")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 80))], spacing: 8) {
+                    ForEach(PredefinedDiveTag.activityCases, id: \.self) { tag in
+                        TagChipView(
+                            tag: tag,
+                            isSelected: selectedActivityTags.contains(tag)
+                        ) {
+                            if selectedActivityTags.contains(tag) {
+                                selectedActivityTags.remove(tag)
+                            } else {
+                                selectedActivityTags.insert(tag)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Recent custom tags as suggestion chips
+            if !savedCustomTags.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Recent Tags")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    FlowLayout(spacing: 6) {
+                        ForEach(savedCustomTags.filter { !customTags.contains($0) }, id: \.self) { tag in
+                            Button {
+                                if !customTags.contains(tag) {
+                                    customTags.append(tag)
+                                }
+                            } label: {
+                                Text(tag)
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(Color.secondary.opacity(0.1))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                                    )
+                                    .foregroundColor(.secondary)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -501,7 +583,13 @@ struct NewDiveSheet: View {
         let tag = newCustomTag.trimmingCharacters(in: .whitespaces).lowercased()
         guard !tag.isEmpty else { return }
         if let predefined = PredefinedDiveTag(fromTag: tag) {
-            selectedTags.insert(predefined)
+            if predefined.category == .diveType {
+                selectedDiveTypeTag = predefined
+                isCCR = predefined == .ccr
+                decoRequired = predefined == .ocDeco
+            } else {
+                selectedActivityTags.insert(predefined)
+            }
         } else if !customTags.contains(tag) {
             customTags.append(tag)
         }
@@ -564,7 +652,8 @@ struct NewDiveSheet: View {
             fingerprint: editingDive?.fingerprint
         )
 
-        var allTags = selectedTags.map { $0.rawValue }
+        var allTags = [selectedDiveTypeTag.rawValue]
+        allTags.append(contentsOf: selectedActivityTags.map(\.rawValue))
         allTags.append(contentsOf: customTags)
 
         do {

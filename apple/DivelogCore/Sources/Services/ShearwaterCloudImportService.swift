@@ -517,6 +517,10 @@ public final class ShearwaterCloudImportService: Sendable {
                 }
 
                 try dive.insert(db)
+                let typeTag = PredefinedDiveTag.diveTypeTag(
+                    isCcr: dive.isCcr, decoRequired: dive.decoRequired
+                )
+                try DiveTag(diveId: dive.id, tag: typeTag.rawValue).insert(db)
 
                 for teammateId in teammateIds {
                     try DiveTeammate(diveId: diveId, teammateId: teammateId).insert(db)

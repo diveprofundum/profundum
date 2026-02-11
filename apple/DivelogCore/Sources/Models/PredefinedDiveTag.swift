@@ -38,9 +38,15 @@ public enum DiveTypeFilter: String, CaseIterable, Sendable {
     }
 }
 
-/// Predefined dive tags for environment/activity filtering.
-/// These tags are stored in the dive_tags table.
+/// Predefined dive tags stored in the dive_tags table.
+/// Includes both dive-type tags and activity/environment tags.
 public enum PredefinedDiveTag: String, CaseIterable, Sendable {
+    // Dive type tags (mutually exclusive)
+    case ocRec = "oc_rec"
+    case ccr
+    case ocDeco = "oc_deco"
+
+    // Activity / environment tags
     case cave
     case wreck
     case reef
@@ -50,9 +56,49 @@ public enum PredefinedDiveTag: String, CaseIterable, Sendable {
     case training
     case technical
 
+    /// Tag category for UI grouping.
+    public enum Category: Sendable {
+        case diveType
+        case activity
+    }
+
+    /// The category this tag belongs to.
+    public var category: Category {
+        switch self {
+        case .ocRec, .ccr, .ocDeco:
+            return .diveType
+        case .cave, .wreck, .reef, .night, .shore, .deep, .training, .technical:
+            return .activity
+        }
+    }
+
+    /// All dive-type tags.
+    public static var diveTypeCases: [PredefinedDiveTag] {
+        allCases.filter { $0.category == .diveType }
+    }
+
+    /// All activity/environment tags.
+    public static var activityCases: [PredefinedDiveTag] {
+        allCases.filter { $0.category == .activity }
+    }
+
+    /// Returns the appropriate dive-type tag for a dive's properties.
+    public static func diveTypeTag(isCcr: Bool, decoRequired: Bool) -> PredefinedDiveTag {
+        if isCcr {
+            return .ccr
+        } else if decoRequired {
+            return .ocDeco
+        } else {
+            return .ocRec
+        }
+    }
+
     /// Display name for UI presentation.
     public var displayName: String {
         switch self {
+        case .ocRec: return "OC Rec"
+        case .ccr: return "CCR"
+        case .ocDeco: return "OC Deco"
         case .cave: return "Cave"
         case .wreck: return "Wreck"
         case .reef: return "Reef"
@@ -67,6 +113,9 @@ public enum PredefinedDiveTag: String, CaseIterable, Sendable {
     /// Color for UI presentation.
     public var color: Color {
         switch self {
+        case .ocRec: return .green
+        case .ccr: return .blue
+        case .ocDeco: return .orange
         case .cave: return .brown
         case .wreck: return .gray
         case .reef: return .cyan

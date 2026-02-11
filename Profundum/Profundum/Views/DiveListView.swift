@@ -261,7 +261,7 @@ struct DiveListView: View {
                     Divider()
                         .frame(height: 20)
 
-                    ForEach(PredefinedDiveTag.allCases, id: \.self) { tag in
+                    ForEach(PredefinedDiveTag.activityCases, id: \.self) { tag in
                         TagChipView(
                             tag: tag,
                             isSelected: selectedTags.contains(tag)

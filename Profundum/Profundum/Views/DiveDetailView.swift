@@ -24,18 +24,9 @@ struct DiveDetailView: View {
 
     private var dive: Dive { diveWithSite.dive }
 
-    private var diveType: DiveTypeFilter {
-        if dive.isCcr {
-            return .ccr
-        } else if dive.decoRequired {
-            return .ocDeco
-        } else {
-            return .ocRec
-        }
-    }
-
     private var predefinedTags: [PredefinedDiveTag] {
         tags.compactMap { PredefinedDiveTag(fromTag: $0) }
+            .sorted { $0.category == .diveType && $1.category != .diveType }
     }
 
     private var customTags: [String] {
@@ -210,15 +201,6 @@ struct DiveDetailView: View {
             // Tags row
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    Text(diveType.displayName)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(diveType.color.opacity(0.2))
-                        .foregroundColor(diveType.color)
-                        .cornerRadius(6)
-
                     if sourceCount > 1 {
                         Button {
                             showSourceDevices = true

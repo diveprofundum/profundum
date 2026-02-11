@@ -90,6 +90,8 @@ public final class DiveComputerImportService: Sendable {
             }
 
             try dive.insert(db)
+            let typeTag = PredefinedDiveTag.diveTypeTag(isCcr: dive.isCcr, decoRequired: dive.decoRequired)
+            try DiveTag(diveId: dive.id, tag: typeTag.rawValue).insert(db)
             for sample in samples {
                 try sample.insert(db)
             }
