@@ -63,6 +63,21 @@ enum ImportError: Equatable {
     }
 }
 
+/// Orchestrates the BLE dive computer import lifecycle: scan → connect → download.
+///
+/// ## Thread Safety
+///
+/// `ImportSession` is an `ObservableObject` whose `@Published` properties and
+/// mutable state are only mutated on the **MainActor**.
+///
+/// `isCancelled` is `nonisolated(unsafe)` because it is read from the detached
+/// download task's `onCancel` closure (which runs on `DiveDownloadService`'s
+/// serial queue). Safety is ensured by:
+/// 1. Writes happen on MainActor (`startImport` sets `false`, `cancelImport`/
+///    `reset` sets `true`) — all before or after the download task runs.
+/// 2. The download task reads it via `onCancel` on a serial queue, so reads
+///    are ordered. A torn read of `Bool` is benign (worst case: one extra
+///    iteration before cancellation is observed).
 class ImportSession: ObservableObject {
     @Published var phase: ImportPhase = .idle
     @Published var statusMessage: String = ""
@@ -77,6 +92,7 @@ class ImportSession: ObservableObject {
     private var downloadTask: Task<Void, Never>?
     /// Read from the detached download task's `onCancel` closure.
     /// Safe because writes only happen on MainActor before/after the task runs.
+    /// See class-level doc comment for the full thread safety rationale.
     nonisolated(unsafe) private var isCancelled = false
 
     init() {
@@ -378,7 +394,14 @@ class ImportSession: ObservableObject {
 }
 
 /// Mutable counters shared between the download callbacks and completion handler.
-/// All access happens on `DiveDownloadService`'s serial queue, so no data race.
+///
+/// ## Thread Safety
+///
+/// Marked `@unchecked Sendable` because all access happens on
+/// `DiveDownloadService`'s serial `DispatchQueue`. The `onDive` and `onProgress`
+/// callbacks are invoked synchronously within `dc_device_foreach`, which runs
+/// entirely on that serial queue. The completion handler reads the final values
+/// after `download()` returns (still on the same queue), so no data race occurs.
 private final class ImportCounts: @unchecked Sendable {
     nonisolated(unsafe) var saved = 0
     nonisolated(unsafe) var skipped = 0
