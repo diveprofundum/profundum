@@ -149,13 +149,11 @@ struct NewDiveSheet: View {
                 if selectedDiveTypeTag != newTag { selectedDiveTypeTag = newTag }
             }
             .onChange(of: decoRequired) { _, newValue in
-                // Swap rec/deco activity tags to match toggle
                 if newValue {
                     selectedActivityTags.remove(.rec)
                     selectedActivityTags.insert(.deco)
                 } else {
                     selectedActivityTags.remove(.deco)
-                    selectedActivityTags.insert(.rec)
                 }
             }
             .alert(
@@ -318,14 +316,15 @@ struct NewDiveSheet: View {
                         ) {
                             if selectedActivityTags.contains(tag) {
                                 selectedActivityTags.remove(tag)
-                                // Sync decoRequired toggle when removing deco/rec
                                 if tag == .deco { decoRequired = false }
                             } else {
                                 selectedActivityTags.insert(tag)
-                                // Sync decoRequired toggle when adding deco/rec
+                                // Rec and deco are mutually exclusive
                                 if tag == .deco {
+                                    selectedActivityTags.remove(.rec)
                                     decoRequired = true
                                 } else if tag == .rec {
+                                    selectedActivityTags.remove(.deco)
                                     decoRequired = false
                                 }
                             }
