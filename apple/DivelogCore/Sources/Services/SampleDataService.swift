@@ -353,7 +353,10 @@ public final class SampleDataService: Sendable {
         )
 
         // Generate samples for CCR cave dive profile
-        let samples = generateCaveDiveProfile(diveId: id, durationMin: durationMin, maxDepth: maxDepth, isCCR: true)
+        let samples = generateCaveDiveProfile(
+            diveId: id, durationMin: durationMin,
+            maxDepth: maxDepth, isCCR: true
+        )
         try diveService.saveSamples(samples)
     }
 
@@ -429,7 +432,10 @@ public final class SampleDataService: Sendable {
             equipmentIds: equipment.map(\.id)
         )
 
-        let samples = generateDecoDiveProfile(diveId: id, durationMin: durationMin, maxDepth: maxDepth, bottomTimeMin: 25)
+        let samples = generateDecoDiveProfile(
+            diveId: id, durationMin: durationMin,
+            maxDepth: maxDepth, bottomTimeMin: 25
+        )
         try diveService.saveSamples(samples)
     }
 
@@ -473,7 +479,10 @@ public final class SampleDataService: Sendable {
 
     // MARK: - Profile Generation
 
-    private func generateCaveDiveProfile(diveId: String, durationMin: Int, maxDepth: Float, isCCR: Bool) -> [DiveSample] {
+    private func generateCaveDiveProfile(
+        diveId: String, durationMin: Int,
+        maxDepth: Float, isCCR: Bool
+    ) -> [DiveSample] {
         var samples: [DiveSample] = []
         let intervalSec: Int32 = 10
         let totalSamples = (durationMin * 60) / Int(intervalSec)
@@ -562,7 +571,10 @@ public final class SampleDataService: Sendable {
         return samples
     }
 
-    private func generateDecoDiveProfile(diveId: String, durationMin: Int, maxDepth: Float, bottomTimeMin: Int) -> [DiveSample] {
+    private func generateDecoDiveProfile(
+        diveId: String, durationMin: Int,
+        maxDepth: Float, bottomTimeMin: Int
+    ) -> [DiveSample] {
         var samples: [DiveSample] = []
         let intervalSec: Int32 = 10
         let totalSamples = (durationMin * 60) / Int(intervalSec)

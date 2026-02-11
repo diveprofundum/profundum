@@ -108,10 +108,8 @@ public final class DiveComputerImportService: Sendable {
     /// - Returns: The number of dives that were newly saved (not duplicates).
     public func saveImportedDives(_ parsedDives: [ParsedDive], deviceId: String) throws -> Int {
         var saved = 0
-        for parsed in parsedDives {
-            if try saveImportedDive(parsed, deviceId: deviceId) {
-                saved += 1
-            }
+        for parsed in parsedDives where try saveImportedDive(parsed, deviceId: deviceId) {
+            saved += 1
         }
         return saved
     }

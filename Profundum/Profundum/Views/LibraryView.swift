@@ -1,5 +1,5 @@
-import SwiftUI
 import DivelogCore
+import SwiftUI
 
 /// Library section containing devices, sites, teammates, equipment, and formulas.
 struct LibraryView: View {

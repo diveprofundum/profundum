@@ -1,6 +1,6 @@
+import Combine
 import CoreBluetooth
 import DivelogCore
-import Combine
 import os
 
 private let importLog = Logger(subsystem: "com.divelog.profundum", category: "ImportSession")
@@ -66,7 +66,7 @@ enum ImportError: Equatable {
 class ImportSession: ObservableObject {
     @Published var phase: ImportPhase = .idle
     @Published var statusMessage: String = ""
-    @Published var downloadProgress: (current: Int, total: Int?)? = nil
+    @Published var downloadProgress: (current: Int, total: Int?)?
 
     let scanner: BLEScanner
     private var diveService: DiveService?
@@ -120,7 +120,10 @@ class ImportSession: ObservableObject {
             guard !Task.isCancelled else { return }
             if case .connecting = self?.phase {
                 self?.scanner.disconnect()
-                self?.phase = .error(.connectionFailed("Connection timed out. Make sure the dive computer is awake and in range."))
+                self?.phase = .error(.connectionFailed(
+                    "Connection timed out. "
+                    + "Make sure the dive computer is awake and in range."
+                ))
             }
         }
     }
@@ -230,7 +233,8 @@ class ImportSession: ObservableObject {
                             skippedDives: skipped,
                             deviceName: device.model
                         ))
-                        self.statusMessage = "Cancelled. \(saved) dive\(saved == 1 ? "" : "s") saved before cancellation."
+                        let plural = saved == 1 ? "" : "s"
+                        self.statusMessage = "Cancelled. \(saved) dive\(plural) saved before cancellation."
                     } else {
                         self.phase = .paired(device)
                         self.statusMessage = "Download cancelled."
@@ -249,7 +253,8 @@ class ImportSession: ObservableObject {
                             skippedDives: skipped,
                             deviceName: device.model
                         ))
-                        self.statusMessage = "Connection lost. \(saved) dive\(saved == 1 ? "" : "s") saved before the error."
+                        let plural = saved == 1 ? "" : "s"
+                        self.statusMessage = "Connection lost. \(saved) dive\(plural) saved before the error."
                     } else {
                         self.phase = .error(.downloadFailed(error.localizedDescription))
                     }

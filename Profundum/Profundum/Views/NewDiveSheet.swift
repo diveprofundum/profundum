@@ -1,5 +1,5 @@
-import SwiftUI
 import DivelogCore
+import SwiftUI
 
 struct NewDiveSheet: View {
     @Environment(\.dismiss) var dismiss
@@ -122,7 +122,13 @@ struct NewDiveSheet: View {
                     selectedEquipmentIds = Set(editingEquipmentIds)
                 }
             }
-            .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            .alert(
+                "Error",
+                isPresented: Binding(
+                    get: { errorMessage != nil },
+                    set: { if !$0 { errorMessage = nil } }
+                )
+            ) {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(errorMessage ?? "")
@@ -586,10 +592,19 @@ struct FlowLayout: Layout {
         return result.size
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize,
+        subviews: Subviews, cache: inout ()
+    ) {
         let result = layout(proposal: proposal, subviews: subviews)
         for (index, position) in result.positions.enumerated() {
-            subviews[index].place(at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y), proposal: .unspecified)
+            subviews[index].place(
+                at: CGPoint(
+                    x: bounds.minX + position.x,
+                    y: bounds.minY + position.y
+                ),
+                proposal: .unspecified
+            )
         }
     }
 

@@ -97,7 +97,8 @@ public final class ExportService: Sendable {
             }
         }
 
-        var csv = "date,site,max_depth_m,duration_min,bottom_time_min,min_temp_c,max_temp_c,is_ccr,deco_required,cns_percent,notes\n"
+        var csv = "date,site,max_depth_m,duration_min,bottom_time_min,"
+            + "min_temp_c,max_temp_c,is_ccr,deco_required,cns_percent,notes\n"
 
         let dateFormatter = ISO8601DateFormatter()
         dateFormatter.formatOptions = [.withFullDate, .withTime, .withColonSeparatorInTime]
@@ -116,7 +117,9 @@ public final class ExportService: Sendable {
             let cns = String(format: "%.0f", dive.cnsPercent)
             let notes = csvEscape(dive.notes ?? "")
 
-            csv += "\(date),\(site),\(maxDepth),\(duration),\(bottomTime),\(minTemp),\(maxTemp),\(isCcr),\(deco),\(cns),\(notes)\n"
+            csv += "\(date),\(site),\(maxDepth),\(duration),"
+                + "\(bottomTime),\(minTemp),\(maxTemp),"
+                + "\(isCcr),\(deco),\(cns),\(notes)\n"
         }
 
         return Data(csv.utf8)
@@ -134,14 +137,25 @@ public final class ExportService: Sendable {
 
         let diveIds = Set(dives.map(\.id))
 
-        let allTags = try DiveTag.filter(diveIds.contains(Column("dive_id"))).fetchAll(db)
-        let allTeammates = try DiveTeammate.filter(diveIds.contains(Column("dive_id"))).fetchAll(db)
-        let allEquipment = try DiveEquipment.filter(diveIds.contains(Column("dive_id"))).fetchAll(db)
-        let allSamples = try DiveSample.filter(diveIds.contains(Column("dive_id"))).order(Column("t_sec")).fetchAll(db)
-        let allSegments = try Segment.filter(diveIds.contains(Column("dive_id"))).order(Column("start_t_sec")).fetchAll(db)
+        let allTags = try DiveTag
+            .filter(diveIds.contains(Column("dive_id"))).fetchAll(db)
+        let allTeammates = try DiveTeammate
+            .filter(diveIds.contains(Column("dive_id"))).fetchAll(db)
+        let allEquipment = try DiveEquipment
+            .filter(diveIds.contains(Column("dive_id"))).fetchAll(db)
+        let allSamples = try DiveSample
+            .filter(diveIds.contains(Column("dive_id")))
+            .order(Column("t_sec")).fetchAll(db)
+        let allSegments = try Segment
+            .filter(diveIds.contains(Column("dive_id")))
+            .order(Column("start_t_sec")).fetchAll(db)
 
         let segmentIds = Set(allSegments.map(\.id))
-        let allSegmentTags = segmentIds.isEmpty ? [SegmentTag]() : try SegmentTag.filter(segmentIds.contains(Column("segment_id"))).fetchAll(db)
+        let allSegmentTags = segmentIds.isEmpty
+            ? [SegmentTag]()
+            : try SegmentTag
+                .filter(segmentIds.contains(Column("segment_id")))
+                .fetchAll(db)
 
         let tagsByDive = Dictionary(grouping: allTags, by: \.diveId)
         let teammatesByDive = Dictionary(grouping: allTeammates, by: \.diveId)

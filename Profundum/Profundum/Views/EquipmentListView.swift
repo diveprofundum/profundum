@@ -1,5 +1,5 @@
-import SwiftUI
 import DivelogCore
+import SwiftUI
 
 struct EquipmentListView: View {
     @EnvironmentObject var appState: AppState
@@ -259,7 +259,13 @@ struct AddEquipmentSheet: View {
                     notes = eq.notes ?? ""
                 }
             }
-            .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            .alert(
+                "Error",
+                isPresented: Binding(
+                    get: { errorMessage != nil },
+                    set: { if !$0 { errorMessage = nil } }
+                )
+            ) {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(errorMessage ?? "")

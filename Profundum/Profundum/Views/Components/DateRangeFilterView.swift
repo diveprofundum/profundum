@@ -35,7 +35,7 @@ struct DateRangeFilterView: View {
 
     @State private var localStartDate: Date = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
     @State private var localEndDate: Date = Date()
-    @State private var selectedPreset: DatePreset? = nil
+    @State private var selectedPreset: DatePreset?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

@@ -1,6 +1,6 @@
-import SwiftUI
 import Combine
 import DivelogCore
+import SwiftUI
 
 @main
 struct ProfundumApp: App {
@@ -56,7 +56,7 @@ class AppState: ObservableObject {
         // Use in-memory DB for UI testing, file-based otherwise
         var db: DivelogDatabase
         var usingInMemory = false
-        var warning: String? = nil
+        var warning: String?
 
         if isUITesting {
             do {
@@ -72,7 +72,9 @@ class AppState: ObservableObject {
             do {
                 db = try DivelogDatabase(path: dbPath)
             } catch {
-                warning = "Could not access database file. Using temporary in-memory storage. Your data will not be saved."
+                warning = "Could not access database file. "
+                    + "Using temporary in-memory storage. "
+                    + "Your data will not be saved."
                 usingInMemory = true
 
                 do {

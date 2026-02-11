@@ -152,7 +152,10 @@ public final class DiveService: Sendable {
 
     // MARK: - Dive Operations
 
-    public func saveDive(_ dive: Dive, tags: [String] = [], teammateIds: [String] = [], equipmentIds: [String] = []) throws {
+    public func saveDive(
+        _ dive: Dive, tags: [String] = [],
+        teammateIds: [String] = [], equipmentIds: [String] = []
+    ) throws {
         try database.dbQueue.write { db in
             try dive.save(db)
 

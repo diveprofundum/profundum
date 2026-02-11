@@ -1,5 +1,5 @@
-import SwiftUI
 import DivelogCore
+import SwiftUI
 
 struct FormulaListView: View {
     @EnvironmentObject var appState: AppState
@@ -229,7 +229,13 @@ struct AddFormulaSheet: View {
             .onChange(of: expression) { _, newValue in
                 validateExpression(newValue)
             }
-            .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            .alert(
+                "Error",
+                isPresented: Binding(
+                    get: { errorMessage != nil },
+                    set: { if !$0 { errorMessage = nil } }
+                )
+            ) {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(errorMessage ?? "")

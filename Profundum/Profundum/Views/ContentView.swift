@@ -1,5 +1,5 @@
-import SwiftUI
 import DivelogCore
+import SwiftUI
 
 enum AppTab: String, CaseIterable {
     case log = "Log"
@@ -75,7 +75,10 @@ struct ContentView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This will permanently delete all dives, devices, sites, teammates, and equipment. This cannot be undone.")
+            Text(
+                "This will permanently delete all dives, devices, "
+                + "sites, teammates, and equipment. This cannot be undone."
+            )
         }
     }
 }

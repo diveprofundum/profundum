@@ -1,5 +1,5 @@
-import SwiftUI
 import DivelogCore
+import SwiftUI
 
 struct DeviceListView: View {
     @EnvironmentObject var appState: AppState
@@ -273,7 +273,13 @@ struct AddDeviceSheet: View {
                     .disabled(model.isEmpty || serialNumber.isEmpty)
                 }
             }
-            .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            .alert(
+                "Error",
+                isPresented: Binding(
+                    get: { errorMessage != nil },
+                    set: { if !$0 { errorMessage = nil } }
+                )
+            ) {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(errorMessage ?? "")

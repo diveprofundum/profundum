@@ -1,5 +1,5 @@
-import SwiftUI
 import DivelogCore
+import SwiftUI
 
 struct DiveListView: View {
     @EnvironmentObject var appState: AppState
@@ -47,9 +47,16 @@ struct DiveListView: View {
             Group {
                 if filteredDives.isEmpty {
                     ContentUnavailableView {
-                        Label(hasActiveFilters ? "No Matching Dives" : "No Dives", systemImage: "waveform.path")
+                        Label(
+                            hasActiveFilters ? "No Matching Dives" : "No Dives",
+                            systemImage: "waveform.path"
+                        )
                     } description: {
-                        Text(hasActiveFilters ? "Try adjusting your filters." : "Add a dive or load sample data from Settings to get started.")
+                        Text(
+                            hasActiveFilters
+                                ? "Try adjusting your filters."
+                                : "Add a dive or load sample data from Settings to get started."
+                        )
                     } actions: {
                         if !hasActiveFilters {
                             Button("Add Dive") {
@@ -356,7 +363,9 @@ struct DiveListView: View {
         do {
             let exportService = ExportService(database: appState.database)
             let data = try exportService.exportDives(ids: Array(selectedDiveIDs))
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent("divelog-export-\(selectedDiveIDs.count)-dives.json")
+            let filename = "divelog-export-\(selectedDiveIDs.count)-dives.json"
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent(filename)
             try data.write(to: url)
             batchExportURL = url
             showBatchShareSheet = true
@@ -445,7 +454,12 @@ struct DiveRowView: View {
             }
 
             HStack(spacing: 16) {
-                Label(UnitFormatter.formatDepthCompact(dive.maxDepthM, unit: appState.depthUnit), systemImage: "arrow.down")
+                Label(
+                    UnitFormatter.formatDepthCompact(
+                        dive.maxDepthM, unit: appState.depthUnit
+                    ),
+                    systemImage: "arrow.down"
+                )
                     .font(.subheadline)
                     .foregroundColor(.secondary)
 
