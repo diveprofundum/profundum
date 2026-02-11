@@ -95,12 +95,12 @@ jobs:
       needs.changes.outputs.swift == 'true' ||
       needs.changes.outputs.app == 'true' ||
       needs.changes.outputs.ci == 'true'
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
       - name: Install SwiftLint
-        uses: norio-nomura/action-swiftlint@3.2.1
+        run: brew install swiftlint
 
       - name: Run SwiftLint
         run: swiftlint lint --strict --config .swiftlint.yml
