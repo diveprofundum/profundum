@@ -73,9 +73,16 @@ final class DiveListUITests: XCTestCase {
         XCTAssertGreaterThan(filteredCount, 0, "Expected at least one CCR dive")
         XCTAssertLessThanOrEqual(filteredCount, initialCellCount)
 
-        // Clear button should appear
-        let clearButton = app.buttons["Clear"]
+        // Clear button should appear — may be offscreen in the horizontal
+        // filter ScrollView, so scroll it into view first
+        let filterBar = app.scrollViews["filterBar"]
+        let clearButton = filterBar.buttons["Clear"]
         clearButton.assertExists()
+        filterBar.swipeLeft()
+        // After swipe, the button should be hittable
+        if !clearButton.isHittable {
+            filterBar.swipeLeft()
+        }
         clearButton.tap()
 
         // List should restore

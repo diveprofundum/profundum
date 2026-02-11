@@ -48,21 +48,23 @@ final class NewDiveSheetUITests: XCTestCase {
         let depthTime = app.staticTexts["Depth & Time"]
         depthTime.assertExists()
 
-        // Dive Type section
-        let diveType = app.staticTexts["Dive Type"]
-        diveType.assertExists()
-
-        // Scroll down to find remaining sections
-        let form = app.scrollViews.firstMatch
-        form.swipeUp()
+        // Dive Type section — may need scrolling on smaller screens
+        // SwiftUI Form renders as a collectionView on iOS
+        let form = app.collectionViews.firstMatch
+        if !app.staticTexts["Dive Type"].waitForExistence(timeout: 2) {
+            form.swipeUp()
+        }
+        app.staticTexts["Dive Type"].assertExists(timeout: 3)
 
         // Exposure section
+        form.swipeUp()
         let exposure = app.staticTexts["Exposure"]
         exposure.assertExists(timeout: 3)
 
-        // Tags section
+        // Tags section — further down
+        form.swipeUp()
         let tags = app.staticTexts["Tags"]
-        tags.assertExists()
+        tags.assertExists(timeout: 3)
     }
 
     @MainActor
