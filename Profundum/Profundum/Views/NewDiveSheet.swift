@@ -82,12 +82,14 @@ struct NewDiveSheet: View {
                     Button("Cancel") {
                         dismiss()
                     }
+                    .accessibilityIdentifier("cancelButton")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         saveDive()
                     }
                     .disabled(selectedDeviceId == nil)
+                    .accessibilityIdentifier("saveButton")
                 }
             }
             .task {

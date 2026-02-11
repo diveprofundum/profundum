@@ -88,6 +88,7 @@ struct SyncView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .disabled(session.scanner.managerState != .poweredOn)
+            .accessibilityIdentifier("scanButton")
 
             Button {
                 showingFileImporter = true
@@ -96,6 +97,7 @@ struct SyncView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
+            .accessibilityIdentifier("fileImportButton")
 
             Spacer()
         }
