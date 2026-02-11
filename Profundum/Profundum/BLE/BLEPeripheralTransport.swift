@@ -64,8 +64,7 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
                 ? "withoutResponse" : "withResponse"
             let props = String(describing: characteristic.properties.rawValue)
             bleLog.info(
-                "BLETransport init: writeType=\(writeTypeName), "
-                + "MTU=\(mtu), properties=\(props)"
+                "BLETransport init: writeType=\(writeTypeName), MTU=\(mtu), properties=\(props)"
             )
         }
     }
@@ -129,8 +128,7 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
 
             if Self.enableLogging {
                 bleLog.info(
-                    "WRITE chunk \(chunkIndex + 1)/\(totalChunks): "
-                    + "\(chunkSize) bytes (total \(data.count), offset \(offset))"
+                    "WRITE chunk \(chunkIndex + 1)/\(totalChunks): \(chunkSize) bytes (total \(data.count), offset \(offset))"
                 )
             }
 
