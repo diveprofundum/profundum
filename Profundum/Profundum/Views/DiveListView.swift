@@ -491,6 +491,9 @@ struct DiveRowView: View {
         if let siteName = diveWithSite.siteName {
             label = "Dive on \(dateStr), \(siteName), \(depthStr), \(durationStr)"
         }
+        if !rowBadges.isEmpty {
+            label += ", " + rowBadges.map(\.text).joined(separator: ", ")
+        }
         return label
     }
 
