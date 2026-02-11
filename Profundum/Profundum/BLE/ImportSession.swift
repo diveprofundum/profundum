@@ -125,7 +125,7 @@ class ImportSession: ObservableObject {
         }
     }
 
-    func startImport() {
+    func startImport(forceFullSync: Bool = false) {
         guard case .paired(let device) = phase else { return }
         phase = .importing(device)
         statusMessage = "Preparing to download dives..."
@@ -154,8 +154,6 @@ class ImportSession: ObservableObject {
         }
 
         // Look up last fingerprint for incremental sync
-        // TODO: Remove forceFullSync once BLE stability is verified
-        let forceFullSync = true
         let lastFP: Data? = forceFullSync ? nil : (try? importService.lastFingerprint(deviceId: device.id))
 
         // Wrap transport with tracing for protocol-level I/O visibility

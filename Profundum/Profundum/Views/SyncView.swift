@@ -11,6 +11,7 @@ struct SyncView: View {
     @State private var fileImportError: String?
     @State private var isImportingFile = false
     @State private var fileImportProgress: (current: Int, total: Int)?
+    @State private var forceFullSync = false
 
     var body: some View {
         NavigationStack {
@@ -190,9 +191,14 @@ struct SyncView: View {
                 }
             }
 
+            Toggle("Full Sync", isOn: $forceFullSync)
+                .font(.subheadline)
+                .frame(maxWidth: 250)
+                .accessibilityHint("Downloads all dives instead of only new ones")
+
             HStack(spacing: 12) {
                 Button {
-                    session.startImport()
+                    session.startImport(forceFullSync: forceFullSync)
                 } label: {
                     Label("Import Dives", systemImage: "square.and.arrow.down")
                 }
@@ -278,12 +284,14 @@ struct SyncView: View {
 
             HStack(spacing: 12) {
                 Button("Done") {
+                    forceFullSync = false
                     session.reset()
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
 
                 Button("Scan Again") {
+                    forceFullSync = false
                     session.reset()
                     session.startScan()
                 }
