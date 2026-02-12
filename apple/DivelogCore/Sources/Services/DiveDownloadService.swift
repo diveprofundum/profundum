@@ -348,12 +348,13 @@ private func parseDiveData(
         ))
     }
 
-    // Extract per-sample GF99 from raw PNF binary (same as Shearwater Cloud import).
+    // Extract per-sample PNF fields (GF99, @+5 TTS) from raw binary.
     let rawData = Data(bytes: data, count: Int(size))
-    let gf99Values = DiveDataMapper.extractGf99FromPnf(rawData)
-    if gf99Values.count == sampleContext.samples.count {
-        for i in 0 ..< gf99Values.count {
-            sampleContext.samples[i].gf99 = gf99Values[i]
+    let pnf = DiveDataMapper.extractPnfSampleFields(rawData)
+    if pnf.gf99.count == sampleContext.samples.count {
+        for i in 0 ..< pnf.gf99.count {
+            sampleContext.samples[i].gf99 = pnf.gf99[i]
+            sampleContext.samples[i].atPlusFiveTtsMin = pnf.atPlusFiveTtsMin[i]
         }
     }
 

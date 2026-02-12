@@ -23,6 +23,7 @@ public struct DiveSample: Identifiable, Equatable, Sendable {
     public var decoStopDepthM: Float?
     public var rbtSec: Int?
     public var gasmixIndex: Int?
+    public var atPlusFiveTtsMin: Int?
 
     public init(
         id: String = UUID().uuidString,
@@ -44,7 +45,8 @@ public struct DiveSample: Identifiable, Equatable, Sendable {
         ndlSec: Int? = nil,
         decoStopDepthM: Float? = nil,
         rbtSec: Int? = nil,
-        gasmixIndex: Int? = nil
+        gasmixIndex: Int? = nil,
+        atPlusFiveTtsMin: Int? = nil
     ) {
         self.id = id
         self.diveId = diveId
@@ -66,6 +68,7 @@ public struct DiveSample: Identifiable, Equatable, Sendable {
         self.decoStopDepthM = decoStopDepthM
         self.rbtSec = rbtSec
         self.gasmixIndex = gasmixIndex
+        self.atPlusFiveTtsMin = atPlusFiveTtsMin
     }
 }
 
@@ -95,6 +98,7 @@ extension DiveSample: Codable, FetchableRecord, PersistableRecord {
         case decoStopDepthM = "deco_stop_depth_m"
         case rbtSec = "rbt_sec"
         case gasmixIndex = "gasmix_index"
+        case atPlusFiveTtsMin = "at_plus_five_tts_min"
     }
 }
 

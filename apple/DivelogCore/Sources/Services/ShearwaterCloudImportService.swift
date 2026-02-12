@@ -355,7 +355,8 @@ public final class ShearwaterCloudImportService: Sendable {
                                 ndlSec: sample.ndlSec,
                                 decoStopDepthM: sample.decoStopDepthM,
                                 rbtSec: sample.rbtSec,
-                                gasmixIndex: sample.gasmixIndex
+                                gasmixIndex: sample.gasmixIndex,
+                                atPlusFiveTtsMin: sample.atPlusFiveTtsMin
                             ).insert(db)
                         }
 
@@ -576,7 +577,8 @@ public final class ShearwaterCloudImportService: Sendable {
                             ndlSec: sample.ndlSec,
                             decoStopDepthM: sample.decoStopDepthM,
                             rbtSec: sample.rbtSec,
-                            gasmixIndex: sample.gasmixIndex
+                            gasmixIndex: sample.gasmixIndex,
+                            atPlusFiveTtsMin: sample.atPlusFiveTtsMin
                         ).insert(db)
                     }
 
@@ -1064,13 +1066,14 @@ private func _tryParseShearwaterBlob(_ blob: Data) -> ParsedDive? {
             sampleContext.commitCurrentSample()
         }
 
-        // Extract per-sample GF99 from raw PNF binary.
-        // libdivecomputer doesn't emit GF99, but it's at data byte 24
-        // in each 32-byte Petrel PNF dive sample record.
-        let gf99Values = DiveDataMapper.extractGf99FromPnf(blob)
-        if gf99Values.count == sampleContext.samples.count {
-            for i in 0 ..< gf99Values.count {
-                sampleContext.samples[i].gf99 = gf99Values[i]
+        // Extract per-sample PNF fields (GF99, @+5 TTS) from raw binary.
+        // libdivecomputer doesn't emit these, but Petrel computers store them
+        // in each 32-byte PNF dive sample record.
+        let pnf = DiveDataMapper.extractPnfSampleFields(blob)
+        if pnf.gf99.count == sampleContext.samples.count {
+            for i in 0 ..< pnf.gf99.count {
+                sampleContext.samples[i].gf99 = pnf.gf99[i]
+                sampleContext.samples[i].atPlusFiveTtsMin = pnf.atPlusFiveTtsMin[i]
             }
         }
 
