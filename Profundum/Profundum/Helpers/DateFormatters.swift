@@ -9,10 +9,26 @@ import Foundation
 /// that would otherwise shift displayed times by the device's timezone.
 enum DateFormatters {
 
+    // MARK: - Locale helpers
+
+    /// Locale with hour cycle forced to 12-hour (h:mm AM/PM).
+    private static let locale12h: Locale = {
+        var components = Locale.Components(locale: .current)
+        components.hourCycle = .oneToTwelve
+        return Locale(components: components)
+    }()
+
+    /// Locale with hour cycle forced to 24-hour (HH:mm).
+    private static let locale24h: Locale = {
+        var components = Locale.Components(locale: .current)
+        components.hourCycle = .zeroToTwentyThree
+        return Locale(components: components)
+    }()
+
     // MARK: - System (follows device 12/24h setting)
 
     /// Medium date + short time — used in dive list rows.
-    static let mediumSystem: DateFormatter = {
+    private static let mediumSystem: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .medium
         f.timeStyle = .short
@@ -21,7 +37,7 @@ enum DateFormatters {
     }()
 
     /// Full date + short time — used in dive detail.
-    static let fullSystem: DateFormatter = {
+    private static let fullSystem: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .full
         f.timeStyle = .short
@@ -33,21 +49,19 @@ enum DateFormatters {
 
     private static let medium12h: DateFormatter = {
         let f = DateFormatter()
+        f.locale = locale12h
+        f.dateStyle = .medium
+        f.timeStyle = .short
         f.timeZone = TimeZone(identifier: "UTC")
-        let template = DateFormatter.dateFormat(
-            fromTemplate: "MMMdyyyyhmma", options: 0, locale: .current
-        )
-        f.dateFormat = template
         return f
     }()
 
     private static let full12h: DateFormatter = {
         let f = DateFormatter()
+        f.locale = locale12h
+        f.dateStyle = .full
+        f.timeStyle = .short
         f.timeZone = TimeZone(identifier: "UTC")
-        let template = DateFormatter.dateFormat(
-            fromTemplate: "EEEEMMMMdyyyyhmma", options: 0, locale: .current
-        )
-        f.dateFormat = template
         return f
     }()
 
@@ -55,21 +69,19 @@ enum DateFormatters {
 
     private static let medium24h: DateFormatter = {
         let f = DateFormatter()
+        f.locale = locale24h
+        f.dateStyle = .medium
+        f.timeStyle = .short
         f.timeZone = TimeZone(identifier: "UTC")
-        let template = DateFormatter.dateFormat(
-            fromTemplate: "MMMdyyyyHHmm", options: 0, locale: .current
-        )
-        f.dateFormat = template
         return f
     }()
 
     private static let full24h: DateFormatter = {
         let f = DateFormatter()
+        f.locale = locale24h
+        f.dateStyle = .full
+        f.timeStyle = .short
         f.timeZone = TimeZone(identifier: "UTC")
-        let template = DateFormatter.dateFormat(
-            fromTemplate: "EEEEMMMMdyyyyHHmm", options: 0, locale: .current
-        )
-        f.dateFormat = template
         return f
     }()
 
