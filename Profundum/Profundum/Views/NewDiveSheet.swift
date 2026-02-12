@@ -108,7 +108,9 @@ struct NewDiveSheet: View {
                     selectedDeviceId = dive.deviceId
                     // Timestamps are stored as local time in UTC epoch seconds.
                     // Shift so the DatePicker (which uses device timezone) shows the correct local time.
-                    let tzOffset = TimeInterval(TimeZone.current.secondsFromGMT())
+                    // Use the offset at the dive's time (not now) so DST transitions don't shift by 1h.
+                    let approxDate = Date(timeIntervalSince1970: TimeInterval(dive.startTimeUnix))
+                    let tzOffset = TimeInterval(TimeZone.current.secondsFromGMT(for: approxDate))
                     startDate = Date(timeIntervalSince1970: TimeInterval(dive.startTimeUnix) - tzOffset)
                     let totalSeconds = dive.endTimeUnix - dive.startTimeUnix
                     durationMinutes = Int(totalSeconds / 60)

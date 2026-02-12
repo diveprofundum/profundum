@@ -11,14 +11,14 @@ enum DateFormatters {
 
     // MARK: - Locale helpers
 
-    /// Locale with hour cycle forced to 12-hour (h:mm AM/PM).
+    /// Locale with hour cycle forced to 12-hour.
     private static let locale12h: Locale = {
         var components = Locale.Components(locale: .current)
         components.hourCycle = .oneToTwelve
         return Locale(components: components)
     }()
 
-    /// Locale with hour cycle forced to 24-hour (HH:mm).
+    /// Locale with hour cycle forced to 24-hour.
     private static let locale24h: Locale = {
         var components = Locale.Components(locale: .current)
         components.hourCycle = .zeroToTwentyThree
