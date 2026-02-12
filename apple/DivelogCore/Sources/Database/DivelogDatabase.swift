@@ -369,6 +369,12 @@ public final class DivelogDatabase: Sendable {
             """)
         }
 
+        migrator.registerMigration("012_add_at_plus_five") { db in
+            try db.execute(sql: """
+                ALTER TABLE samples ADD COLUMN at_plus_five_tts_min INTEGER;
+            """)
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

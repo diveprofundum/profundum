@@ -132,6 +132,7 @@ public struct ParsedSample: Sendable {
     public var decoStopDepthM: Float?
     public var rbtSec: Int?
     public var gasmixIndex: Int?
+    public var atPlusFiveTtsMin: Int?
 
     public init(
         tSec: Int32,
@@ -150,7 +151,8 @@ public struct ParsedSample: Sendable {
         ndlSec: Int? = nil,
         decoStopDepthM: Float? = nil,
         rbtSec: Int? = nil,
-        gasmixIndex: Int? = nil
+        gasmixIndex: Int? = nil,
+        atPlusFiveTtsMin: Int? = nil
     ) {
         self.tSec = tSec
         self.depthM = depthM
@@ -169,6 +171,7 @@ public struct ParsedSample: Sendable {
         self.decoStopDepthM = decoStopDepthM
         self.rbtSec = rbtSec
         self.gasmixIndex = gasmixIndex
+        self.atPlusFiveTtsMin = atPlusFiveTtsMin
     }
 }
 
@@ -257,7 +260,8 @@ public enum DiveDataMapper {
                 ndlSec: s.ndlSec,
                 decoStopDepthM: s.decoStopDepthM,
                 rbtSec: s.rbtSec,
-                gasmixIndex: s.gasmixIndex
+                gasmixIndex: s.gasmixIndex,
+                atPlusFiveTtsMin: s.atPlusFiveTtsMin
             )
         }
 
@@ -274,24 +278,33 @@ public enum DiveDataMapper {
         return (dive, samples, gasMixes)
     }
 
-    // MARK: - GF99 Extraction from PNF Binary
+    // MARK: - PNF Sample Field Extraction
 
-    /// Extracts per-sample GF99 values directly from raw Shearwater PNF binary data.
-    /// libdivecomputer doesn't emit GF99 as a sample type, but Petrel computers store it
-    /// at data byte offset 24 in each 32-byte dive sample record.
-    /// Returns nil for samples where GF99 is 0 (surface/no-load) or 0xFF (not computed at depth).
-    static func extractGf99FromPnf(_ data: Data) -> [Float?] {
-        guard data.count >= 32 else { return [] }
+    /// Fields extracted from Shearwater PNF binary that libdivecomputer doesn't parse.
+    struct PnfSampleFields: Sendable {
+        let gf99: [Float?]
+        let atPlusFiveTtsMin: [Int?]
+    }
+
+    /// Extracts per-sample GF99 and @+5 TTS values from raw Shearwater PNF binary data.
+    /// libdivecomputer doesn't emit these as sample types, but Petrel computers store them
+    /// in each 32-byte dive sample record:
+    /// - GF99: data byte 24 (raw byte 25 in PNF, 24 in non-PNF)
+    /// - @+5 TTS: data byte 26 (raw byte 27 in PNF, 26 in non-PNF), in minutes
+    static func extractPnfSampleFields(_ data: Data) -> PnfSampleFields {
+        guard data.count >= 32 else { return PnfSampleFields(gf99: [], atPlusFiveTtsMin: []) }
 
         let sampleSize = 32 // SZ_SAMPLE_PETREL
         // PNF format: first 2 bytes != 0xFFFF
         let isPnf = data.count >= 2 && !(data[0] == 0xFF && data[1] == 0xFF)
-        // In PNF, byte 0 of each record is the type; data byte 24 = raw byte 25.
-        // In non-PNF, no type byte; data byte 24 = raw byte 24.
+        // In PNF, byte 0 of each record is the type; data byte N = raw byte N+1.
+        // In non-PNF, no type byte; data byte N = raw byte N.
         let gf99Offset = isPnf ? 25 : 24
+        let atPlusFiveOffset = isPnf ? 27 : 26
         let diveSampleType: UInt8 = 0x01
 
-        var values: [Float?] = []
+        var gf99Values: [Float?] = []
+        var atPlusFiveValues: [Int?] = []
         var offset = 0
 
         if isPnf {
@@ -299,10 +312,14 @@ public enum DiveDataMapper {
                 let recordType = data[offset]
                 if recordType == 0xFF { break } // LOG_RECORD_FINAL
                 if recordType == diveSampleType {
-                    let raw = data[offset + gf99Offset]
-                    // 0 = no tissue loading (surface), 0xFF = not computed (at depth)
-                    let valid = raw > 0 && raw < 0xFF
-                    values.append(valid ? Float(raw) : nil)
+                    // GF99: 0 = no tissue loading (surface), 0xFF = not computed
+                    let rawGf99 = data[offset + gf99Offset]
+                    let validGf99 = rawGf99 > 0 && rawGf99 < 0xFF
+                    gf99Values.append(validGf99 ? Float(rawGf99) : nil)
+
+                    // @+5 TTS in minutes: 0 = no deco obligation → nil
+                    let rawAtPlusFive = data[offset + atPlusFiveOffset]
+                    atPlusFiveValues.append(rawAtPlusFive > 0 ? Int(rawAtPlusFive) : nil)
                 }
                 offset += sampleSize
             }
@@ -310,17 +327,23 @@ public enum DiveDataMapper {
             // Non-PNF: skip 128-byte header and footer, all records are dive samples
             let headerSize = 128
             let footerSize = 128
-            guard data.count > headerSize + footerSize else { return [] }
+            guard data.count > headerSize + footerSize else {
+                return PnfSampleFields(gf99: [], atPlusFiveTtsMin: [])
+            }
             offset = headerSize
             let endOffset = data.count - footerSize
             while offset + sampleSize <= endOffset {
-                let raw = data[offset + gf99Offset]
-                let valid = raw > 0 && raw < 0xFF
-                values.append(valid ? Float(raw) : nil)
+                let rawGf99 = data[offset + gf99Offset]
+                let validGf99 = rawGf99 > 0 && rawGf99 < 0xFF
+                gf99Values.append(validGf99 ? Float(rawGf99) : nil)
+
+                let rawAtPlusFive = data[offset + atPlusFiveOffset]
+                atPlusFiveValues.append(rawAtPlusFive > 0 ? Int(rawAtPlusFive) : nil)
+
                 offset += sampleSize
             }
         }
 
-        return values
+        return PnfSampleFields(gf99: gf99Values, atPlusFiveTtsMin: atPlusFiveValues)
     }
 }
