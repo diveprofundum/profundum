@@ -112,47 +112,55 @@ struct DepthProfileChartData {
             self.tempPoints = []
         }
 
-        // Ceiling pass: downsample to ~300 points, no smoothing.
-        // Emit zero-ceiling points at deco boundaries so AreaMark closes cleanly.
+        // Ceiling pass: iterate ALL samples to catch every deco transition,
+        // but only emit data points at stride intervals to keep ~300 output points.
         let anyCeiling = samples.contains { ($0.ceilingM ?? 0) > 0 }
         self.hasCeilingData = anyCeiling
         if anyCeiling {
             let cStride = max(1, samples.count / 300)
             var cPoints: [CeilingDataPoint] = []
             cPoints.reserveCapacity(302)
-            var ci = 0
             var cIdx = 0
             var wasInDeco = false
-            while ci < samples.count {
-                let cm = samples[ci].ceilingM ?? 0
-                let t = Float(samples[ci].tSec) / 60.0
-                if cm > 0 {
-                    if !wasInDeco {
-                        // Entering deco — emit a zero point to start the area cleanly
+            var lastEmitted = -cStride // so first deco point is always eligible
+
+            for i in 0 ..< samples.count {
+                let cm = samples[i].ceilingM ?? 0
+                let inDeco = cm > 0
+                let t = Float(samples[i].tSec) / 60.0
+
+                if inDeco != wasInDeco {
+                    // Transition — always emit boundary points
+                    if inDeco {
+                        cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: t, ceilingDepth: 0))
+                        cIdx += 1
+                        let d = UnitFormatter.depth(cm, unit: depthUnit)
+                        cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: t, ceilingDepth: d))
+                        cIdx += 1
+                    } else {
                         cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: t, ceilingDepth: 0))
                         cIdx += 1
                     }
+                    lastEmitted = i
+                    wasInDeco = inDeco
+                } else if inDeco && (i - lastEmitted >= cStride) {
+                    // In deco at stride interval — emit point
                     let d = UnitFormatter.depth(cm, unit: depthUnit)
                     cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: t, ceilingDepth: d))
                     cIdx += 1
-                    wasInDeco = true
-                } else if wasInDeco {
-                    // Exiting deco — emit a zero point to close the area
-                    cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: t, ceilingDepth: 0))
-                    cIdx += 1
-                    wasInDeco = false
+                    lastEmitted = i
                 }
-                ci += cStride
             }
-            // Always include last sample
-            if let last = samples.last {
+
+            // Close the area if we end mid-deco
+            if wasInDeco, let last = samples.last {
                 let lastT = Float(last.tSec) / 60.0
-                let cm = last.ceilingM ?? 0
                 if cPoints.last?.timeMinutes != lastT {
+                    let cm = last.ceilingM ?? 0
                     if cm > 0 {
                         let d = UnitFormatter.depth(cm, unit: depthUnit)
                         cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: lastT, ceilingDepth: d))
-                    } else if wasInDeco {
+                    } else {
                         cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: lastT, ceilingDepth: 0))
                     }
                 }
