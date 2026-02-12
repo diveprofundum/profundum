@@ -350,7 +350,7 @@ private func parseDiveData(
 
     let endTimeUnix = startTimeUnix + Int64(diveTime)
 
-    return ParsedDive(
+    return DiveDataMapper.clipSurfaceTimeout(ParsedDive(
         startTimeUnix: startTimeUnix,
         endTimeUnix: endTimeUnix,
         maxDepthM: Float(maxDepth),
@@ -360,7 +360,7 @@ private func parseDiveData(
         decoRequired: sampleContext.maxCeiling > 0,
         fingerprint: fingerprint,
         samples: sampleContext.samples
-    )
+    ))
 }
 
 // MARK: - Sample Callback

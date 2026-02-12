@@ -174,6 +174,32 @@ public struct ParsedSample: Sendable {
 
 /// Maps parsed dive computer data to domain models.
 public enum DiveDataMapper {
+    /// Clips post-dive surface timeout padding from samples.
+    ///
+    /// Shearwater computers stay in dive mode for up to 10 minutes after surfacing.
+    /// This finds the last sample where `depthM > surfaceThresholdM` and clips
+    /// everything after it, recalculating `endTimeUnix` and `bottomTimeSec`.
+    ///
+    /// Mid-dive surface intervals are preserved because we find the *last* descent,
+    /// not the first surface.
+    public static func clipSurfaceTimeout(_ dive: ParsedDive, surfaceThresholdM: Float = 1.0) -> ParsedDive {
+        guard !dive.samples.isEmpty else { return dive }
+
+        // Find the last sample at depth
+        guard let lastDeepIndex = dive.samples.lastIndex(where: { $0.depthM > surfaceThresholdM }) else {
+            return dive
+        }
+
+        // If it's already the last sample, no padding to clip
+        guard lastDeepIndex < dive.samples.count - 1 else { return dive }
+
+        var clipped = dive
+        clipped.samples = Array(dive.samples[0...lastDeepIndex])
+        clipped.bottomTimeSec = dive.samples[lastDeepIndex].tSec
+        clipped.endTimeUnix = dive.startTimeUnix + Int64(clipped.bottomTimeSec)
+        return clipped
+    }
+
     /// Converts a `ParsedDive` into a `Dive`, its `[DiveSample]`, and `[GasMix]`.
     public static func toDive(_ parsed: ParsedDive, deviceId: String) -> (Dive, [DiveSample], [GasMix]) {
         let diveId = UUID().uuidString
