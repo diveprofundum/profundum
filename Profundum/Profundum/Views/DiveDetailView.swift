@@ -19,6 +19,8 @@ struct DiveDetailView: View {
     @State private var formulaResults: [(name: String, value: Double)] = []
     @State private var errorMessage: String?
     @State private var exportFileURL: URL?
+    @State private var showFullscreenChart = false
+    @State private var showTemperature = false
 
     var onDiveUpdated: (() -> Void)?
 
@@ -47,6 +49,12 @@ struct DiveDetailView: View {
                     notesSection(notes)
                 }
 
+                // Depth profile (hero element)
+                if !samples.isEmpty {
+                    Divider()
+                    depthProfileSection
+                }
+
                 Divider()
 
                 statsSection
@@ -67,12 +75,6 @@ struct DiveDetailView: View {
                 if !formulaResults.isEmpty {
                     Divider()
                     calculatedFieldsSection
-                }
-
-                // Depth profile
-                if !samples.isEmpty {
-                    Divider()
-                    depthProfileSection
                 }
 
                 // PPO2 chart for CCR dives
@@ -303,19 +305,73 @@ struct DiveDetailView: View {
         }
     }
 
+    private var hasTemperatureVariation: Bool {
+        let temps = samples.map(\.tempC)
+        guard let lo = temps.min(), let hi = temps.max() else { return false }
+        return hi - lo > 0.1
+    }
+
     private var depthProfileSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Depth Profile")
-                .font(.headline)
+            HStack(spacing: 10) {
+                Text("Depth Profile")
+                    .font(.headline)
 
-            DepthProfileChart(samples: samples, depthUnit: appState.depthUnit)
-                .frame(height: 200)
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(depthChartAccessibilityLabel)
-                .accessibilityIdentifier("depthProfileChart")
+                if hasTemperatureVariation {
+                    ChartOverlayChip(
+                        label: "Temperature",
+                        color: .orange,
+                        isActive: showTemperature
+                    ) {
+                        showTemperature.toggle()
+                    }
+                    .accessibilityIdentifier("temperatureToggle")
+                }
+
+                Spacer()
+
+                Button {
+                    showFullscreenChart = true
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Expand depth profile fullscreen")
+            }
+
+            DepthProfileChart(
+                samples: samples,
+                depthUnit: appState.depthUnit,
+                temperatureUnit: appState.temperatureUnit,
+                showTemperature: showTemperature
+            )
+            .frame(height: 200)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.gray.opacity(0.1))
+            )
+            .accessibilityIdentifier("depthProfileChart")
         }
+        #if os(iOS)
+        .fullScreenCover(isPresented: $showFullscreenChart) {
+            DepthProfileFullscreenView(
+                samples: samples,
+                depthUnit: appState.depthUnit,
+                temperatureUnit: appState.temperatureUnit
+            )
+        }
+        #else
+        .sheet(isPresented: $showFullscreenChart) {
+            DepthProfileFullscreenView(
+                samples: samples,
+                depthUnit: appState.depthUnit,
+                temperatureUnit: appState.temperatureUnit
+            )
+            .frame(minWidth: 700, minHeight: 500)
+        }
+        #endif
     }
 
     private func notesSection(_ notes: String) -> some View {
@@ -404,12 +460,6 @@ struct DiveDetailView: View {
                 }
             }
         }
-    }
-
-    private var depthChartAccessibilityLabel: String {
-        let depthStr = UnitFormatter.formatDepth(dive.maxDepthM, unit: appState.depthUnit)
-        let totalMinutes = (dive.endTimeUnix - dive.startTimeUnix) / 60
-        return "Depth profile chart. Maximum depth \(depthStr) over \(totalMinutes) minutes."
     }
 
     private var ppo2ChartAccessibilityLabel: String {
