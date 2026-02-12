@@ -3,6 +3,7 @@ import DivelogCore
 import SwiftUI
 
 #if os(iOS)
+@MainActor
 class AppDelegate: NSObject, UIApplicationDelegate {
     /// Orientation lock — views can override to force landscape, etc.
     static var orientationLock: UIInterfaceOrientationMask = .all
