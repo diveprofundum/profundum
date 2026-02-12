@@ -414,7 +414,9 @@ public final class ShearwaterCloudImportService: Sendable {
 
             // Merge metadata across group
             let mergedStartTime = group.map(\.startTimeUnix).min()!
-            let mergedEndTime = group.map { $0.startTimeUnix + Int64($0.durationSec) }.max()!
+            let mergedEndTime = parseResults.map {
+                $0.ir.startTimeUnix + Int64($0.parsedInfo.bottomTimeSec)
+            }.max()!
             let mergedMaxDepth = parseResults.map(\.parsedInfo.maxDepthM).max()!
             let mergedBottomTime = parseResults.map(\.parsedInfo.bottomTimeSec).max()!
             let mergedIsCcr = parseResults.contains { $0.parsedInfo.isCcr }
@@ -1063,7 +1065,7 @@ private func _tryParseShearwaterBlob(_ blob: Data) -> ParsedDive? {
 
         let endTimeUnix = startTimeUnix + Int64(diveTime)
 
-        return ParsedDive(
+        return DiveDataMapper.clipSurfaceTimeout(ParsedDive(
             startTimeUnix: startTimeUnix,
             endTimeUnix: endTimeUnix,
             maxDepthM: Float(maxDepth),
@@ -1080,7 +1082,7 @@ private func _tryParseShearwaterBlob(_ blob: Data) -> ParsedDive? {
             salinity: salinityStr,
             surfacePressureBar: atmStatus == DC_STATUS_SUCCESS ? Float(atmospheric) : nil,
             gasMixes: parsedGasMixes
-        )
+        ))
     }
 }
 
