@@ -1064,6 +1064,16 @@ private func _tryParseShearwaterBlob(_ blob: Data) -> ParsedDive? {
             sampleContext.commitCurrentSample()
         }
 
+        // Extract per-sample GF99 from raw PNF binary.
+        // libdivecomputer doesn't emit GF99, but it's at data byte 24
+        // in each 32-byte Petrel PNF dive sample record.
+        let gf99Values = DiveDataMapper.extractGf99FromPnf(blob)
+        if gf99Values.count == sampleContext.samples.count {
+            for i in 0 ..< gf99Values.count {
+                sampleContext.samples[i].gf99 = gf99Values[i]
+            }
+        }
+
         #if DEBUG
         let ppo2Samples = sampleContext.samples.filter {
             $0.ppo2_1 != nil || $0.ppo2_2 != nil || $0.ppo2_3 != nil

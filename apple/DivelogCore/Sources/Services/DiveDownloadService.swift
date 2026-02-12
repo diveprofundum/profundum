@@ -348,6 +348,15 @@ private func parseDiveData(
         ))
     }
 
+    // Extract per-sample GF99 from raw PNF binary (same as Shearwater Cloud import).
+    let rawData = Data(bytes: data, count: Int(size))
+    let gf99Values = DiveDataMapper.extractGf99FromPnf(rawData)
+    if gf99Values.count == sampleContext.samples.count {
+        for i in 0 ..< gf99Values.count {
+            sampleContext.samples[i].gf99 = gf99Values[i]
+        }
+    }
+
     let endTimeUnix = startTimeUnix + Int64(diveTime)
 
     return DiveDataMapper.clipSurfaceTimeout(ParsedDive(

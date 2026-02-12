@@ -13,7 +13,12 @@ struct DepthProfileChartData {
     let tempDisplayRange: (min: Float, max: Float)?
     let tempPoints: [TempDataPoint]
     let hasCeilingData: Bool
+    /// Time (in minutes) of the first sample with ceiling > 0, used to gate NDL display.
+    let firstCeilingTimeMinutes: Float?
     let ceilingPoints: [CeilingDataPoint]
+    let hasGf99Data: Bool
+    let gf99DisplayRange: (min: Float, max: Float)?
+    let gf99Points: [Gf99DataPoint]
 
     init(samples: [DiveSample], depthUnit: DepthUnit, temperatureUnit: TemperatureUnit) {
         var maxD: Float = 0
@@ -116,9 +121,11 @@ struct DepthProfileChartData {
         // but only emit data points at stride intervals to keep ~300 output points.
         // Gap tolerance ignores brief ceiling interruptions (data noise between stops).
         // Rolling max window smooths oscillations at stop boundaries for display.
-        let anyCeiling = samples.contains { ($0.ceilingM ?? 0) > 0 }
+        let firstCeilingIdx = samples.firstIndex(where: { ($0.ceilingM ?? 0) > 0 })
+        let anyCeiling = firstCeilingIdx != nil
         self.hasCeilingData = anyCeiling
         if anyCeiling {
+            self.firstCeilingTimeMinutes = firstCeilingIdx.map { Float(samples[$0].tSec) / 60.0 }
             // Pre-compute rolling max ceiling (±15 sec window) to smooth stop oscillations.
             // Uses sample timestamps to determine the window rather than fixed index count.
             let halfWindowSec: Int32 = 15
@@ -205,7 +212,69 @@ struct DepthProfileChartData {
             }
             self.ceilingPoints = cPoints
         } else {
+            self.firstCeilingTimeMinutes = nil
             self.ceilingPoints = []
+        }
+
+        // GF99 pass: downsample + smooth, normalize to depth Y-axis (same pattern as temperature).
+        let anyGf99 = samples.contains { ($0.gf99 ?? 0) > 0 }
+        self.hasGf99Data = anyGf99
+        if anyGf99 {
+            var minGf: Float = .greatestFiniteMagnitude
+            var maxGf: Float = -.greatestFiniteMagnitude
+            for s in samples {
+                if let g = s.gf99, g > 0 {
+                    if g < minGf { minGf = g }
+                    if g > maxGf { maxGf = g }
+                }
+            }
+            let gfSpan = maxGf - minGf
+            let gfPad = gfSpan > 0.1 ? gfSpan * 0.15 : max(minGf * 0.1, 1)
+            let gfRange = (min: minGf - gfPad, max: maxGf + gfPad)
+            let gfRangeDelta = gfRange.max - gfRange.min
+            self.gf99DisplayRange = gfRange
+
+            let gfTargetCount = 300
+            let gfStride = max(1, samples.count / gfTargetCount)
+            let gfHalfWindow = max(5, samples.count / 40)
+            var gf99Pts: [Gf99DataPoint] = []
+            gf99Pts.reserveCapacity(gfTargetCount + 2)
+            var gi = 0
+            var gfIdx = 0
+            while gi < samples.count {
+                let t = Float(samples[gi].tSec) / 60.0
+                let wStart = max(0, gi - gfHalfWindow)
+                let wEnd = min(samples.count - 1, gi + gfHalfWindow)
+                var gfSum: Float = 0
+                var gfCount = 0
+                for j in wStart ... wEnd {
+                    if let g = samples[j].gf99, g > 0 {
+                        gfSum += g
+                        gfCount += 1
+                    }
+                }
+                if gfCount > 0 {
+                    let avgGf = gfSum / Float(gfCount)
+                    let fraction = (avgGf - gfRange.min) / gfRangeDelta
+                    let normalized = -(maxD * (1.0 - fraction))
+                    gf99Pts.append(Gf99DataPoint(id: gfIdx, timeMinutes: t, normalizedValue: normalized))
+                    gfIdx += 1
+                }
+                gi += gfStride
+            }
+            // Always include last sample
+            if let last = samples.last, let g = last.gf99, g > 0 {
+                let lastT = Float(last.tSec) / 60.0
+                if gf99Pts.last?.timeMinutes != lastT {
+                    let fraction = (g - gfRange.min) / gfRangeDelta
+                    let normalized = -(maxD * (1.0 - fraction))
+                    gf99Pts.append(Gf99DataPoint(id: gfIdx, timeMinutes: lastT, normalizedValue: normalized))
+                }
+            }
+            self.gf99Points = gf99Pts
+        } else {
+            self.gf99DisplayRange = nil
+            self.gf99Points = []
         }
     }
 
@@ -303,11 +372,13 @@ struct DepthProfileChartData {
     }
 
     /// NDL display string for the nearest sample.
-    /// Returns nil if the sample has a ceiling (in deco) or no NDL data.
+    /// Returns nil if the sample has a ceiling, is past the first deco obligation, or has no NDL data.
     func nearestNdlDisplay(to time: Float, samples: [DiveSample]) -> String? {
         guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
         // Only show NDL when not in deco (no ceiling)
         if let cm = samples[idx].ceilingM, cm > 0 { return nil }
+        // Don't show NDL after deco has been entered — only pre-deco portion
+        if let firstCeiling = firstCeilingTimeMinutes, time >= firstCeiling { return nil }
         guard let ndl = samples[idx].ndlSec, ndl > 0 else { return nil }
         let minutes = ndl / 60
         return "\(minutes) min"
@@ -319,6 +390,20 @@ struct DepthProfileChartData {
         let fraction = (maxDepth + yValue) / maxDepth
         return range.min + fraction * (range.max - range.min)
     }
+
+    /// GF99 display string for the nearest sample.
+    func nearestGf99Display(to time: Float, samples: [DiveSample]) -> String? {
+        guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        guard let gf = samples[idx].gf99, gf > 0 else { return nil }
+        return String(format: "%.0f%%", gf)
+    }
+
+    /// Denormalize a negative Y chart value back to GF99 percentage.
+    func denormalizeGf99(_ yValue: Float) -> Float {
+        guard let range = gf99DisplayRange else { return 0 }
+        let fraction = (maxDepth + yValue) / maxDepth
+        return max(0, range.min + fraction * (range.max - range.min))
+    }
 }
 
 // MARK: - Chart view
@@ -328,6 +413,7 @@ struct DepthProfileChart: View {
     var depthUnit: DepthUnit = .meters
     var temperatureUnit: TemperatureUnit = .celsius
     var showTemperature: Bool = false
+    var showGf99: Bool = false
     var isFullscreen: Bool = false
 
     @State private var chartData: DepthProfileChartData?
@@ -368,6 +454,11 @@ struct DepthProfileChart: View {
         return data.nearestNdlDisplay(to: selectedTime, samples: samples)
     }
 
+    private var selectedGf99Display: String? {
+        guard let selectedTime, showGf99, let data = chartData, data.hasGf99Data else { return nil }
+        return data.nearestGf99Display(to: selectedTime, samples: samples)
+    }
+
     // MARK: - Accessibility
 
     private var chartAccessibilityLabel: String {
@@ -386,6 +477,14 @@ struct DepthProfileChart: View {
         if data.hasCeilingData, let maxCeiling = samples.compactMap(\.ceilingM).max(), maxCeiling > 0 {
             let maxCeilingDisp = UnitFormatter.formatDepth(maxCeiling, unit: depthUnit)
             label += " Deco ceiling shown, maximum ceiling \(maxCeilingDisp)."
+        }
+        if showGf99, data.hasGf99Data {
+            let gf99Values = samples.compactMap(\.gf99).filter { $0 > 0 }
+            if let loGf = gf99Values.min(), let hiGf = gf99Values.max() {
+                let loStr = String(format: "%.0f%%", loGf)
+                let hiStr = String(format: "%.0f%%", hiGf)
+                label += " GF99 overlay active, ranging from \(loStr) to \(hiStr)."
+            }
         }
         return label
     }
@@ -470,6 +569,21 @@ struct DepthProfileChart: View {
     }
 
     @ChartContentBuilder
+    private func gf99Content(data: DepthProfileChartData) -> some ChartContent {
+        if showGf99 {
+            ForEach(data.gf99Points) { point in
+                LineMark(
+                    x: .value("Time", point.timeMinutes),
+                    y: .value("Depth", point.normalizedValue),
+                    series: .value("Series", "GF99")
+                )
+                .foregroundStyle(Color.purple)
+                .lineStyle(StrokeStyle(lineWidth: 2))
+            }
+        }
+    }
+
+    @ChartContentBuilder
     private var scrubContent: some ChartContent {
         if let selectedPoint {
             RuleMark(x: .value("Selected", selectedPoint.timeMinutes))
@@ -481,7 +595,7 @@ struct DepthProfileChart: View {
                 .annotation(
                     position: .top,
                     spacing: 4,
-                    overflowResolution: .init(x: .fit(to: .chart), y: .disabled)
+                    overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))
                 ) {
                     tooltipView
                 }
@@ -493,6 +607,7 @@ struct DepthProfileChart: View {
             depthContent(data: data)
             ceilingContent(data: data)
             temperatureContent(data: data)
+            gf99Content(data: data)
             scrubContent
         }
         .chartYScale(domain: data.domainMin ... data.domainMax)
@@ -516,7 +631,18 @@ struct DepthProfileChart: View {
                     }
                 }
             }
-            if showTemperature {
+            if showGf99 {
+                AxisMarks(position: .trailing, values: .automatic) { value in
+                    AxisValueLabel {
+                        if let yVal = value.as(Float.self) {
+                            let gf = data.denormalizeGf99(yVal)
+                            if gf >= 0 {
+                                Text(String(format: "%.0f%%", gf))
+                            }
+                        }
+                    }
+                }
+            } else if showTemperature {
                 AxisMarks(position: .trailing, values: .automatic) { value in
                     AxisValueLabel {
                         if let yVal = value.as(Float.self) {
@@ -585,6 +711,11 @@ struct DepthProfileChart: View {
                     .font(isFullscreen ? .caption : .caption2)
                     .foregroundColor(.green)
             }
+            if let gf99Str = selectedGf99Display {
+                Text("GF99 \(gf99Str)")
+                    .font(isFullscreen ? .caption : .caption2)
+                    .foregroundColor(.purple)
+            }
         }
         .padding(4)
         .background(tooltipBackground)
@@ -631,4 +762,11 @@ struct CeilingDataPoint: Identifiable {
     let timeMinutes: Float
     /// Positive ceiling depth in display units.
     let ceilingDepth: Float
+}
+
+struct Gf99DataPoint: Identifiable {
+    let id: Int
+    let timeMinutes: Float
+    /// Negative normalized value mapped to depth Y-axis.
+    let normalizedValue: Float
 }

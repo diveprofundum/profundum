@@ -8,6 +8,11 @@ struct DepthProfileFullscreenView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var showTemperature = false
+    @State private var showGf99 = false
+
+    private var hasGf99Data: Bool {
+        samples.contains { ($0.gf99 ?? 0) > 0 }
+    }
 
     private var hasTemperatureVariation: Bool {
         let temps = samples.map(\.tempC)
@@ -29,6 +34,16 @@ struct DepthProfileFullscreenView: View {
                         isActive: showTemperature
                     ) {
                         showTemperature.toggle()
+                    }
+                }
+
+                if hasGf99Data {
+                    ChartOverlayChip(
+                        label: "GF99",
+                        color: .purple,
+                        isActive: showGf99
+                    ) {
+                        showGf99.toggle()
                     }
                 }
 
@@ -54,6 +69,7 @@ struct DepthProfileFullscreenView: View {
                 depthUnit: depthUnit,
                 temperatureUnit: temperatureUnit,
                 showTemperature: showTemperature,
+                showGf99: showGf99,
                 isFullscreen: true
             )
             .frame(maxHeight: .infinity)
