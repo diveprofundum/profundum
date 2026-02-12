@@ -34,14 +34,14 @@ struct DepthProfileChart: View {
 
     /// True when samples contain varying temperature (more than 0.1 C spread).
     private var hasTemperatureVariation: Bool {
-        let temps = samples.compactMap(\.tempC)
+        let temps = samples.map(\.tempC)
         guard let lo = temps.min(), let hi = temps.max() else { return false }
         return hi - lo > 0.1
     }
 
     /// Temperature display range (in user unit) with padding, or nil if no variation.
     private var tempDisplayRange: (min: Float, max: Float)? {
-        let temps = samples.compactMap(\.tempC)
+        let temps = samples.map(\.tempC)
         guard let loC = temps.min(), let hiC = temps.max(), hiC - loC > 0.1 else { return nil }
         let a = UnitFormatter.temperature(loC, unit: temperatureUnit)
         let b = UnitFormatter.temperature(hiC, unit: temperatureUnit)
@@ -69,11 +69,10 @@ struct DepthProfileChart: View {
     }
 
     private var temperaturePoints: [TempDataPoint] {
-        samples.compactMap { s in
-            guard let tempC = s.tempC else { return nil }
-            return TempDataPoint(
+        samples.map { s in
+            TempDataPoint(
                 timeMinutes: Float(s.tSec) / 60.0,
-                normalizedValue: normalizeTemp(tempC)
+                normalizedValue: normalizeTemp(s.tempC)
             )
         }
     }
@@ -82,11 +81,9 @@ struct DepthProfileChart: View {
     private var selectedTempDisplay: String? {
         guard let selectedTime, showTemperature else { return nil }
         guard let sample = samples
-            .filter({ $0.tempC != nil })
-            .min(by: { abs(Float($0.tSec) / 60.0 - selectedTime) < abs(Float($1.tSec) / 60.0 - selectedTime) }),
-            let tempC = sample.tempC
+            .min(by: { abs(Float($0.tSec) / 60.0 - selectedTime) < abs(Float($1.tSec) / 60.0 - selectedTime) })
         else { return nil }
-        return UnitFormatter.formatTemperature(tempC, unit: temperatureUnit)
+        return UnitFormatter.formatTemperature(sample.tempC, unit: temperatureUnit)
     }
 
     // MARK: - Accessibility
@@ -96,7 +93,7 @@ struct DepthProfileChart: View {
         let totalMinutes = Int((chartPoints.last?.timeMinutes ?? 0).rounded())
         var label = "Depth profile chart. Maximum depth \(depthStr) over \(totalMinutes) minutes."
         if showTemperature {
-            let temps = samples.compactMap(\.tempC)
+            let temps = samples.map(\.tempC)
             if let loC = temps.min(), let hiC = temps.max() {
                 let loDisp = UnitFormatter.formatTemperature(loC, unit: temperatureUnit)
                 let hiDisp = UnitFormatter.formatTemperature(hiC, unit: temperatureUnit)
