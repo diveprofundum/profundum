@@ -15,11 +15,11 @@ use crate::metrics::SampleInput;
 const P_WATER_VAPOR: f64 = 0.0627;
 
 /// Pressure increase per metre of seawater (bar/m).
-/// Using 1.01325 / 10.0 ≈ 0.101325 — standard seawater.
-const BAR_PER_METER: f64 = 0.10;
+/// 1 atm / 10 msw = 1.01325 / 10.0
+const BAR_PER_METER: f64 = 0.101325;
 
 /// Default surface atmospheric pressure (bar) at sea level.
-const DEFAULT_SURFACE_PRESSURE: f64 = 1.013;
+const DEFAULT_SURFACE_PRESSURE: f64 = 1.01325;
 
 /// Fraction of N2 in air.
 const AIR_FN2: f64 = 0.7902;
@@ -34,39 +34,39 @@ const AIR_FO2: f64 = 0.2095;
 /// Number of tissue compartments.
 const NUM_COMPARTMENTS: usize = 16;
 
-/// N2 half-times in minutes for compartments 1–16.
+/// N2 half-times in minutes for compartments 1–16 (ZHL-16C).
 const N2_HALF_TIMES: [f64; NUM_COMPARTMENTS] = [
-    4.0, 8.0, 12.5, 18.5, 27.0, 38.3, 54.3, 77.0, 109.0, 146.0, 187.0, 239.0, 305.0, 390.0, 498.0,
+    5.0, 8.0, 12.5, 18.5, 27.0, 38.3, 54.3, 77.0, 109.0, 146.0, 187.0, 239.0, 305.0, 390.0, 498.0,
     635.0,
 ];
 
-/// He half-times in minutes for compartments 1–16.
+/// He half-times in minutes for compartments 1–16 (ZHL-16C).
 const HE_HALF_TIMES: [f64; NUM_COMPARTMENTS] = [
-    1.51, 3.02, 4.72, 6.99, 10.21, 14.48, 20.53, 29.11, 41.20, 55.19, 70.69, 90.34, 115.29, 147.42,
+    1.88, 3.02, 4.72, 6.99, 10.21, 14.48, 20.53, 29.11, 41.20, 55.19, 70.69, 90.34, 115.29, 147.42,
     188.24, 240.03,
 ];
 
 /// N2 'a' coefficients (bar) for ZHL-16C.
 const A_N2: [f64; NUM_COMPARTMENTS] = [
-    1.2599, 1.0000, 0.8618, 0.7562, 0.6200, 0.5043, 0.4410, 0.4000, 0.3750, 0.3500, 0.3295, 0.3065,
+    1.1696, 1.0000, 0.8618, 0.7562, 0.6200, 0.5043, 0.4410, 0.4000, 0.3750, 0.3500, 0.3295, 0.3065,
     0.2835, 0.2610, 0.2480, 0.2327,
 ];
 
 /// N2 'b' coefficients (dimensionless) for ZHL-16C.
 const B_N2: [f64; NUM_COMPARTMENTS] = [
-    0.5050, 0.6514, 0.7222, 0.7825, 0.8126, 0.8434, 0.8693, 0.8910, 0.9092, 0.9222, 0.9319, 0.9403,
+    0.5578, 0.6514, 0.7222, 0.7825, 0.8126, 0.8434, 0.8693, 0.8910, 0.9092, 0.9222, 0.9319, 0.9403,
     0.9477, 0.9544, 0.9602, 0.9653,
 ];
 
 /// He 'a' coefficients (bar) for ZHL-16C.
 const A_HE: [f64; NUM_COMPARTMENTS] = [
-    1.7424, 1.3830, 1.1919, 1.0458, 0.9220, 0.8205, 0.7305, 0.6502, 0.5950, 0.5545, 0.5333, 0.5189,
+    1.6189, 1.3830, 1.1919, 1.0458, 0.9220, 0.8205, 0.7305, 0.6502, 0.5950, 0.5545, 0.5333, 0.5189,
     0.5181, 0.5176, 0.5172, 0.5119,
 ];
 
 /// He 'b' coefficients (dimensionless) for ZHL-16C.
 const B_HE: [f64; NUM_COMPARTMENTS] = [
-    0.4245, 0.5747, 0.6527, 0.7223, 0.7582, 0.7957, 0.8279, 0.8553, 0.8757, 0.8903, 0.8997, 0.9073,
+    0.4770, 0.5747, 0.6527, 0.7223, 0.7582, 0.7957, 0.8279, 0.8553, 0.8757, 0.8903, 0.8997, 0.9073,
     0.9122, 0.9171, 0.9217, 0.9267,
 ];
 
@@ -143,31 +143,19 @@ impl TissueState {
         }
     }
 
-    /// Compute the Surface Gradient Factor (%) — the max GF across all compartments
-    /// if the diver were to ascend instantly to the surface.
-    fn surface_gf(&self, surface_pressure: f64) -> f64 {
+    /// Compute the Surface Gradient Factor (%) and leading compartment index
+    /// in a single pass over all compartments.
+    fn surface_gf_and_leading(&self, surface_pressure: f64) -> (f64, usize) {
         let mut max_gf: f64 = 0.0;
+        let mut leading: usize = 0;
         for i in 0..NUM_COMPARTMENTS {
             let gf = self.compartment_gf(i, surface_pressure);
             if gf > max_gf {
                 max_gf = gf;
+                leading = i;
             }
         }
-        max_gf
-    }
-
-    /// Index of the compartment with the highest surface GF.
-    fn leading_compartment(&self, surface_pressure: f64) -> usize {
-        let mut best_idx = 0;
-        let mut best_gf = f64::NEG_INFINITY;
-        for i in 0..NUM_COMPARTMENTS {
-            let gf = self.compartment_gf(i, surface_pressure);
-            if gf > best_gf {
-                best_gf = gf;
-                best_idx = i;
-            }
-        }
-        best_idx
+        (max_gf, leading)
     }
 
     /// Gradient factor for a single compartment at the given ambient pressure.
@@ -205,9 +193,12 @@ impl TissueState {
 /// Uses a Bühlmann ZHL-16C tissue simulation. Assumes the diver starts
 /// at surface equilibrium on air.
 ///
+/// **Note:** Assumes open-circuit gas fractions. CCR `setpoint_ppo2` is not yet
+/// used to derive effective inspired fractions — a future enhancement.
+///
 /// - `samples` — time-ordered depth/time/gas profile.
 /// - `gas_mixes` — gas definitions keyed by `mix_index`. If empty, defaults to air.
-/// - `surface_pressure_bar` — ambient surface pressure (defaults to 1.013 bar).
+/// - `surface_pressure_bar` — ambient surface pressure (defaults to 1.01325 bar).
 pub fn compute_surface_gf(
     samples: &[SampleInput],
     gas_mixes: &[GasMixInput],
@@ -235,21 +226,14 @@ pub fn compute_surface_gf(
     let mut results = Vec::with_capacity(samples.len());
 
     for (idx, sample) in samples.iter().enumerate() {
-        // Handle gas switches
-        if let Some(mix_idx) = sample.gasmix_index {
-            if let Some(&(fo2, fhe)) = gas_lookup.get(&mix_idx) {
-                current_fo2 = fo2;
-                current_fhe = fhe;
-            }
-            // Unknown mix_idx: keep last known gas
-        }
-
-        // Compute time delta from previous sample
+        // Compute time delta from previous sample and update tissues
+        // using the gas that was being breathed during the interval.
         if idx > 0 {
             let dt_sec = (sample.t_sec - samples[idx - 1].t_sec) as f64;
 
-            // Average depth between this sample and previous
-            let avg_depth_m = (samples[idx - 1].depth_m as f64 + sample.depth_m as f64) / 2.0;
+            // Average depth between this sample and previous (clamp ≥ 0)
+            let avg_depth_m =
+                ((samples[idx - 1].depth_m as f64 + sample.depth_m as f64) / 2.0).max(0.0);
             let ambient_p = surface_p + avg_depth_m * BAR_PER_METER;
 
             // Inspired gas partial pressures (accounting for water vapour)
@@ -260,8 +244,16 @@ pub fn compute_surface_gf(
             tissues.update(dt_sec, p_inspired_n2, p_inspired_he);
         }
 
-        let sgf = tissues.surface_gf(surface_p);
-        let leading = tissues.leading_compartment(surface_p);
+        // Apply gas switch after tissue update so the previous interval
+        // uses the gas that was actually being breathed.
+        if let Some(mix_idx) = sample.gasmix_index {
+            if let Some(&(fo2, fhe)) = gas_lookup.get(&mix_idx) {
+                current_fo2 = fo2;
+                current_fhe = fhe;
+            }
+        }
+
+        let (sgf, leading) = tissues.surface_gf_and_leading(surface_p);
 
         results.push(SurfaceGfPoint {
             t_sec: sample.t_sec,
@@ -297,7 +289,7 @@ mod tests {
     #[test]
     fn test_surface_equilibrium() {
         let tissues = TissueState::surface_equilibrium(DEFAULT_SURFACE_PRESSURE);
-        let sgf = tissues.surface_gf(DEFAULT_SURFACE_PRESSURE);
+        let (sgf, _) = tissues.surface_gf_and_leading(DEFAULT_SURFACE_PRESSURE);
         // At surface equilibrium, SurfGF should be ~0
         assert!(
             sgf.abs() < 1.0,
