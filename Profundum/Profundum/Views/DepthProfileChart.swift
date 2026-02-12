@@ -333,7 +333,7 @@ struct DepthProfileChart: View {
                     yStart: .value("Surface", Float(0)),
                     yEnd: .value("Ceiling", -point.ceilingDepth)
                 )
-                .foregroundStyle(Color.red.opacity(0.08))
+                .foregroundStyle(Color.red.opacity(0.25))
             }
         }
     }
