@@ -273,4 +273,54 @@ public enum DiveDataMapper {
 
         return (dive, samples, gasMixes)
     }
+
+    // MARK: - GF99 Extraction from PNF Binary
+
+    /// Extracts per-sample GF99 values directly from raw Shearwater PNF binary data.
+    /// libdivecomputer doesn't emit GF99 as a sample type, but Petrel computers store it
+    /// at data byte offset 24 in each 32-byte dive sample record.
+    /// Returns nil for samples where GF99 is 0 (surface/no-load) or 0xFF (not computed at depth).
+    static func extractGf99FromPnf(_ data: Data) -> [Float?] {
+        guard data.count >= 32 else { return [] }
+
+        let sampleSize = 32 // SZ_SAMPLE_PETREL
+        // PNF format: first 2 bytes != 0xFFFF
+        let isPnf = data.count >= 2 && !(data[0] == 0xFF && data[1] == 0xFF)
+        // In PNF, byte 0 of each record is the type; data byte 24 = raw byte 25.
+        // In non-PNF, no type byte; data byte 24 = raw byte 24.
+        let gf99Offset = isPnf ? 25 : 24
+        let diveSampleType: UInt8 = 0x01
+
+        var values: [Float?] = []
+        var offset = 0
+
+        if isPnf {
+            while offset + sampleSize <= data.count {
+                let recordType = data[offset]
+                if recordType == 0xFF { break } // LOG_RECORD_FINAL
+                if recordType == diveSampleType {
+                    let raw = data[offset + gf99Offset]
+                    // 0 = no tissue loading (surface), 0xFF = not computed (at depth)
+                    let valid = raw > 0 && raw < 0xFF
+                    values.append(valid ? Float(raw) : nil)
+                }
+                offset += sampleSize
+            }
+        } else {
+            // Non-PNF: skip 128-byte header and footer, all records are dive samples
+            let headerSize = 128
+            let footerSize = 128
+            guard data.count > headerSize + footerSize else { return [] }
+            offset = headerSize
+            let endOffset = data.count - footerSize
+            while offset + sampleSize <= endOffset {
+                let raw = data[offset + gf99Offset]
+                let valid = raw > 0 && raw < 0xFF
+                values.append(valid ? Float(raw) : nil)
+                offset += sampleSize
+            }
+        }
+
+        return values
+    }
 }

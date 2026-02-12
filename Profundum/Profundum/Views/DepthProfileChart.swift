@@ -121,11 +121,11 @@ struct DepthProfileChartData {
         // but only emit data points at stride intervals to keep ~300 output points.
         // Gap tolerance ignores brief ceiling interruptions (data noise between stops).
         // Rolling max window smooths oscillations at stop boundaries for display.
-        let anyCeiling = samples.contains { ($0.ceilingM ?? 0) > 0 }
+        let firstCeilingIdx = samples.firstIndex(where: { ($0.ceilingM ?? 0) > 0 })
+        let anyCeiling = firstCeilingIdx != nil
         self.hasCeilingData = anyCeiling
         if anyCeiling {
-            self.firstCeilingTimeMinutes = samples.first(where: { ($0.ceilingM ?? 0) > 0 })
-                .map { Float($0.tSec) / 60.0 }
+            self.firstCeilingTimeMinutes = firstCeilingIdx.map { Float(samples[$0].tSec) / 60.0 }
             // Pre-compute rolling max ceiling (±15 sec window) to smooth stop oscillations.
             // Uses sample timestamps to determine the window rather than fixed index count.
             let halfWindowSec: Int32 = 15
@@ -228,8 +228,10 @@ struct DepthProfileChartData {
                     if g > maxGf { maxGf = g }
                 }
             }
-            let gfPad = (maxGf - minGf) * 0.15
+            let gfSpan = maxGf - minGf
+            let gfPad = gfSpan > 0.1 ? gfSpan * 0.15 : max(minGf * 0.1, 1)
             let gfRange = (min: minGf - gfPad, max: maxGf + gfPad)
+            let gfRangeDelta = gfRange.max - gfRange.min
             self.gf99DisplayRange = gfRange
 
             let gfTargetCount = 300
@@ -253,7 +255,7 @@ struct DepthProfileChartData {
                 }
                 if gfCount > 0 {
                     let avgGf = gfSum / Float(gfCount)
-                    let fraction = (avgGf - gfRange.min) / (gfRange.max - gfRange.min)
+                    let fraction = (avgGf - gfRange.min) / gfRangeDelta
                     let normalized = -(maxD * (1.0 - fraction))
                     gf99Pts.append(Gf99DataPoint(id: gfIdx, timeMinutes: t, normalizedValue: normalized))
                     gfIdx += 1
@@ -264,7 +266,7 @@ struct DepthProfileChartData {
             if let last = samples.last, let g = last.gf99, g > 0 {
                 let lastT = Float(last.tSec) / 60.0
                 if gf99Pts.last?.timeMinutes != lastT {
-                    let fraction = (g - gfRange.min) / (gfRange.max - gfRange.min)
+                    let fraction = (g - gfRange.min) / gfRangeDelta
                     let normalized = -(maxD * (1.0 - fraction))
                     gf99Pts.append(Gf99DataPoint(id: gfIdx, timeMinutes: lastT, normalizedValue: normalized))
                 }
