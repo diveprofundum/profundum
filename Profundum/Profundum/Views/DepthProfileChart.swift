@@ -115,11 +115,34 @@ struct DepthProfileChartData {
         // Ceiling pass: iterate ALL samples to catch every deco transition,
         // but only emit data points at stride intervals to keep ~300 output points.
         // Gap tolerance ignores brief ceiling interruptions (data noise between stops).
+        // Rolling max window smooths oscillations at stop boundaries for display.
         let anyCeiling = samples.contains { ($0.ceilingM ?? 0) > 0 }
         self.hasCeilingData = anyCeiling
         if anyCeiling {
+            // Pre-compute rolling max ceiling (±15 sec window) to smooth stop oscillations.
+            // Uses sample timestamps to determine the window rather than fixed index count.
+            let halfWindowSec: Int32 = 15
+            var smoothedCeiling = [Float](repeating: 0, count: samples.count)
+            var windowStart = 0
+            var windowEnd = 0
+            for i in 0 ..< samples.count {
+                let tSec = samples[i].tSec
+                while windowStart < samples.count && samples[windowStart].tSec < tSec - halfWindowSec {
+                    windowStart += 1
+                }
+                while windowEnd < samples.count && samples[windowEnd].tSec <= tSec + halfWindowSec {
+                    windowEnd += 1
+                }
+                var maxInWindow: Float = 0
+                for j in windowStart ..< windowEnd {
+                    let c = samples[j].ceilingM ?? 0
+                    if c > maxInWindow { maxInWindow = c }
+                }
+                smoothedCeiling[i] = maxInWindow
+            }
+
             let cStride = max(1, samples.count / 300)
-            let gapTolerance = 5 // ignore gaps shorter than 5 consecutive zero-ceiling samples
+            let gapTolerance = 5
             var cPoints: [CeilingDataPoint] = []
             cPoints.reserveCapacity(302)
             var cIdx = 0
@@ -129,13 +152,12 @@ struct DepthProfileChartData {
             var gapStartIndex = 0
 
             for i in 0 ..< samples.count {
-                let cm = samples[i].ceilingM ?? 0
+                let cm = smoothedCeiling[i]
                 let inDeco = cm > 0
                 let t = Float(samples[i].tSec) / 60.0
 
                 if wasInDeco {
                     if inDeco {
-                        // Still in deco (or gap recovered) — reset gap tracking
                         gapLength = 0
                         if i - lastEmitted >= cStride {
                             let d = UnitFormatter.depth(cm, unit: depthUnit)
@@ -144,11 +166,9 @@ struct DepthProfileChartData {
                             lastEmitted = i
                         }
                     } else {
-                        // Zero ceiling while in deco — count gap
                         if gapLength == 0 { gapStartIndex = i }
                         gapLength += 1
                         if gapLength >= gapTolerance {
-                            // Real exit — emit boundary at gap start
                             let exitT = Float(samples[gapStartIndex].tSec) / 60.0
                             cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: exitT, ceilingDepth: 0))
                             cIdx += 1
@@ -157,7 +177,6 @@ struct DepthProfileChartData {
                         }
                     }
                 } else if inDeco {
-                    // Entering deco
                     cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: t, ceilingDepth: 0))
                     cIdx += 1
                     let d = UnitFormatter.depth(cm, unit: depthUnit)

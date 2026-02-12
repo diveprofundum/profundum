@@ -461,6 +461,17 @@ public final class ShearwaterCloudImportService: Sendable {
                 return nil
             }()
 
+            // Max ceiling across all computers' samples
+            let mergedMaxCeiling: Float? = {
+                var maxVal: Float = 0
+                for pr in parseResults {
+                    for s in pr.parsedInfo.samples {
+                        if let c = s.ceilingM, c > maxVal { maxVal = c }
+                    }
+                }
+                return maxVal > 0 ? maxVal : nil
+            }()
+
             let diveId = UUID().uuidString
             let dive = Dive(
                 id: diveId,
@@ -487,6 +498,7 @@ public final class ShearwaterCloudImportService: Sendable {
                 lat: mergedLat,
                 lon: mergedLon,
                 groupId: groupId,
+                maxCeilingM: mergedMaxCeiling,
                 environment: mergedEnvironment,
                 visibility: mergedVisibility,
                 weather: mergedWeather

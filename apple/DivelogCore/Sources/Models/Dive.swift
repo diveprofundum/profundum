@@ -39,6 +39,7 @@ public struct Dive: Identifiable, Equatable, Hashable, Sendable {
     public var lon: Double?
     public var groupId: String?
     public var environment: String?
+    public var maxCeilingM: Float?
     public var visibility: String?
     public var weather: String?
 
@@ -75,6 +76,7 @@ public struct Dive: Identifiable, Equatable, Hashable, Sendable {
         lat: Double? = nil,
         lon: Double? = nil,
         groupId: String? = nil,
+        maxCeilingM: Float? = nil,
         environment: String? = nil,
         visibility: String? = nil,
         weather: String? = nil
@@ -111,6 +113,7 @@ public struct Dive: Identifiable, Equatable, Hashable, Sendable {
         self.lat = lat
         self.lon = lon
         self.groupId = groupId
+        self.maxCeilingM = maxCeilingM
         self.environment = environment
         self.visibility = visibility
         self.weather = weather
@@ -155,6 +158,7 @@ extension Dive: Codable, FetchableRecord, PersistableRecord {
         case lat
         case lon
         case groupId = "group_id"
+        case maxCeilingM = "max_ceiling_m"
         case environment
         case visibility
         case weather
