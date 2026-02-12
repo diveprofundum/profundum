@@ -252,7 +252,7 @@ final class DiveComputerTests: XCTestCase {
             samples: [
                 ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0),
                 ParsedSample(tSec: 60, depthM: 15.0, tempC: 20.0, setpointPpo2: 1.3),
-                ParsedSample(tSec: 120, depthM: 35.0, tempC: 18.0, ceilingM: 3.0, gf99: 85.0),
+                ParsedSample(tSec: 120, depthM: 35.0, tempC: 18.0, ceilingM: 3.0, gf99: 85.0, atPlusFiveTtsMin: 12),
             ]
         )
 
@@ -267,14 +267,153 @@ final class DiveComputerTests: XCTestCase {
 
         XCTAssertEqual(samples.count, 3)
         XCTAssertEqual(samples[0].tSec, 0)
+        XCTAssertNil(samples[0].atPlusFiveTtsMin)
         XCTAssertEqual(samples[1].setpointPpo2, 1.3)
         XCTAssertEqual(samples[2].ceilingM, 3.0)
         XCTAssertEqual(samples[2].gf99, 85.0)
+        XCTAssertEqual(samples[2].atPlusFiveTtsMin, 12)
 
         // All samples should share the dive ID
         for sample in samples {
             XCTAssertEqual(sample.diveId, dive.id)
         }
+    }
+
+    // MARK: - PNF Sample Field Extraction Tests
+
+    func testExtractPnfSampleFieldsTooSmall() {
+        // Data smaller than one 32-byte record → empty arrays
+        let pnf = DiveDataMapper.extractPnfSampleFields(Data(repeating: 0, count: 16))
+        XCTAssertTrue(pnf.gf99.isEmpty)
+        XCTAssertTrue(pnf.atPlusFiveTtsMin.isEmpty)
+    }
+
+    func testExtractPnfSampleFieldsPnfFormat() {
+        // Build a PNF record: byte 0 = record type (0x01 = dive sample),
+        // bytes 1-31 = data. GF99 at raw byte 25, @+5 at raw byte 27.
+        var record = Data(repeating: 0, count: 32)
+        record[0] = 0x01  // dive sample record type
+        record[25] = 72   // GF99 = 72%
+        record[27] = 15   // @+5 = 15 minutes
+
+        let pnf = DiveDataMapper.extractPnfSampleFields(record)
+        XCTAssertEqual(pnf.gf99.count, 1)
+        XCTAssertEqual(pnf.gf99[0], 72.0)
+        XCTAssertEqual(pnf.atPlusFiveTtsMin.count, 1)
+        XCTAssertEqual(pnf.atPlusFiveTtsMin[0], 15)
+    }
+
+    func testExtractPnfSampleFieldsSentinelValues() {
+        // GF99=0 (no tissue load) → nil, @+5=0 (no deco) → nil
+        var record1 = Data(repeating: 0, count: 32)
+        record1[0] = 0x01
+        record1[25] = 0   // GF99 sentinel
+        record1[27] = 0   // @+5 sentinel
+
+        // GF99=0xFF (not computed) → nil, @+5=8 → valid
+        var record2 = Data(repeating: 0, count: 32)
+        record2[0] = 0x01
+        record2[25] = 0xFF
+        record2[27] = 8
+
+        var data = Data()
+        data.append(record1)
+        data.append(record2)
+
+        let pnf = DiveDataMapper.extractPnfSampleFields(data)
+        XCTAssertEqual(pnf.gf99.count, 2)
+        XCTAssertNil(pnf.gf99[0])
+        XCTAssertNil(pnf.gf99[1])
+        XCTAssertEqual(pnf.atPlusFiveTtsMin.count, 2)
+        XCTAssertNil(pnf.atPlusFiveTtsMin[0])
+        XCTAssertEqual(pnf.atPlusFiveTtsMin[1], 8)
+    }
+
+    func testExtractPnfSampleFieldsSkipsNonDiveRecords() {
+        // Record type 0x02 (not a dive sample) should be skipped
+        var nonDive = Data(repeating: 0, count: 32)
+        nonDive[0] = 0x02
+        nonDive[25] = 50
+        nonDive[27] = 10
+
+        var diveSample = Data(repeating: 0, count: 32)
+        diveSample[0] = 0x01
+        diveSample[25] = 80
+        diveSample[27] = 20
+
+        var data = Data()
+        data.append(nonDive)
+        data.append(diveSample)
+
+        let pnf = DiveDataMapper.extractPnfSampleFields(data)
+        XCTAssertEqual(pnf.gf99.count, 1)
+        XCTAssertEqual(pnf.gf99[0], 80.0)
+        XCTAssertEqual(pnf.atPlusFiveTtsMin[0], 20)
+    }
+
+    func testExtractPnfSampleFieldsStopsAtFinalRecord() {
+        // 0xFF record type = LOG_RECORD_FINAL, should stop parsing
+        var diveSample = Data(repeating: 0, count: 32)
+        diveSample[0] = 0x01
+        diveSample[25] = 60
+        diveSample[27] = 5
+
+        var finalRecord = Data(repeating: 0, count: 32)
+        finalRecord[0] = 0xFF
+
+        var trailingDive = Data(repeating: 0, count: 32)
+        trailingDive[0] = 0x01
+        trailingDive[25] = 90
+        trailingDive[27] = 25
+
+        var data = Data()
+        data.append(diveSample)
+        data.append(finalRecord)
+        data.append(trailingDive)
+
+        let pnf = DiveDataMapper.extractPnfSampleFields(data)
+        XCTAssertEqual(pnf.gf99.count, 1, "Should stop at final record")
+        XCTAssertEqual(pnf.gf99[0], 60.0)
+        XCTAssertEqual(pnf.atPlusFiveTtsMin[0], 5)
+    }
+
+    func testExtractPnfSampleFieldsNonPnfFormat() {
+        // Non-PNF: starts with 0xFFFF, has 128-byte header + 128-byte footer.
+        // GF99 at raw byte 24, @+5 at raw byte 26.
+        let headerSize = 128
+        let footerSize = 128
+
+        var header = Data(repeating: 0, count: headerSize)
+        header[0] = 0xFF
+        header[1] = 0xFF
+
+        var record = Data(repeating: 0, count: 32)
+        record[24] = 55   // GF99
+        record[26] = 7    // @+5
+
+        let footer = Data(repeating: 0, count: footerSize)
+
+        var data = Data()
+        data.append(header)
+        data.append(record)
+        data.append(footer)
+
+        let pnf = DiveDataMapper.extractPnfSampleFields(data)
+        XCTAssertEqual(pnf.gf99.count, 1)
+        XCTAssertEqual(pnf.gf99[0], 55.0)
+        XCTAssertEqual(pnf.atPlusFiveTtsMin.count, 1)
+        XCTAssertEqual(pnf.atPlusFiveTtsMin[0], 7)
+    }
+
+    func testExtractPnfSampleFieldsNonPnfTooSmallForContent() {
+        // Non-PNF with only header+footer, no sample records
+        var data = Data(repeating: 0xFF, count: 256)
+        data[0] = 0xFF
+        data[1] = 0xFF
+
+        let pnf = DiveDataMapper.extractPnfSampleFields(data)
+        XCTAssertTrue(pnf.gf99.isEmpty)
+        XCTAssertTrue(pnf.atPlusFiveTtsMin.isEmpty)
     }
 
     // MARK: - Import Service Idempotency Tests
