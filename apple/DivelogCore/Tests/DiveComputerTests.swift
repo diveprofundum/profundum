@@ -142,7 +142,7 @@ final class DiveComputerTests: XCTestCase {
 
     // MARK: - Fingerprint Duplicate Detection
 
-    func testIsDuplicateFingerprint() throws {
+    func testFindExistingDiveByFingerprint() throws {
         let device = Device(model: "Test", serialNumber: "SN", firmwareVersion: "1.0")
         try diveService.saveDevice(device)
 
@@ -158,11 +158,13 @@ final class DiveComputerTests: XCTestCase {
         )
         try diveService.saveDive(dive)
 
-        // Same fingerprint should be detected as duplicate
-        XCTAssertTrue(try importService.isDuplicate(fingerprint: fingerprint))
+        // Same fingerprint should return the existing dive ID
+        let found = try importService.findExistingDiveByFingerprint(fingerprint: fingerprint)
+        XCTAssertEqual(found, dive.id)
 
-        // Different fingerprint should not be duplicate
-        XCTAssertFalse(try importService.isDuplicate(fingerprint: Data([0xCA, 0xFE])))
+        // Different fingerprint should return nil
+        let notFound = try importService.findExistingDiveByFingerprint(fingerprint: Data([0xCA, 0xFE]))
+        XCTAssertNil(notFound)
     }
 
     // MARK: - Last Fingerprint Ordering
