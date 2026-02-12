@@ -21,10 +21,10 @@ struct DepthProfileChartData {
         var maxC: Float = -.greatestFiniteMagnitude
 
         // Single pass: build depth points, track temp extremes
-        for s in samples {
+        for (idx, s) in samples.enumerated() {
             let t = Float(s.tSec) / 60.0
             let d = UnitFormatter.depth(s.depthM, unit: depthUnit)
-            depths.append(DepthDataPoint(timeMinutes: t, depth: d))
+            depths.append(DepthDataPoint(id: idx, timeMinutes: t, depth: d))
             if d > maxD { maxD = d }
             let c = s.tempC
             if c < minC { minC = c }
@@ -59,6 +59,7 @@ struct DepthProfileChartData {
             var temps: [TempDataPoint] = []
             temps.reserveCapacity(targetCount + 2)
             var i = 0
+            var tempIdx = 0
             while i < samples.count {
                 let t = Float(samples[i].tSec) / 60.0
                 let wStart = max(0, i - halfWindow)
@@ -71,7 +72,8 @@ struct DepthProfileChartData {
                 let display = UnitFormatter.temperature(avgC, unit: temperatureUnit)
                 let fraction = (display - range.min) / (range.max - range.min)
                 let normalized = -(maxD * (1.0 - fraction))
-                temps.append(TempDataPoint(timeMinutes: t, normalizedValue: normalized))
+                temps.append(TempDataPoint(id: tempIdx, timeMinutes: t, normalizedValue: normalized))
+                tempIdx += 1
                 i += stride
             }
             // Always include last sample
@@ -81,7 +83,7 @@ struct DepthProfileChartData {
                     let display = UnitFormatter.temperature(last.tempC, unit: temperatureUnit)
                     let fraction = (display - range.min) / (range.max - range.min)
                     let normalized = -(maxD * (1.0 - fraction))
-                    temps.append(TempDataPoint(timeMinutes: lastT, normalizedValue: normalized))
+                    temps.append(TempDataPoint(id: tempIdx, timeMinutes: lastT, normalizedValue: normalized))
                 }
             }
             self.tempPoints = temps
@@ -351,14 +353,14 @@ struct DepthProfileChart: View {
 // MARK: - Data point types
 
 struct DepthDataPoint: Identifiable {
-    let id = UUID()
+    let id: Int
     let timeMinutes: Float
     /// Positive depth value for display (tooltip, accessibility).
     let depth: Float
 }
 
 struct TempDataPoint: Identifiable {
-    let id = UUID()
+    let id: Int
     let timeMinutes: Float
     /// Negative normalized value for chart Y axis.
     let normalizedValue: Float

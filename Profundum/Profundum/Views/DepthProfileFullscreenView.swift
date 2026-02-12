@@ -67,7 +67,6 @@ struct DepthProfileFullscreenView: View {
         }
         .onDisappear {
             AppDelegate.orientationLock = .all
-            requestOrientation(.portrait)
         }
         #else
         .background(Color(.windowBackgroundColor))
