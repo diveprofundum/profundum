@@ -503,7 +503,7 @@ struct DiveRowView: View {
 
     private func formatDate(_ unix: Int64) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(unix))
-        return DateFormatters.mediumDateTime.string(from: date)
+        return DateFormatters.mediumDateTime(clock: appState.settings.clockFormat).string(from: date)
     }
 
     private func formatDuration(_ seconds: Int32) -> String {

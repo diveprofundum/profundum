@@ -351,6 +351,14 @@ public final class DivelogDatabase: Sendable {
             """)
         }
 
+        migrator.registerMigration("010_add_clock_format") { db in
+            if try !db.columns(in: "settings").contains(where: { $0.name == "clock_format" }) {
+                try db.execute(sql: """
+                    ALTER TABLE settings ADD COLUMN clock_format TEXT DEFAULT 'system';
+                """)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

@@ -7,6 +7,13 @@ public enum TimeFormat: String, Codable, Sendable {
     case mmSs = "MmSs"
 }
 
+/// Clock format preference (12-hour vs 24-hour).
+public enum ClockFormat: String, Codable, CaseIterable, Sendable {
+    case system
+    case twelveHour = "12h"
+    case twentyFourHour = "24h"
+}
+
 /// Appearance mode preference.
 public enum AppearanceMode: String, Codable, CaseIterable, Sendable {
     case system
@@ -22,6 +29,7 @@ public struct Settings: Identifiable, Equatable, Sendable {
     public var temperatureUnit: TemperatureUnit
     public var pressureUnit: PressureUnit
     public var appearanceMode: AppearanceMode
+    public var clockFormat: ClockFormat
 
     public init(
         id: String = "default",
@@ -29,7 +37,8 @@ public struct Settings: Identifiable, Equatable, Sendable {
         depthUnit: DepthUnit = .meters,
         temperatureUnit: TemperatureUnit = .celsius,
         pressureUnit: PressureUnit = .bar,
-        appearanceMode: AppearanceMode = .system
+        appearanceMode: AppearanceMode = .system,
+        clockFormat: ClockFormat = .system
     ) {
         self.id = id
         self.timeFormat = timeFormat
@@ -37,6 +46,7 @@ public struct Settings: Identifiable, Equatable, Sendable {
         self.temperatureUnit = temperatureUnit
         self.pressureUnit = pressureUnit
         self.appearanceMode = appearanceMode
+        self.clockFormat = clockFormat
     }
 }
 
@@ -52,6 +62,7 @@ extension Settings: FetchableRecord, PersistableRecord {
         case temperatureUnit = "temperature_unit"
         case pressureUnit = "pressure_unit"
         case appearanceMode = "appearance_mode"
+        case clockFormat = "clock_format"
     }
 }
 
@@ -64,6 +75,7 @@ extension Settings: Encodable {
         try container.encode(temperatureUnit, forKey: .temperatureUnit)
         try container.encode(pressureUnit, forKey: .pressureUnit)
         try container.encode(appearanceMode, forKey: .appearanceMode)
+        try container.encode(clockFormat, forKey: .clockFormat)
     }
 }
 
@@ -76,5 +88,6 @@ extension Settings: Decodable {
         temperatureUnit = try container.decodeIfPresent(TemperatureUnit.self, forKey: .temperatureUnit) ?? .celsius
         pressureUnit = try container.decodeIfPresent(PressureUnit.self, forKey: .pressureUnit) ?? .bar
         appearanceMode = try container.decodeIfPresent(AppearanceMode.self, forKey: .appearanceMode) ?? .system
+        clockFormat = try container.decodeIfPresent(ClockFormat.self, forKey: .clockFormat) ?? .system
     }
 }

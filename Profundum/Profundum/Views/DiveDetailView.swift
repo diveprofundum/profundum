@@ -560,7 +560,7 @@ struct DiveDetailView: View {
 
     private func formatDate(_ unix: Int64) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(unix))
-        return DateFormatters.fullDateTime.string(from: date)
+        return DateFormatters.fullDateTime(clock: appState.settings.clockFormat).string(from: date)
     }
 
     private func formatTotalTime() -> String {
