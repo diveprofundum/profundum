@@ -188,11 +188,13 @@ struct DepthProfileChartData {
                 }
             }
 
-            // Close the area if we end mid-deco (including during a gap)
-            if wasInDeco, let last = samples.last {
-                let lastT = Float(last.tSec) / 60.0
+            // Close the area if we end mid-deco (including during a gap).
+            // Use smoothed value for consistency with the rest of the rendered ceiling.
+            if wasInDeco {
+                let lastIdx = samples.count - 1
+                let lastT = Float(samples[lastIdx].tSec) / 60.0
                 if cPoints.last?.timeMinutes != lastT {
-                    let cm = last.ceilingM ?? 0
+                    let cm = smoothedCeiling[lastIdx]
                     if cm > 0 {
                         let d = UnitFormatter.depth(cm, unit: depthUnit)
                         cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: lastT, ceilingDepth: d))
@@ -277,6 +279,8 @@ struct DepthProfileChartData {
     }
 
     /// Ceiling display string for the nearest sample.
+    /// Reads the raw dive computer value (not the smoothed display value) so the tooltip
+    /// shows exactly what the diver saw on their wrist computer.
     func nearestCeilingDisplay(to time: Float, samples: [DiveSample], unit: DepthUnit) -> String? {
         guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
         guard let cm = samples[idx].ceilingM, cm > 0 else { return nil }
