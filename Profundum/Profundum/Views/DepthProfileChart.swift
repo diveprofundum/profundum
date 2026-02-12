@@ -393,7 +393,7 @@ struct DepthProfileChartData {
     func denormalizeGf99(_ yValue: Float) -> Float {
         guard let range = gf99DisplayRange else { return 0 }
         let fraction = (maxDepth + yValue) / maxDepth
-        return range.min + fraction * (range.max - range.min)
+        return max(0, range.min + fraction * (range.max - range.min))
     }
 }
 
@@ -586,7 +586,7 @@ struct DepthProfileChart: View {
                 .annotation(
                     position: .top,
                     spacing: 4,
-                    overflowResolution: .init(x: .fit(to: .chart), y: .disabled)
+                    overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))
                 ) {
                     tooltipView
                 }
@@ -627,7 +627,9 @@ struct DepthProfileChart: View {
                     AxisValueLabel {
                         if let yVal = value.as(Float.self) {
                             let gf = data.denormalizeGf99(yVal)
-                            Text(String(format: "%.0f%%", gf))
+                            if gf >= 0 {
+                                Text(String(format: "%.0f%%", gf))
+                            }
                         }
                     }
                 }
