@@ -13,6 +13,8 @@ struct DepthProfileChartData {
     let tempDisplayRange: (min: Float, max: Float)?
     let tempPoints: [TempDataPoint]
     let hasCeilingData: Bool
+    /// Time (in minutes) of the first sample with ceiling > 0, used to gate NDL display.
+    let firstCeilingTimeMinutes: Float?
     let ceilingPoints: [CeilingDataPoint]
     let hasGf99Data: Bool
     let gf99DisplayRange: (min: Float, max: Float)?
@@ -122,6 +124,8 @@ struct DepthProfileChartData {
         let anyCeiling = samples.contains { ($0.ceilingM ?? 0) > 0 }
         self.hasCeilingData = anyCeiling
         if anyCeiling {
+            self.firstCeilingTimeMinutes = samples.first(where: { ($0.ceilingM ?? 0) > 0 })
+                .map { Float($0.tSec) / 60.0 }
             // Pre-compute rolling max ceiling (±15 sec window) to smooth stop oscillations.
             // Uses sample timestamps to determine the window rather than fixed index count.
             let halfWindowSec: Int32 = 15
@@ -208,6 +212,7 @@ struct DepthProfileChartData {
             }
             self.ceilingPoints = cPoints
         } else {
+            self.firstCeilingTimeMinutes = nil
             self.ceilingPoints = []
         }
 
@@ -365,11 +370,13 @@ struct DepthProfileChartData {
     }
 
     /// NDL display string for the nearest sample.
-    /// Returns nil if the sample has a ceiling (in deco) or no NDL data.
+    /// Returns nil if the sample has a ceiling, is past the first deco obligation, or has no NDL data.
     func nearestNdlDisplay(to time: Float, samples: [DiveSample]) -> String? {
         guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
         // Only show NDL when not in deco (no ceiling)
         if let cm = samples[idx].ceilingM, cm > 0 { return nil }
+        // Don't show NDL after deco has been entered — only pre-deco portion
+        if let firstCeiling = firstCeilingTimeMinutes, time >= firstCeiling { return nil }
         guard let ndl = samples[idx].ndlSec, ndl > 0 else { return nil }
         let minutes = ndl / 60
         return "\(minutes) min"
