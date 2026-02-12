@@ -2,8 +2,25 @@ import Combine
 import DivelogCore
 import SwiftUI
 
+#if os(iOS)
+class AppDelegate: NSObject, UIApplicationDelegate {
+    /// Orientation lock — views can override to force landscape, etc.
+    static var orientationLock: UIInterfaceOrientationMask = .all
+
+    func application(
+        _ application: UIApplication,
+        supportedInterfaceOrientationsFor window: UIWindow?
+    ) -> UIInterfaceOrientationMask {
+        AppDelegate.orientationLock
+    }
+}
+#endif
+
 @main
 struct ProfundumApp: App {
+    #if os(iOS)
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    #endif
     @StateObject private var appState = AppState()
 
     var body: some Scene {

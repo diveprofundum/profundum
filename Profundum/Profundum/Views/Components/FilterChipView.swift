@@ -90,3 +90,33 @@ struct CustomTagBadge: View {
             .cornerRadius(6)
     }
 }
+
+/// A chip-style toggle for chart overlay layers (temperature, ceiling, etc.).
+struct ChartOverlayChip: View {
+    let label: String
+    let color: Color
+    let isActive: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.subheadline)
+                .fontWeight(isActive ? .semibold : .regular)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(isActive ? color.opacity(0.3) : Color.clear)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(isActive ? color : Color.secondary.opacity(0.3), lineWidth: 1)
+                )
+                .foregroundColor(isActive ? color : .secondary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(label) overlay")
+        .accessibilityAddTraits(isActive ? .isSelected : [])
+    }
+}
