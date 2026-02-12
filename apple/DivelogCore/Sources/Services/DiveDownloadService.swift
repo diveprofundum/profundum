@@ -348,6 +348,15 @@ private func parseDiveData(
         ))
     }
 
+    // Extract per-sample GF99 from raw PNF binary (same as Shearwater Cloud import).
+    let rawData = Data(bytes: data, count: Int(size))
+    let gf99Values = extractGf99FromPnfDownload(rawData)
+    if gf99Values.count == sampleContext.samples.count {
+        for i in 0 ..< gf99Values.count {
+            sampleContext.samples[i].gf99 = gf99Values[i]
+        }
+    }
+
     let endTimeUnix = startTimeUnix + Int64(diveTime)
 
     return DiveDataMapper.clipSurfaceTimeout(ParsedDive(
@@ -361,6 +370,49 @@ private func parseDiveData(
         fingerprint: fingerprint,
         samples: sampleContext.samples
     ))
+}
+
+// MARK: - GF99 Extraction from PNF Binary
+
+/// Extracts per-sample GF99 values from raw Shearwater PNF binary data.
+/// Same logic as the Shearwater Cloud import extraction.
+private func extractGf99FromPnfDownload(_ data: Data) -> [Float?] {
+    guard data.count >= 32 else { return [] }
+
+    let sampleSize = 32
+    let isPnf = data.count >= 2 && !(data[0] == 0xFF && data[1] == 0xFF)
+    let gf99Offset = isPnf ? 25 : 24
+    let diveSampleType: UInt8 = 0x01
+
+    var values: [Float?] = []
+    var offset = 0
+
+    if isPnf {
+        while offset + sampleSize <= data.count {
+            let recordType = data[offset]
+            if recordType == 0xFF { break }
+            if recordType == diveSampleType {
+                let raw = data[offset + gf99Offset]
+                let valid = raw > 0 && raw < 0xFF
+                values.append(valid ? Float(raw) : nil)
+            }
+            offset += sampleSize
+        }
+    } else {
+        let headerSize = 128
+        let footerSize = 128
+        guard data.count > headerSize + footerSize else { return [] }
+        offset = headerSize
+        let endOffset = data.count - footerSize
+        while offset + sampleSize <= endOffset {
+            let raw = data[offset + gf99Offset]
+            let valid = raw > 0 && raw < 0xFF
+            values.append(valid ? Float(raw) : nil)
+            offset += sampleSize
+        }
+    }
+
+    return values
 }
 
 // MARK: - Sample Callback
