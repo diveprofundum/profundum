@@ -114,45 +114,62 @@ struct DepthProfileChartData {
 
         // Ceiling pass: iterate ALL samples to catch every deco transition,
         // but only emit data points at stride intervals to keep ~300 output points.
+        // Gap tolerance ignores brief ceiling interruptions (data noise between stops).
         let anyCeiling = samples.contains { ($0.ceilingM ?? 0) > 0 }
         self.hasCeilingData = anyCeiling
         if anyCeiling {
             let cStride = max(1, samples.count / 300)
+            let gapTolerance = 5 // ignore gaps shorter than 5 consecutive zero-ceiling samples
             var cPoints: [CeilingDataPoint] = []
             cPoints.reserveCapacity(302)
             var cIdx = 0
             var wasInDeco = false
-            var lastEmitted = -cStride // so first deco point is always eligible
+            var lastEmitted = -cStride
+            var gapLength = 0
+            var gapStartIndex = 0
 
             for i in 0 ..< samples.count {
                 let cm = samples[i].ceilingM ?? 0
                 let inDeco = cm > 0
                 let t = Float(samples[i].tSec) / 60.0
 
-                if inDeco != wasInDeco {
-                    // Transition — always emit boundary points
+                if wasInDeco {
                     if inDeco {
-                        cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: t, ceilingDepth: 0))
-                        cIdx += 1
-                        let d = UnitFormatter.depth(cm, unit: depthUnit)
-                        cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: t, ceilingDepth: d))
-                        cIdx += 1
+                        // Still in deco (or gap recovered) — reset gap tracking
+                        gapLength = 0
+                        if i - lastEmitted >= cStride {
+                            let d = UnitFormatter.depth(cm, unit: depthUnit)
+                            cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: t, ceilingDepth: d))
+                            cIdx += 1
+                            lastEmitted = i
+                        }
                     } else {
-                        cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: t, ceilingDepth: 0))
-                        cIdx += 1
+                        // Zero ceiling while in deco — count gap
+                        if gapLength == 0 { gapStartIndex = i }
+                        gapLength += 1
+                        if gapLength >= gapTolerance {
+                            // Real exit — emit boundary at gap start
+                            let exitT = Float(samples[gapStartIndex].tSec) / 60.0
+                            cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: exitT, ceilingDepth: 0))
+                            cIdx += 1
+                            wasInDeco = false
+                            gapLength = 0
+                        }
                     }
-                    lastEmitted = i
-                    wasInDeco = inDeco
-                } else if inDeco && (i - lastEmitted >= cStride) {
-                    // In deco at stride interval — emit point
+                } else if inDeco {
+                    // Entering deco
+                    cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: t, ceilingDepth: 0))
+                    cIdx += 1
                     let d = UnitFormatter.depth(cm, unit: depthUnit)
                     cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: t, ceilingDepth: d))
                     cIdx += 1
                     lastEmitted = i
+                    wasInDeco = true
+                    gapLength = 0
                 }
             }
 
-            // Close the area if we end mid-deco
+            // Close the area if we end mid-deco (including during a gap)
             if wasInDeco, let last = samples.last {
                 let lastT = Float(last.tSec) / 60.0
                 if cPoints.last?.timeMinutes != lastT {
@@ -368,6 +385,16 @@ struct DepthProfileChart: View {
                     yEnd: .value("Ceiling", -point.ceilingDepth)
                 )
                 .foregroundStyle(Color.red.opacity(0.25))
+            }
+            // Trace ceiling depth as a line so shallow ceilings remain visible
+            ForEach(data.ceilingPoints) { point in
+                LineMark(
+                    x: .value("Time", point.timeMinutes),
+                    y: .value("Ceiling Line", -point.ceilingDepth),
+                    series: .value("Series", "Ceiling")
+                )
+                .foregroundStyle(Color.red.opacity(0.6))
+                .lineStyle(StrokeStyle(lineWidth: 1.5))
             }
         }
     }
