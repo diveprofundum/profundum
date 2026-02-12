@@ -288,8 +288,11 @@ struct DepthProfileChartData {
     }
 
     /// TTS display string for the nearest sample.
+    /// Only returns a value when the sample is in deco (ceiling > 0), since TTS
+    /// outside deco is just ascent time and not useful in the tooltip.
     func nearestTtsDisplay(to time: Float, samples: [DiveSample]) -> String? {
         guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        guard let cm = samples[idx].ceilingM, cm > 0 else { return nil }
         guard let tts = samples[idx].ttsSec, tts > 0 else { return nil }
         let minutes = tts / 60
         let seconds = tts % 60
@@ -475,7 +478,11 @@ struct DepthProfileChart: View {
                     lineWidth: isFullscreen ? 1.5 : 1,
                     dash: isFullscreen ? [] : [4, 4]
                 ))
-                .annotation(position: .top, spacing: 4) {
+                .annotation(
+                    position: .top,
+                    spacing: 4,
+                    overflowResolution: .init(x: .fit(to: .chart), y: .disabled)
+                ) {
                     tooltipView
                 }
         }
