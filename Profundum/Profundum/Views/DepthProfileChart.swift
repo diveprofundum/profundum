@@ -288,8 +288,11 @@ struct DepthProfileChartData {
     }
 
     /// TTS display string for the nearest sample.
+    /// Only returns a value when the sample is in deco (ceiling > 0), since TTS
+    /// outside deco is just ascent time and not useful in the tooltip.
     func nearestTtsDisplay(to time: Float, samples: [DiveSample]) -> String? {
         guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        guard let cm = samples[idx].ceilingM, cm > 0 else { return nil }
         guard let tts = samples[idx].ttsSec, tts > 0 else { return nil }
         let minutes = tts / 60
         let seconds = tts % 60
@@ -297,6 +300,17 @@ struct DepthProfileChartData {
             return "\(minutes):\(String(format: "%02d", seconds))"
         }
         return "\(seconds)s"
+    }
+
+    /// NDL display string for the nearest sample.
+    /// Returns nil if the sample has a ceiling (in deco) or no NDL data.
+    func nearestNdlDisplay(to time: Float, samples: [DiveSample]) -> String? {
+        guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        // Only show NDL when not in deco (no ceiling)
+        if let cm = samples[idx].ceilingM, cm > 0 { return nil }
+        guard let ndl = samples[idx].ndlSec, ndl > 0 else { return nil }
+        let minutes = ndl / 60
+        return "\(minutes) min"
     }
 
     /// Denormalize a negative Y chart value back to display temperature.
@@ -347,6 +361,11 @@ struct DepthProfileChart: View {
     private var selectedTtsDisplay: String? {
         guard let selectedTime, let data = chartData, data.hasCeilingData else { return nil }
         return data.nearestTtsDisplay(to: selectedTime, samples: samples)
+    }
+
+    private var selectedNdlDisplay: String? {
+        guard let selectedTime, let data = chartData else { return nil }
+        return data.nearestNdlDisplay(to: selectedTime, samples: samples)
     }
 
     // MARK: - Accessibility
@@ -459,7 +478,11 @@ struct DepthProfileChart: View {
                     lineWidth: isFullscreen ? 1.5 : 1,
                     dash: isFullscreen ? [] : [4, 4]
                 ))
-                .annotation(position: .top, spacing: 4) {
+                .annotation(
+                    position: .top,
+                    spacing: 4,
+                    overflowResolution: .init(x: .fit(to: .chart), y: .disabled)
+                ) {
                     tooltipView
                 }
         }
@@ -556,6 +579,11 @@ struct DepthProfileChart: View {
                 Text("TTS \(ttsStr)")
                     .font(isFullscreen ? .caption : .caption2)
                     .foregroundColor(.red)
+            }
+            if let ndlStr = selectedNdlDisplay {
+                Text("NDL \(ndlStr)")
+                    .font(isFullscreen ? .caption : .caption2)
+                    .foregroundColor(.green)
             }
         }
         .padding(4)
