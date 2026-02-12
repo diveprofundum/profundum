@@ -16,17 +16,13 @@ struct DepthProfileChartData {
     let ceilingPoints: [CeilingDataPoint]
 
     init(samples: [DiveSample], depthUnit: DepthUnit, temperatureUnit: TemperatureUnit) {
-        var depths: [DepthDataPoint] = []
-        depths.reserveCapacity(samples.count)
         var maxD: Float = 0
         var minC: Float = .greatestFiniteMagnitude
         var maxC: Float = -.greatestFiniteMagnitude
 
-        // Single pass: build depth points, track temp extremes
-        for (idx, s) in samples.enumerated() {
-            let t = Float(s.tSec) / 60.0
+        // First pass: find extremes
+        for s in samples {
             let d = UnitFormatter.depth(s.depthM, unit: depthUnit)
-            depths.append(DepthDataPoint(id: idx, timeMinutes: t, depth: d))
             if d > maxD { maxD = d }
             let c = s.tempC
             if c < minC { minC = c }
@@ -34,9 +30,31 @@ struct DepthProfileChartData {
         }
 
         if maxD < 1 { maxD = 30 }
+        self.maxDepth = maxD
+
+        // Downsample depth to ~300 points
+        let depthStride = max(1, samples.count / 300)
+        var depths: [DepthDataPoint] = []
+        depths.reserveCapacity(302)
+        var di = 0
+        var depthIdx = 0
+        while di < samples.count {
+            let t = Float(samples[di].tSec) / 60.0
+            let d = UnitFormatter.depth(samples[di].depthM, unit: depthUnit)
+            depths.append(DepthDataPoint(id: depthIdx, timeMinutes: t, depth: d))
+            depthIdx += 1
+            di += depthStride
+        }
+        // Always include last sample
+        if let last = samples.last {
+            let lastT = Float(last.tSec) / 60.0
+            if depths.last?.timeMinutes != lastT {
+                let d = UnitFormatter.depth(last.depthM, unit: depthUnit)
+                depths.append(DepthDataPoint(id: depthIdx, timeMinutes: lastT, depth: d))
+            }
+        }
 
         self.depthPoints = depths
-        self.maxDepth = maxD
         self.totalMinutes = depths.last?.timeMinutes ?? 0
 
         let hasVariation = maxC - minC > 0.1 && !samples.isEmpty
@@ -126,8 +144,9 @@ struct DepthProfileChartData {
         }
     }
 
-    /// Padded Y domain lower bound (negative).
+    /// Padded Y domain bounds (negative depth scale).
     var domainMin: Float { -(maxDepth * 1.15) }
+    var domainMax: Float { maxDepth * 0.05 }
 
     /// Binary search for the nearest depth point to a given time.
     func nearestDepthPoint(to time: Float) -> DepthDataPoint? {
@@ -314,7 +333,7 @@ struct DepthProfileChart: View {
                     yStart: .value("Surface", Float(0)),
                     yEnd: .value("Ceiling", -point.ceilingDepth)
                 )
-                .foregroundStyle(Color.red.opacity(0.15))
+                .foregroundStyle(Color.red.opacity(0.08))
             }
         }
     }
@@ -364,19 +383,19 @@ struct DepthProfileChart: View {
 
     private func chartContent(data: DepthProfileChartData) -> some View {
         Chart {
-            ceilingContent(data: data)
             depthContent(data: data)
+            ceilingContent(data: data)
             temperatureContent(data: data)
             scrubContent
         }
-        .chartYScale(domain: data.domainMin ... Float(0))
+        .chartYScale(domain: data.domainMin ... data.domainMax)
         .chartLegend(.hidden)
         .chartXAxis {
             AxisMarks(values: .automatic) { value in
                 AxisGridLine()
                 AxisValueLabel {
                     if let minutes = value.as(Float.self) {
-                        Text("\(Int(minutes))m")
+                        Text("\(Int(minutes)) min")
                     }
                 }
             }
