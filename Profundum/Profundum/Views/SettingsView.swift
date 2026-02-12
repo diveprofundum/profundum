@@ -7,6 +7,7 @@ struct SettingsView: View {
     @State private var settings: DivelogCore.Settings?
     @State private var timeFormat: TimeFormat = .hhMmSs
     @State private var appearanceMode: AppearanceMode = .system
+    @State private var clockFormat: ClockFormat = .system
     @State private var depthUnit: DepthUnit = .meters
     @State private var temperatureUnit: TemperatureUnit = .celsius
     @State private var pressureUnit: PressureUnit = .bar
@@ -24,6 +25,13 @@ struct SettingsView: View {
                         Text("Dark").tag(AppearanceMode.dark)
                     }
                     .onChange(of: appearanceMode) { _, _ in saveSettings() }
+
+                    Picker("Clock", selection: $clockFormat) {
+                        Text("System").tag(ClockFormat.system)
+                        Text("12-hour").tag(ClockFormat.twelveHour)
+                        Text("24-hour").tag(ClockFormat.twentyFourHour)
+                    }
+                    .onChange(of: clockFormat) { _, _ in saveSettings() }
 
                     Picker("Time Format", selection: $timeFormat) {
                         Text("HH:MM:SS").tag(TimeFormat.hhMmSs)
@@ -121,6 +129,7 @@ struct SettingsView: View {
         settings = current
         timeFormat = current.timeFormat
         appearanceMode = current.appearanceMode
+        clockFormat = current.clockFormat
         depthUnit = current.depthUnit
         temperatureUnit = current.temperatureUnit
         pressureUnit = current.pressureUnit
@@ -132,7 +141,8 @@ struct SettingsView: View {
             depthUnit: depthUnit,
             temperatureUnit: temperatureUnit,
             pressureUnit: pressureUnit,
-            appearanceMode: appearanceMode
+            appearanceMode: appearanceMode,
+            clockFormat: clockFormat
         )
         appState.updateSettings(newSettings)
         settings = newSettings
