@@ -112,7 +112,8 @@ struct DepthProfileChartData {
             self.tempPoints = []
         }
 
-        // Ceiling pass: downsample to ~300 points, no smoothing
+        // Ceiling pass: downsample to ~300 points, no smoothing.
+        // Emit zero-ceiling points at deco boundaries so AreaMark closes cleanly.
         let anyCeiling = samples.contains { ($0.ceilingM ?? 0) > 0 }
         self.hasCeilingData = anyCeiling
         if anyCeiling {
@@ -121,21 +122,39 @@ struct DepthProfileChartData {
             cPoints.reserveCapacity(302)
             var ci = 0
             var cIdx = 0
+            var wasInDeco = false
             while ci < samples.count {
-                if let cm = samples[ci].ceilingM, cm > 0 {
-                    let t = Float(samples[ci].tSec) / 60.0
+                let cm = samples[ci].ceilingM ?? 0
+                let t = Float(samples[ci].tSec) / 60.0
+                if cm > 0 {
+                    if !wasInDeco {
+                        // Entering deco — emit a zero point to start the area cleanly
+                        cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: t, ceilingDepth: 0))
+                        cIdx += 1
+                    }
                     let d = UnitFormatter.depth(cm, unit: depthUnit)
                     cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: t, ceilingDepth: d))
                     cIdx += 1
+                    wasInDeco = true
+                } else if wasInDeco {
+                    // Exiting deco — emit a zero point to close the area
+                    cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: t, ceilingDepth: 0))
+                    cIdx += 1
+                    wasInDeco = false
                 }
                 ci += cStride
             }
             // Always include last sample
-            if let last = samples.last, let cm = last.ceilingM, cm > 0 {
+            if let last = samples.last {
                 let lastT = Float(last.tSec) / 60.0
+                let cm = last.ceilingM ?? 0
                 if cPoints.last?.timeMinutes != lastT {
-                    let d = UnitFormatter.depth(cm, unit: depthUnit)
-                    cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: lastT, ceilingDepth: d))
+                    if cm > 0 {
+                        let d = UnitFormatter.depth(cm, unit: depthUnit)
+                        cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: lastT, ceilingDepth: d))
+                    } else if wasInDeco {
+                        cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: lastT, ceilingDepth: 0))
+                    }
                 }
             }
             self.ceilingPoints = cPoints
@@ -169,28 +188,25 @@ struct DepthProfileChartData {
         return depthPoints[lo]
     }
 
-    /// Binary search for the nearest sample temperature display string.
+    /// Accurate depth display string from full-resolution samples.
+    func nearestDepthDisplay(to time: Float, samples: [DiveSample], unit: DepthUnit) -> String? {
+        guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        return UnitFormatter.formatDepth(samples[idx].depthM, unit: unit)
+    }
+
+    /// Elapsed dive time for the nearest sample, formatted as mm:ss.
+    func nearestElapsedTime(to time: Float, samples: [DiveSample]) -> String? {
+        guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        let totalSec = Int(samples[idx].tSec)
+        let minutes = totalSec / 60
+        let seconds = totalSec % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    /// Temperature display string for the nearest sample.
     func nearestTempDisplay(to time: Float, samples: [DiveSample], unit: TemperatureUnit) -> String? {
-        guard !samples.isEmpty else { return nil }
-        var lo = 0
-        var hi = samples.count - 1
-        while lo < hi {
-            let mid = (lo + hi) / 2
-            if Float(samples[mid].tSec) / 60.0 < time {
-                lo = mid + 1
-            } else {
-                hi = mid
-            }
-        }
-        var best = lo
-        if lo > 0 {
-            let prevTime = Float(samples[lo - 1].tSec) / 60.0
-            let currTime = Float(samples[lo].tSec) / 60.0
-            if abs(prevTime - time) < abs(currTime - time) {
-                best = lo - 1
-            }
-        }
-        return UnitFormatter.formatTemperature(samples[best].tempC, unit: unit)
+        guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        return UnitFormatter.formatTemperature(samples[idx].tempC, unit: unit)
     }
 
     /// Binary search returning the nearest sample to a given time.
@@ -260,6 +276,16 @@ struct DepthProfileChart: View {
         return data.nearestDepthPoint(to: selectedTime)
     }
 
+    private var selectedDepthDisplay: String? {
+        guard let selectedTime, let data = chartData else { return nil }
+        return data.nearestDepthDisplay(to: selectedTime, samples: samples, unit: depthUnit)
+    }
+
+    private var selectedElapsedTime: String? {
+        guard let selectedTime, let data = chartData else { return nil }
+        return data.nearestElapsedTime(to: selectedTime, samples: samples)
+    }
+
     private var selectedTempDisplay: String? {
         guard let selectedTime, showTemperature, let data = chartData else { return nil }
         return data.nearestTempDisplay(to: selectedTime, samples: samples, unit: temperatureUnit)
@@ -311,13 +337,13 @@ struct DepthProfileChart: View {
         .onAppear {
             buildChartData()
         }
-        .onChange(of: samples.count) { _ in
+        .onChange(of: samples.count) { _, _ in
             buildChartData()
         }
-        .onChange(of: depthUnit) { _ in
+        .onChange(of: depthUnit) { _, _ in
             buildChartData()
         }
-        .onChange(of: temperatureUnit) { _ in
+        .onChange(of: temperatureUnit) { _, _ in
             buildChartData()
         }
     }
@@ -448,10 +474,15 @@ struct DepthProfileChart: View {
 
     private var tooltipView: some View {
         VStack(spacing: 2) {
-            if let selectedPoint {
-                Text(String(format: "%.1f%@", selectedPoint.depth, UnitFormatter.depthLabel(depthUnit)))
+            if let depthStr = selectedDepthDisplay {
+                Text(depthStr)
                     .font(isFullscreen ? .caption : .caption2)
                     .fontWeight(.semibold)
+            }
+            if let timeStr = selectedElapsedTime {
+                Text(timeStr)
+                    .font(isFullscreen ? .caption : .caption2)
+                    .foregroundColor(.secondary)
             }
             if let tempStr = selectedTempDisplay {
                 Text(tempStr)
