@@ -12,6 +12,8 @@ struct DepthProfileChartData {
     let hasTemperatureVariation: Bool
     let tempDisplayRange: (min: Float, max: Float)?
     let tempPoints: [TempDataPoint]
+    let hasCeilingData: Bool
+    let ceilingPoints: [CeilingDataPoint]
 
     init(samples: [DiveSample], depthUnit: DepthUnit, temperatureUnit: TemperatureUnit) {
         var depths: [DepthDataPoint] = []
@@ -91,6 +93,37 @@ struct DepthProfileChartData {
             self.tempDisplayRange = nil
             self.tempPoints = []
         }
+
+        // Ceiling pass: downsample to ~300 points, no smoothing
+        let anyCeiling = samples.contains { ($0.ceilingM ?? 0) > 0 }
+        self.hasCeilingData = anyCeiling
+        if anyCeiling {
+            let cStride = max(1, samples.count / 300)
+            var cPoints: [CeilingDataPoint] = []
+            cPoints.reserveCapacity(302)
+            var ci = 0
+            var cIdx = 0
+            while ci < samples.count {
+                if let cm = samples[ci].ceilingM, cm > 0 {
+                    let t = Float(samples[ci].tSec) / 60.0
+                    let d = UnitFormatter.depth(cm, unit: depthUnit)
+                    cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: t, ceilingDepth: d))
+                    cIdx += 1
+                }
+                ci += cStride
+            }
+            // Always include last sample
+            if let last = samples.last, let cm = last.ceilingM, cm > 0 {
+                let lastT = Float(last.tSec) / 60.0
+                if cPoints.last?.timeMinutes != lastT {
+                    let d = UnitFormatter.depth(cm, unit: depthUnit)
+                    cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: lastT, ceilingDepth: d))
+                }
+            }
+            self.ceilingPoints = cPoints
+        } else {
+            self.ceilingPoints = []
+        }
     }
 
     /// Padded Y domain lower bound (negative).
@@ -141,6 +174,48 @@ struct DepthProfileChartData {
         return UnitFormatter.formatTemperature(samples[best].tempC, unit: unit)
     }
 
+    /// Binary search returning the nearest sample to a given time.
+    func nearestSampleIndex(to time: Float, in samples: [DiveSample]) -> Int? {
+        guard !samples.isEmpty else { return nil }
+        var lo = 0
+        var hi = samples.count - 1
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if Float(samples[mid].tSec) / 60.0 < time {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
+        }
+        if lo > 0 {
+            let prevTime = Float(samples[lo - 1].tSec) / 60.0
+            let currTime = Float(samples[lo].tSec) / 60.0
+            if abs(prevTime - time) < abs(currTime - time) {
+                return lo - 1
+            }
+        }
+        return lo
+    }
+
+    /// Ceiling display string for the nearest sample.
+    func nearestCeilingDisplay(to time: Float, samples: [DiveSample], unit: DepthUnit) -> String? {
+        guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        guard let cm = samples[idx].ceilingM, cm > 0 else { return nil }
+        return UnitFormatter.formatDepth(cm, unit: unit)
+    }
+
+    /// TTS display string for the nearest sample.
+    func nearestTtsDisplay(to time: Float, samples: [DiveSample]) -> String? {
+        guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        guard let tts = samples[idx].ttsSec, tts > 0 else { return nil }
+        let minutes = tts / 60
+        let seconds = tts % 60
+        if minutes > 0 {
+            return "\(minutes):\(String(format: "%02d", seconds))"
+        }
+        return "\(seconds)s"
+    }
+
     /// Denormalize a negative Y chart value back to display temperature.
     func denormalizeTemp(_ yValue: Float) -> Float {
         guard let range = tempDisplayRange else { return 0 }
@@ -171,6 +246,16 @@ struct DepthProfileChart: View {
         return data.nearestTempDisplay(to: selectedTime, samples: samples, unit: temperatureUnit)
     }
 
+    private var selectedCeilingDisplay: String? {
+        guard let selectedTime, let data = chartData, data.hasCeilingData else { return nil }
+        return data.nearestCeilingDisplay(to: selectedTime, samples: samples, unit: depthUnit)
+    }
+
+    private var selectedTtsDisplay: String? {
+        guard let selectedTime, let data = chartData, data.hasCeilingData else { return nil }
+        return data.nearestTtsDisplay(to: selectedTime, samples: samples)
+    }
+
     // MARK: - Accessibility
 
     private var chartAccessibilityLabel: String {
@@ -185,6 +270,10 @@ struct DepthProfileChart: View {
                 let hiDisp = UnitFormatter.formatTemperature(hiC, unit: temperatureUnit)
                 label += " Temperature overlay active, ranging from \(loDisp) to \(hiDisp)."
             }
+        }
+        if data.hasCeilingData, let maxCeiling = samples.compactMap(\.ceilingM).max(), maxCeiling > 0 {
+            let maxCeilingDisp = UnitFormatter.formatDepth(maxCeiling, unit: depthUnit)
+            label += " Deco ceiling shown, maximum ceiling \(maxCeilingDisp)."
         }
         return label
     }
@@ -216,44 +305,69 @@ struct DepthProfileChart: View {
 
     // MARK: - Chart
 
-    private func chartContent(data: DepthProfileChartData) -> some View {
-        Chart {
-            // Depth line (negative Y for natural top-down layout)
-            ForEach(data.depthPoints) { point in
+    @ChartContentBuilder
+    private func ceilingContent(data: DepthProfileChartData) -> some ChartContent {
+        if data.hasCeilingData {
+            ForEach(data.ceilingPoints) { point in
+                AreaMark(
+                    x: .value("Time", point.timeMinutes),
+                    yStart: .value("Surface", Float(0)),
+                    yEnd: .value("Ceiling", -point.ceilingDepth)
+                )
+                .foregroundStyle(Color.red.opacity(0.15))
+            }
+        }
+    }
+
+    @ChartContentBuilder
+    private func depthContent(data: DepthProfileChartData) -> some ChartContent {
+        ForEach(data.depthPoints) { point in
+            LineMark(
+                x: .value("Time", point.timeMinutes),
+                y: .value("Depth", -point.depth),
+                series: .value("Series", "Depth")
+            )
+            .foregroundStyle(Color.blue)
+            .lineStyle(StrokeStyle(lineWidth: 2))
+        }
+    }
+
+    @ChartContentBuilder
+    private func temperatureContent(data: DepthProfileChartData) -> some ChartContent {
+        if showTemperature {
+            ForEach(data.tempPoints) { point in
                 LineMark(
                     x: .value("Time", point.timeMinutes),
-                    y: .value("Depth", -point.depth),
-                    series: .value("Series", "Depth")
+                    y: .value("Depth", point.normalizedValue),
+                    series: .value("Series", "Temperature")
                 )
-                .foregroundStyle(Color.blue)
+                .foregroundStyle(Color.orange)
                 .lineStyle(StrokeStyle(lineWidth: 2))
             }
+        }
+    }
 
-            // Temperature line (separate series, already negative normalized)
-            if showTemperature {
-                ForEach(data.tempPoints) { point in
-                    LineMark(
-                        x: .value("Time", point.timeMinutes),
-                        y: .value("Depth", point.normalizedValue),
-                        series: .value("Series", "Temperature")
-                    )
-                    .foregroundStyle(Color.orange)
-                    .lineStyle(StrokeStyle(lineWidth: 2))
+    @ChartContentBuilder
+    private var scrubContent: some ChartContent {
+        if let selectedPoint {
+            RuleMark(x: .value("Selected", selectedPoint.timeMinutes))
+                .foregroundStyle(Color.gray.opacity(isFullscreen ? 0.7 : 0.5))
+                .lineStyle(StrokeStyle(
+                    lineWidth: isFullscreen ? 1.5 : 1,
+                    dash: isFullscreen ? [] : [4, 4]
+                ))
+                .annotation(position: .top, spacing: 4) {
+                    tooltipView
                 }
-            }
+        }
+    }
 
-            // Scrub line + tooltip
-            if let selectedPoint {
-                RuleMark(x: .value("Selected", selectedPoint.timeMinutes))
-                    .foregroundStyle(Color.gray.opacity(isFullscreen ? 0.7 : 0.5))
-                    .lineStyle(StrokeStyle(
-                        lineWidth: isFullscreen ? 1.5 : 1,
-                        dash: isFullscreen ? [] : [4, 4]
-                    ))
-                    .annotation(position: .top, spacing: 4) {
-                        tooltipView
-                    }
-            }
+    private func chartContent(data: DepthProfileChartData) -> some View {
+        Chart {
+            ceilingContent(data: data)
+            depthContent(data: data)
+            temperatureContent(data: data)
+            scrubContent
         }
         .chartYScale(domain: data.domainMin ... Float(0))
         .chartLegend(.hidden)
@@ -325,6 +439,16 @@ struct DepthProfileChart: View {
                     .font(isFullscreen ? .caption : .caption2)
                     .foregroundColor(.orange)
             }
+            if let ceilStr = selectedCeilingDisplay {
+                Text("CEIL \(ceilStr)")
+                    .font(isFullscreen ? .caption : .caption2)
+                    .foregroundColor(.red)
+            }
+            if let ttsStr = selectedTtsDisplay {
+                Text("TTS \(ttsStr)")
+                    .font(isFullscreen ? .caption : .caption2)
+                    .foregroundColor(.red)
+            }
         }
         .padding(4)
         .background(tooltipBackground)
@@ -364,4 +488,11 @@ struct TempDataPoint: Identifiable {
     let timeMinutes: Float
     /// Negative normalized value for chart Y axis.
     let normalizedValue: Float
+}
+
+struct CeilingDataPoint: Identifiable {
+    let id: Int
+    let timeMinutes: Float
+    /// Positive ceiling depth in display units.
+    let ceilingDepth: Float
 }
