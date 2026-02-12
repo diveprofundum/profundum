@@ -862,4 +862,42 @@ final class DiveComputerTests: XCTestCase {
         let mixes = try diveService.getGasMixes(diveId: dive.id)
         XCTAssertEqual(mixes.count, 2, "Read-time dedup should remove duplicates")
     }
+
+    // MARK: - DiveSample.deltaFiveTtsMin Tests
+
+    func testDeltaFiveBothPresentPositive() {
+        let sample = DiveSample(diveId: "d1", tSec: 0, depthM: 30, tempC: 20,
+                                ttsSec: 600, atPlusFiveTtsMin: 15)
+        XCTAssertEqual(sample.deltaFiveTtsMin, 5)
+    }
+
+    func testDeltaFiveBothPresentNegative() {
+        let sample = DiveSample(diveId: "d1", tSec: 0, depthM: 30, tempC: 20,
+                                ttsSec: 480, atPlusFiveTtsMin: 3)
+        XCTAssertEqual(sample.deltaFiveTtsMin, -5)
+    }
+
+    func testDeltaFiveBothPresentZero() {
+        let sample = DiveSample(diveId: "d1", tSec: 0, depthM: 30, tempC: 20,
+                                ttsSec: 600, atPlusFiveTtsMin: 10)
+        XCTAssertEqual(sample.deltaFiveTtsMin, 0)
+    }
+
+    func testDeltaFiveAtPlusFiveNil() {
+        let sample = DiveSample(diveId: "d1", tSec: 0, depthM: 30, tempC: 20,
+                                ttsSec: 600, atPlusFiveTtsMin: nil)
+        XCTAssertNil(sample.deltaFiveTtsMin)
+    }
+
+    func testDeltaFiveTtsNilAtPlusFivePresent() {
+        let sample = DiveSample(diveId: "d1", tSec: 0, depthM: 30, tempC: 20,
+                                ttsSec: nil, atPlusFiveTtsMin: 12)
+        XCTAssertEqual(sample.deltaFiveTtsMin, 12)
+    }
+
+    func testDeltaFiveBothNil() {
+        let sample = DiveSample(diveId: "d1", tSec: 0, depthM: 30, tempC: 20,
+                                ttsSec: nil, atPlusFiveTtsMin: nil)
+        XCTAssertNil(sample.deltaFiveTtsMin)
+    }
 }

@@ -25,6 +25,14 @@ public struct DiveSample: Identifiable, Equatable, Sendable {
     public var gasmixIndex: Int?
     public var atPlusFiveTtsMin: Int?
 
+    /// Δ+5: projected change in TTS if diver stays 5 more minutes at current depth.
+    /// Positive = accumulating deco, negative = clearing deco, nil = no data.
+    public var deltaFiveTtsMin: Int? {
+        guard let atPlusFive = atPlusFiveTtsMin else { return nil }
+        guard let tts = ttsSec else { return atPlusFive }
+        return atPlusFive - (tts / 60)
+    }
+
     public init(
         id: String = UUID().uuidString,
         diveId: String,
