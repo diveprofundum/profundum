@@ -21,6 +21,7 @@ struct DiveDetailView: View {
     @State private var exportFileURL: URL?
     @State private var showFullscreenChart = false
     @State private var showTemperature = false
+    @State private var showGf99 = false
 
     var onDiveUpdated: (() -> Void)?
 
@@ -33,6 +34,10 @@ struct DiveDetailView: View {
 
     private var customTags: [String] {
         tags.filter { PredefinedDiveTag(fromTag: $0) == nil }
+    }
+
+    private var hasGf99Data: Bool {
+        samples.contains { ($0.gf99 ?? 0) > 0 }
     }
 
     private var hasPpo2Data: Bool {
@@ -328,6 +333,17 @@ struct DiveDetailView: View {
                     .accessibilityIdentifier("temperatureToggle")
                 }
 
+                if hasGf99Data {
+                    ChartOverlayChip(
+                        label: "GF99",
+                        color: .purple,
+                        isActive: showGf99
+                    ) {
+                        showGf99.toggle()
+                    }
+                    .accessibilityIdentifier("gf99Toggle")
+                }
+
                 Spacer()
 
                 Button {
@@ -345,7 +361,8 @@ struct DiveDetailView: View {
                 samples: samples,
                 depthUnit: appState.depthUnit,
                 temperatureUnit: appState.temperatureUnit,
-                showTemperature: showTemperature
+                showTemperature: showTemperature,
+                showGf99: showGf99
             )
             .frame(height: 200)
             .background(
