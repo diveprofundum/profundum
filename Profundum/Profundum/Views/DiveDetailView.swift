@@ -308,12 +308,14 @@ struct DiveDetailView: View {
             Text("Depth Profile")
                 .font(.headline)
 
-            DepthProfileChart(samples: samples, depthUnit: appState.depthUnit)
+            DepthProfileChart(
+                samples: samples,
+                depthUnit: appState.depthUnit,
+                temperatureUnit: appState.temperatureUnit
+            )
                 .frame(height: 200)
                 .background(Color.gray.opacity(0.1))
                 .cornerRadius(12)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(depthChartAccessibilityLabel)
                 .accessibilityIdentifier("depthProfileChart")
         }
     }
@@ -404,12 +406,6 @@ struct DiveDetailView: View {
                 }
             }
         }
-    }
-
-    private var depthChartAccessibilityLabel: String {
-        let depthStr = UnitFormatter.formatDepth(dive.maxDepthM, unit: appState.depthUnit)
-        let totalMinutes = (dive.endTimeUnix - dive.startTimeUnix) / 60
-        return "Depth profile chart. Maximum depth \(depthStr) over \(totalMinutes) minutes."
     }
 
     private var ppo2ChartAccessibilityLabel: String {
