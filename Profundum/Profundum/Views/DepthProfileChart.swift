@@ -12,19 +12,17 @@ struct DepthProfileChartData {
     let hasTemperatureVariation: Bool
     let tempDisplayRange: (min: Float, max: Float)?
     let tempPoints: [TempDataPoint]
+    let hasCeilingData: Bool
+    let ceilingPoints: [CeilingDataPoint]
 
     init(samples: [DiveSample], depthUnit: DepthUnit, temperatureUnit: TemperatureUnit) {
-        var depths: [DepthDataPoint] = []
-        depths.reserveCapacity(samples.count)
         var maxD: Float = 0
         var minC: Float = .greatestFiniteMagnitude
         var maxC: Float = -.greatestFiniteMagnitude
 
-        // Single pass: build depth points, track temp extremes
-        for (idx, s) in samples.enumerated() {
-            let t = Float(s.tSec) / 60.0
+        // First pass: find extremes
+        for s in samples {
             let d = UnitFormatter.depth(s.depthM, unit: depthUnit)
-            depths.append(DepthDataPoint(id: idx, timeMinutes: t, depth: d))
             if d > maxD { maxD = d }
             let c = s.tempC
             if c < minC { minC = c }
@@ -32,9 +30,31 @@ struct DepthProfileChartData {
         }
 
         if maxD < 1 { maxD = 30 }
+        self.maxDepth = maxD
+
+        // Downsample depth to ~300 points
+        let depthStride = max(1, samples.count / 300)
+        var depths: [DepthDataPoint] = []
+        depths.reserveCapacity(302)
+        var di = 0
+        var depthIdx = 0
+        while di < samples.count {
+            let t = Float(samples[di].tSec) / 60.0
+            let d = UnitFormatter.depth(samples[di].depthM, unit: depthUnit)
+            depths.append(DepthDataPoint(id: depthIdx, timeMinutes: t, depth: d))
+            depthIdx += 1
+            di += depthStride
+        }
+        // Always include last sample
+        if let last = samples.last {
+            let lastT = Float(last.tSec) / 60.0
+            if depths.last?.timeMinutes != lastT {
+                let d = UnitFormatter.depth(last.depthM, unit: depthUnit)
+                depths.append(DepthDataPoint(id: depthIdx, timeMinutes: lastT, depth: d))
+            }
+        }
 
         self.depthPoints = depths
-        self.maxDepth = maxD
         self.totalMinutes = depths.last?.timeMinutes ?? 0
 
         let hasVariation = maxC - minC > 0.1 && !samples.isEmpty
@@ -91,10 +111,105 @@ struct DepthProfileChartData {
             self.tempDisplayRange = nil
             self.tempPoints = []
         }
+
+        // Ceiling pass: iterate ALL samples to catch every deco transition,
+        // but only emit data points at stride intervals to keep ~300 output points.
+        // Gap tolerance ignores brief ceiling interruptions (data noise between stops).
+        // Rolling max window smooths oscillations at stop boundaries for display.
+        let anyCeiling = samples.contains { ($0.ceilingM ?? 0) > 0 }
+        self.hasCeilingData = anyCeiling
+        if anyCeiling {
+            // Pre-compute rolling max ceiling (±15 sec window) to smooth stop oscillations.
+            // Uses sample timestamps to determine the window rather than fixed index count.
+            let halfWindowSec: Int32 = 15
+            var smoothedCeiling = [Float](repeating: 0, count: samples.count)
+            var windowStart = 0
+            var windowEnd = 0
+            for i in 0 ..< samples.count {
+                let tSec = samples[i].tSec
+                while windowStart < samples.count && samples[windowStart].tSec < tSec - halfWindowSec {
+                    windowStart += 1
+                }
+                while windowEnd < samples.count && samples[windowEnd].tSec <= tSec + halfWindowSec {
+                    windowEnd += 1
+                }
+                var maxInWindow: Float = 0
+                for j in windowStart ..< windowEnd {
+                    let c = samples[j].ceilingM ?? 0
+                    if c > maxInWindow { maxInWindow = c }
+                }
+                smoothedCeiling[i] = maxInWindow
+            }
+
+            let cStride = max(1, samples.count / 300)
+            let gapTolerance = 5
+            var cPoints: [CeilingDataPoint] = []
+            cPoints.reserveCapacity(302)
+            var cIdx = 0
+            var wasInDeco = false
+            var lastEmitted = -cStride
+            var gapLength = 0
+            var gapStartIndex = 0
+
+            for i in 0 ..< samples.count {
+                let cm = smoothedCeiling[i]
+                let inDeco = cm > 0
+                let t = Float(samples[i].tSec) / 60.0
+
+                if wasInDeco {
+                    if inDeco {
+                        gapLength = 0
+                        if i - lastEmitted >= cStride {
+                            let d = UnitFormatter.depth(cm, unit: depthUnit)
+                            cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: t, ceilingDepth: d))
+                            cIdx += 1
+                            lastEmitted = i
+                        }
+                    } else {
+                        if gapLength == 0 { gapStartIndex = i }
+                        gapLength += 1
+                        if gapLength >= gapTolerance {
+                            let exitT = Float(samples[gapStartIndex].tSec) / 60.0
+                            cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: exitT, ceilingDepth: 0))
+                            cIdx += 1
+                            wasInDeco = false
+                            gapLength = 0
+                        }
+                    }
+                } else if inDeco {
+                    cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: t, ceilingDepth: 0))
+                    cIdx += 1
+                    let d = UnitFormatter.depth(cm, unit: depthUnit)
+                    cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: t, ceilingDepth: d))
+                    cIdx += 1
+                    lastEmitted = i
+                    wasInDeco = true
+                    gapLength = 0
+                }
+            }
+
+            // Close the area if we end mid-deco (including during a gap)
+            if wasInDeco, let last = samples.last {
+                let lastT = Float(last.tSec) / 60.0
+                if cPoints.last?.timeMinutes != lastT {
+                    let cm = last.ceilingM ?? 0
+                    if cm > 0 {
+                        let d = UnitFormatter.depth(cm, unit: depthUnit)
+                        cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: lastT, ceilingDepth: d))
+                    } else {
+                        cPoints.append(CeilingDataPoint(id: cIdx, timeMinutes: lastT, ceilingDepth: 0))
+                    }
+                }
+            }
+            self.ceilingPoints = cPoints
+        } else {
+            self.ceilingPoints = []
+        }
     }
 
-    /// Padded Y domain lower bound (negative).
+    /// Padded Y domain bounds (negative depth scale).
     var domainMin: Float { -(maxDepth * 1.15) }
+    var domainMax: Float { maxDepth * 0.05 }
 
     /// Binary search for the nearest depth point to a given time.
     func nearestDepthPoint(to time: Float) -> DepthDataPoint? {
@@ -117,8 +232,29 @@ struct DepthProfileChartData {
         return depthPoints[lo]
     }
 
-    /// Binary search for the nearest sample temperature display string.
+    /// Accurate depth display string from full-resolution samples.
+    func nearestDepthDisplay(to time: Float, samples: [DiveSample], unit: DepthUnit) -> String? {
+        guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        return UnitFormatter.formatDepth(samples[idx].depthM, unit: unit)
+    }
+
+    /// Elapsed dive time for the nearest sample, formatted as mm:ss.
+    func nearestElapsedTime(to time: Float, samples: [DiveSample]) -> String? {
+        guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        let totalSec = Int(samples[idx].tSec)
+        let minutes = totalSec / 60
+        let seconds = totalSec % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    /// Temperature display string for the nearest sample.
     func nearestTempDisplay(to time: Float, samples: [DiveSample], unit: TemperatureUnit) -> String? {
+        guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        return UnitFormatter.formatTemperature(samples[idx].tempC, unit: unit)
+    }
+
+    /// Binary search returning the nearest sample to a given time.
+    func nearestSampleIndex(to time: Float, in samples: [DiveSample]) -> Int? {
         guard !samples.isEmpty else { return nil }
         var lo = 0
         var hi = samples.count - 1
@@ -130,15 +266,33 @@ struct DepthProfileChartData {
                 hi = mid
             }
         }
-        var best = lo
         if lo > 0 {
             let prevTime = Float(samples[lo - 1].tSec) / 60.0
             let currTime = Float(samples[lo].tSec) / 60.0
             if abs(prevTime - time) < abs(currTime - time) {
-                best = lo - 1
+                return lo - 1
             }
         }
-        return UnitFormatter.formatTemperature(samples[best].tempC, unit: unit)
+        return lo
+    }
+
+    /// Ceiling display string for the nearest sample.
+    func nearestCeilingDisplay(to time: Float, samples: [DiveSample], unit: DepthUnit) -> String? {
+        guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        guard let cm = samples[idx].ceilingM, cm > 0 else { return nil }
+        return UnitFormatter.formatDepth(cm, unit: unit)
+    }
+
+    /// TTS display string for the nearest sample.
+    func nearestTtsDisplay(to time: Float, samples: [DiveSample]) -> String? {
+        guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        guard let tts = samples[idx].ttsSec, tts > 0 else { return nil }
+        let minutes = tts / 60
+        let seconds = tts % 60
+        if minutes > 0 {
+            return "\(minutes):\(String(format: "%02d", seconds))"
+        }
+        return "\(seconds)s"
     }
 
     /// Denormalize a negative Y chart value back to display temperature.
@@ -166,9 +320,29 @@ struct DepthProfileChart: View {
         return data.nearestDepthPoint(to: selectedTime)
     }
 
+    private var selectedDepthDisplay: String? {
+        guard let selectedTime, let data = chartData else { return nil }
+        return data.nearestDepthDisplay(to: selectedTime, samples: samples, unit: depthUnit)
+    }
+
+    private var selectedElapsedTime: String? {
+        guard let selectedTime, let data = chartData else { return nil }
+        return data.nearestElapsedTime(to: selectedTime, samples: samples)
+    }
+
     private var selectedTempDisplay: String? {
         guard let selectedTime, showTemperature, let data = chartData else { return nil }
         return data.nearestTempDisplay(to: selectedTime, samples: samples, unit: temperatureUnit)
+    }
+
+    private var selectedCeilingDisplay: String? {
+        guard let selectedTime, let data = chartData, data.hasCeilingData else { return nil }
+        return data.nearestCeilingDisplay(to: selectedTime, samples: samples, unit: depthUnit)
+    }
+
+    private var selectedTtsDisplay: String? {
+        guard let selectedTime, let data = chartData, data.hasCeilingData else { return nil }
+        return data.nearestTtsDisplay(to: selectedTime, samples: samples)
     }
 
     // MARK: - Accessibility
@@ -185,6 +359,10 @@ struct DepthProfileChart: View {
                 let hiDisp = UnitFormatter.formatTemperature(hiC, unit: temperatureUnit)
                 label += " Temperature overlay active, ranging from \(loDisp) to \(hiDisp)."
             }
+        }
+        if data.hasCeilingData, let maxCeiling = samples.compactMap(\.ceilingM).max(), maxCeiling > 0 {
+            let maxCeilingDisp = UnitFormatter.formatDepth(maxCeiling, unit: depthUnit)
+            label += " Deco ceiling shown, maximum ceiling \(maxCeilingDisp)."
         }
         return label
     }
@@ -203,66 +381,101 @@ struct DepthProfileChart: View {
         .onAppear {
             buildChartData()
         }
-        .onChange(of: samples.count) { _ in
+        .onChange(of: samples.count) { _, _ in
             buildChartData()
         }
-        .onChange(of: depthUnit) { _ in
+        .onChange(of: depthUnit) { _, _ in
             buildChartData()
         }
-        .onChange(of: temperatureUnit) { _ in
+        .onChange(of: temperatureUnit) { _, _ in
             buildChartData()
         }
     }
 
     // MARK: - Chart
 
-    private func chartContent(data: DepthProfileChartData) -> some View {
-        Chart {
-            // Depth line (negative Y for natural top-down layout)
-            ForEach(data.depthPoints) { point in
+    @ChartContentBuilder
+    private func ceilingContent(data: DepthProfileChartData) -> some ChartContent {
+        if data.hasCeilingData {
+            ForEach(data.ceilingPoints) { point in
+                AreaMark(
+                    x: .value("Time", point.timeMinutes),
+                    yStart: .value("Surface", Float(0)),
+                    yEnd: .value("Ceiling", -point.ceilingDepth)
+                )
+                .foregroundStyle(Color.red.opacity(0.25))
+            }
+            // Trace ceiling depth as a line so shallow ceilings remain visible
+            ForEach(data.ceilingPoints) { point in
                 LineMark(
                     x: .value("Time", point.timeMinutes),
-                    y: .value("Depth", -point.depth),
-                    series: .value("Series", "Depth")
+                    y: .value("Ceiling Line", -point.ceilingDepth),
+                    series: .value("Series", "Ceiling")
                 )
-                .foregroundStyle(Color.blue)
-                .lineStyle(StrokeStyle(lineWidth: 2))
-            }
-
-            // Temperature line (separate series, already negative normalized)
-            if showTemperature {
-                ForEach(data.tempPoints) { point in
-                    LineMark(
-                        x: .value("Time", point.timeMinutes),
-                        y: .value("Depth", point.normalizedValue),
-                        series: .value("Series", "Temperature")
-                    )
-                    .foregroundStyle(Color.orange)
-                    .lineStyle(StrokeStyle(lineWidth: 2))
-                }
-            }
-
-            // Scrub line + tooltip
-            if let selectedPoint {
-                RuleMark(x: .value("Selected", selectedPoint.timeMinutes))
-                    .foregroundStyle(Color.gray.opacity(isFullscreen ? 0.7 : 0.5))
-                    .lineStyle(StrokeStyle(
-                        lineWidth: isFullscreen ? 1.5 : 1,
-                        dash: isFullscreen ? [] : [4, 4]
-                    ))
-                    .annotation(position: .top, spacing: 4) {
-                        tooltipView
-                    }
+                .foregroundStyle(Color.red.opacity(0.6))
+                .lineStyle(StrokeStyle(lineWidth: 1.5))
             }
         }
-        .chartYScale(domain: data.domainMin ... Float(0))
+    }
+
+    @ChartContentBuilder
+    private func depthContent(data: DepthProfileChartData) -> some ChartContent {
+        ForEach(data.depthPoints) { point in
+            LineMark(
+                x: .value("Time", point.timeMinutes),
+                y: .value("Depth", -point.depth),
+                series: .value("Series", "Depth")
+            )
+            .foregroundStyle(Color.blue)
+            .lineStyle(StrokeStyle(lineWidth: 2))
+        }
+    }
+
+    @ChartContentBuilder
+    private func temperatureContent(data: DepthProfileChartData) -> some ChartContent {
+        if showTemperature {
+            ForEach(data.tempPoints) { point in
+                LineMark(
+                    x: .value("Time", point.timeMinutes),
+                    y: .value("Depth", point.normalizedValue),
+                    series: .value("Series", "Temperature")
+                )
+                .foregroundStyle(Color.orange)
+                .lineStyle(StrokeStyle(lineWidth: 2))
+            }
+        }
+    }
+
+    @ChartContentBuilder
+    private var scrubContent: some ChartContent {
+        if let selectedPoint {
+            RuleMark(x: .value("Selected", selectedPoint.timeMinutes))
+                .foregroundStyle(Color.gray.opacity(isFullscreen ? 0.7 : 0.5))
+                .lineStyle(StrokeStyle(
+                    lineWidth: isFullscreen ? 1.5 : 1,
+                    dash: isFullscreen ? [] : [4, 4]
+                ))
+                .annotation(position: .top, spacing: 4) {
+                    tooltipView
+                }
+        }
+    }
+
+    private func chartContent(data: DepthProfileChartData) -> some View {
+        Chart {
+            depthContent(data: data)
+            ceilingContent(data: data)
+            temperatureContent(data: data)
+            scrubContent
+        }
+        .chartYScale(domain: data.domainMin ... data.domainMax)
         .chartLegend(.hidden)
         .chartXAxis {
             AxisMarks(values: .automatic) { value in
                 AxisGridLine()
                 AxisValueLabel {
                     if let minutes = value.as(Float.self) {
-                        Text("\(Int(minutes))m")
+                        Text("\(Int(minutes)) min")
                     }
                 }
             }
@@ -315,15 +528,30 @@ struct DepthProfileChart: View {
 
     private var tooltipView: some View {
         VStack(spacing: 2) {
-            if let selectedPoint {
-                Text(String(format: "%.1f%@", selectedPoint.depth, UnitFormatter.depthLabel(depthUnit)))
+            if let depthStr = selectedDepthDisplay {
+                Text(depthStr)
                     .font(isFullscreen ? .caption : .caption2)
                     .fontWeight(.semibold)
+            }
+            if let timeStr = selectedElapsedTime {
+                Text(timeStr)
+                    .font(isFullscreen ? .caption : .caption2)
+                    .foregroundColor(.secondary)
             }
             if let tempStr = selectedTempDisplay {
                 Text(tempStr)
                     .font(isFullscreen ? .caption : .caption2)
                     .foregroundColor(.orange)
+            }
+            if let ceilStr = selectedCeilingDisplay {
+                Text("CEIL \(ceilStr)")
+                    .font(isFullscreen ? .caption : .caption2)
+                    .foregroundColor(.red)
+            }
+            if let ttsStr = selectedTtsDisplay {
+                Text("TTS \(ttsStr)")
+                    .font(isFullscreen ? .caption : .caption2)
+                    .foregroundColor(.red)
             }
         }
         .padding(4)
@@ -364,4 +592,11 @@ struct TempDataPoint: Identifiable {
     let timeMinutes: Float
     /// Negative normalized value for chart Y axis.
     let normalizedValue: Float
+}
+
+struct CeilingDataPoint: Identifiable {
+    let id: Int
+    let timeMinutes: Float
+    /// Positive ceiling depth in display units.
+    let ceilingDepth: Float
 }

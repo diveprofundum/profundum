@@ -359,6 +359,16 @@ public final class DivelogDatabase: Sendable {
             }
         }
 
+        migrator.registerMigration("011_add_max_ceiling") { db in
+            try db.execute(sql: """
+                ALTER TABLE dives ADD COLUMN max_ceiling_m REAL;
+
+                UPDATE dives SET max_ceiling_m = (
+                    SELECT MAX(ceiling_m) FROM samples WHERE samples.dive_id = dives.id
+                );
+            """)
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

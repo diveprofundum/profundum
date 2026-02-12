@@ -203,6 +203,13 @@ public enum DiveDataMapper {
     /// Converts a `ParsedDive` into a `Dive`, its `[DiveSample]`, and `[GasMix]`.
     public static func toDive(_ parsed: ParsedDive, deviceId: String) -> (Dive, [DiveSample], [GasMix]) {
         let diveId = UUID().uuidString
+        let maxCeiling: Float? = {
+            var maxVal: Float = 0
+            for s in parsed.samples {
+                if let c = s.ceilingM, c > maxVal { maxVal = c }
+            }
+            return maxVal > 0 ? maxVal : nil
+        }()
         let dive = Dive(
             id: diveId,
             deviceId: deviceId,
@@ -226,7 +233,8 @@ public enum DiveDataMapper {
             salinity: parsed.salinity,
             surfacePressureBar: parsed.surfacePressureBar,
             lat: parsed.lat,
-            lon: parsed.lon
+            lon: parsed.lon,
+            maxCeilingM: maxCeiling
         )
 
         let samples = parsed.samples.map { s in
