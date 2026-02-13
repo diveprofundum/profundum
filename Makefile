@@ -16,11 +16,8 @@ xcframework:
 	./core/build-xcframework.sh
 
 # Regenerate Swift bindings from the UDL definition
+# (build-xcframework.sh generates bindings as part of the build)
 swift-bindings: xcframework
-	cd core && cargo run --features=uniffi/cli \
-		--bin uniffi-bindgen generate src/divelog_compute.udl \
-		--language swift \
-		--out-dir ../apple/DivelogCore/Sources/RustBridge/Generated
 
 # Run Rust tests
 rust-test:
