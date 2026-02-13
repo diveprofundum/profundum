@@ -5,13 +5,29 @@ struct DepthProfileFullscreenView: View {
     let samples: [DiveSample]
     let depthUnit: DepthUnit
     let temperatureUnit: TemperatureUnit
+    var gasMixes: [GasMix] = []
 
     @Environment(\.dismiss) private var dismiss
     @State private var showTemperature = false
     @State private var showGf99 = false
+    @State private var showAtPlusFive = false
+    @State private var showDeltaFive = false
+    @State private var showSurfGf = false
 
     private var hasGf99Data: Bool {
         samples.contains { ($0.gf99 ?? 0) > 0 }
+    }
+
+    private var hasAtPlusFiveData: Bool {
+        samples.contains { $0.atPlusFiveTtsMin != nil }
+    }
+
+    private var hasDeltaFiveData: Bool {
+        samples.contains { $0.deltaFiveTtsMin != nil }
+    }
+
+    private var hasSurfGfData: Bool {
+        samples.contains { $0.depthM > 3.0 }
     }
 
     private var hasTemperatureVariation: Bool {
@@ -47,6 +63,36 @@ struct DepthProfileFullscreenView: View {
                     }
                 }
 
+                if hasAtPlusFiveData {
+                    ChartOverlayChip(
+                        label: "@+5",
+                        color: .cyan,
+                        isActive: showAtPlusFive
+                    ) {
+                        showAtPlusFive.toggle()
+                    }
+                }
+
+                if hasDeltaFiveData {
+                    ChartOverlayChip(
+                        label: "\u{0394}+5",
+                        color: .yellow,
+                        isActive: showDeltaFive
+                    ) {
+                        showDeltaFive.toggle()
+                    }
+                }
+
+                if hasSurfGfData {
+                    ChartOverlayChip(
+                        label: "SurfGF",
+                        color: .teal,
+                        isActive: showSurfGf
+                    ) {
+                        showSurfGf.toggle()
+                    }
+                }
+
                 Spacer()
 
                 Button {
@@ -70,6 +116,10 @@ struct DepthProfileFullscreenView: View {
                 temperatureUnit: temperatureUnit,
                 showTemperature: showTemperature,
                 showGf99: showGf99,
+                showAtPlusFive: showAtPlusFive,
+                showDeltaFive: showDeltaFive,
+                showSurfGf: showSurfGf,
+                gasMixes: gasMixes,
                 isFullscreen: true
             )
             .frame(maxHeight: .infinity)

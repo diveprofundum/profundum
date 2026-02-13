@@ -67,6 +67,8 @@ pub struct SampleInput {
     pub gf99: Option<f32>,
     /// Gas mix index (identifies which gas is being breathed)
     pub gasmix_index: Option<i32>,
+    /// Actual measured PPO2 (for CCR); None = OC, use gas fractions
+    pub ppo2: Option<f32>,
 }
 
 /// Computed statistics for a dive.
@@ -446,6 +448,7 @@ mod tests {
                 ceiling_m: Some(0.0),
                 gf99: Some(0.0),
                 gasmix_index: None,
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 60,
@@ -455,6 +458,7 @@ mod tests {
                 ceiling_m: Some(0.0),
                 gf99: Some(20.0),
                 gasmix_index: None,
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 120,
@@ -464,6 +468,7 @@ mod tests {
                 ceiling_m: Some(0.0),
                 gf99: Some(40.0),
                 gasmix_index: None,
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 300,
@@ -473,6 +478,7 @@ mod tests {
                 ceiling_m: Some(3.0),
                 gf99: Some(60.0),
                 gasmix_index: None,
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 600,
@@ -482,6 +488,7 @@ mod tests {
                 ceiling_m: Some(6.0),
                 gf99: Some(80.0),
                 gasmix_index: None,
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 900,
@@ -491,6 +498,7 @@ mod tests {
                 ceiling_m: Some(3.0),
                 gf99: Some(70.0),
                 gasmix_index: None,
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 1200,
@@ -500,6 +508,7 @@ mod tests {
                 ceiling_m: Some(0.0),
                 gf99: Some(50.0),
                 gasmix_index: None,
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 1500,
@@ -509,6 +518,7 @@ mod tests {
                 ceiling_m: Some(0.0),
                 gf99: Some(30.0),
                 gasmix_index: None,
+                ppo2: None,
             },
         ]
     }
@@ -589,6 +599,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: Some(0),
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 60,
@@ -598,6 +609,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: Some(0),
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 120,
@@ -607,6 +619,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: Some(1),
+                ppo2: None,
             }, // switch 1
             SampleInput {
                 t_sec: 300,
@@ -616,6 +629,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: Some(1),
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 600,
@@ -625,6 +639,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: Some(0),
+                ppo2: None,
             }, // switch 2
             SampleInput {
                 t_sec: 900,
@@ -634,6 +649,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: Some(0),
+                ppo2: None,
             },
         ];
         let stats = DiveStats::compute(&dive, &samples);
@@ -650,6 +666,7 @@ mod tests {
             ceiling_m: None,
             gf99: None,
             gasmix_index: None,
+            ppo2: None,
         }];
         let (descent, ascent) = DiveStats::compute_rates(&samples);
         assert_eq!(descent, 0.0);
@@ -668,6 +685,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: None,
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 300,
@@ -677,6 +695,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: None,
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 900,
@@ -686,6 +705,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: None,
+                ppo2: None,
             },
         ];
         let (descent, ascent) = DiveStats::compute_rates(&samples);
@@ -707,6 +727,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: None,
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 600,
@@ -716,6 +737,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: None,
+                ppo2: None,
             },
         ];
         let (descent, ascent) = DiveStats::compute_rates(&samples);
@@ -736,6 +758,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: None,
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 600,
@@ -745,6 +768,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: None,
+                ppo2: None,
             },
         ];
         let (descent, ascent) = DiveStats::compute_rates(&samples);
@@ -765,6 +789,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: None,
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 120,
@@ -774,6 +799,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: None,
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 300,
@@ -783,6 +809,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: None,
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 600,
@@ -792,6 +819,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: None,
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 1200,
@@ -801,6 +829,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: None,
+                ppo2: None,
             },
         ];
         let (descent, ascent) = DiveStats::compute_rates(&samples);
@@ -823,6 +852,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: Some(0),
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 60,
@@ -832,6 +862,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: Some(0),
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 120,
@@ -841,6 +872,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: Some(0),
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 300,
@@ -850,6 +882,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: Some(0),
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 600,
@@ -859,6 +892,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: Some(0),
+                ppo2: None,
             },
             SampleInput {
                 t_sec: 900,
@@ -868,6 +902,7 @@ mod tests {
                 ceiling_m: None,
                 gf99: None,
                 gasmix_index: Some(0),
+                ppo2: None,
             },
         ];
         let stats = DiveStats::compute(&dive, &samples);
