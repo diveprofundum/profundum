@@ -18,23 +18,30 @@ struct DepthProfileChartData {
     let ceilingPoints: [CeilingDataPoint]
     let hasGf99Data: Bool
     let gf99DisplayRange: (min: Float, max: Float)?
-    let gf99Points: [Gf99DataPoint]
+    let gf99Points: [OverlayDataPoint]
 
     let hasAtPlusFiveData: Bool
     let atPlusFiveDisplayRange: (min: Float, max: Float)?
-    let atPlusFivePoints: [AtPlusFiveTtsDataPoint]
+    let atPlusFivePoints: [OverlayDataPoint]
 
     let hasDeltaFiveData: Bool
     let deltaFiveDisplayRange: (min: Float, max: Float)?
-    let deltaFivePoints: [DeltaFiveTtsDataPoint]
+    let deltaFivePoints: [OverlayDataPoint]
 
     let hasSurfGfData: Bool
     let surfGfDisplayRange: (min: Float, max: Float)?
-    let surfGfPoints: [SurfGfDataPoint]
+    let surfGfPoints: [OverlayDataPoint]
     /// SurfGF lookup by sample tSec for tooltip display.
     let surfGfLookup: [Int32: Float]
 
-    init(samples: [DiveSample], depthUnit: DepthUnit, temperatureUnit: TemperatureUnit, gasMixes: [GasMix] = []) {
+    // swiftlint:disable:next function_body_length
+    init(
+        samples: [DiveSample],
+        depthUnit: DepthUnit,
+        temperatureUnit: TemperatureUnit,
+        gasMixes: [GasMix] = [],
+        needsSurfGf: Bool = false
+    ) {
         var maxD: Float = 0
         var minC: Float = .greatestFiniteMagnitude
         var maxC: Float = -.greatestFiniteMagnitude
@@ -230,282 +237,159 @@ struct DepthProfileChartData {
             self.ceilingPoints = []
         }
 
-        // GF99 pass: downsample + smooth, normalize to depth Y-axis (same pattern as temperature).
-        let anyGf99 = samples.contains { ($0.gf99 ?? 0) > 0 }
-        self.hasGf99Data = anyGf99
-        if anyGf99 {
-            var minGf: Float = .greatestFiniteMagnitude
-            var maxGf: Float = -.greatestFiniteMagnitude
-            for s in samples {
-                if let g = s.gf99, g > 0 {
-                    if g < minGf { minGf = g }
-                    if g > maxGf { maxGf = g }
-                }
-            }
-            let gfSpan = maxGf - minGf
-            let gfPad = gfSpan > 0.1 ? gfSpan * 0.15 : max(minGf * 0.1, 1)
-            let gfRange = (min: minGf - gfPad, max: maxGf + gfPad)
-            let gfRangeDelta = gfRange.max - gfRange.min
-            self.gf99DisplayRange = gfRange
-
-            let gfTargetCount = 300
-            let gfStride = max(1, samples.count / gfTargetCount)
-            let gfHalfWindow = max(5, samples.count / 40)
-            var gf99Pts: [Gf99DataPoint] = []
-            gf99Pts.reserveCapacity(gfTargetCount + 2)
-            var gi = 0
-            var gfIdx = 0
-            while gi < samples.count {
-                let t = Float(samples[gi].tSec) / 60.0
-                let wStart = max(0, gi - gfHalfWindow)
-                let wEnd = min(samples.count - 1, gi + gfHalfWindow)
-                var gfSum: Float = 0
-                var gfCount = 0
-                for j in wStart ... wEnd {
-                    if let g = samples[j].gf99, g > 0 {
-                        gfSum += g
-                        gfCount += 1
-                    }
-                }
-                if gfCount > 0 {
-                    let avgGf = gfSum / Float(gfCount)
-                    let fraction = (avgGf - gfRange.min) / gfRangeDelta
-                    let normalized = -(maxD * (1.0 - fraction))
-                    gf99Pts.append(Gf99DataPoint(id: gfIdx, timeMinutes: t, normalizedValue: normalized))
-                    gfIdx += 1
-                }
-                gi += gfStride
-            }
-            // Always include last sample
-            if let last = samples.last, let g = last.gf99, g > 0 {
-                let lastT = Float(last.tSec) / 60.0
-                if gf99Pts.last?.timeMinutes != lastT {
-                    let fraction = (g - gfRange.min) / gfRangeDelta
-                    let normalized = -(maxD * (1.0 - fraction))
-                    gf99Pts.append(Gf99DataPoint(id: gfIdx, timeMinutes: lastT, normalizedValue: normalized))
-                }
-            }
-            self.gf99Points = gf99Pts
-        } else {
-            self.gf99DisplayRange = nil
-            self.gf99Points = []
+        // GF99 overlay
+        let gf99Values: [Float?] = samples.map { s in
+            guard let g = s.gf99, g > 0 else { return nil }
+            return g
         }
+        let gf99Result = Self.downsampleOverlay(samples: samples, values: gf99Values, maxDepth: maxD)
+        self.hasGf99Data = gf99Result.hasData
+        self.gf99DisplayRange = gf99Result.range
+        self.gf99Points = gf99Result.points
 
-        // @+5 TTS pass: downsample + smooth + normalize (same pattern as GF99).
-        let anyAtPlusFive = samples.contains { $0.atPlusFiveTtsMin != nil }
-        self.hasAtPlusFiveData = anyAtPlusFive
-        if anyAtPlusFive {
-            var minVal: Float = .greatestFiniteMagnitude
-            var maxVal: Float = -.greatestFiniteMagnitude
-            for s in samples {
-                if let v = s.atPlusFiveTtsMin {
-                    let f = Float(v)
-                    if f < minVal { minVal = f }
-                    if f > maxVal { maxVal = f }
-                }
-            }
-            let span = maxVal - minVal
-            let pad = span > 0.1 ? span * 0.15 : max(minVal * 0.1, 1)
-            let range = (min: minVal - pad, max: maxVal + pad)
-            let rangeDelta = range.max - range.min
-            self.atPlusFiveDisplayRange = range
+        // @+5 TTS overlay
+        let atPlusFiveValues: [Float?] = samples.map { s in s.atPlusFiveTtsMin.map { Float($0) } }
+        let atPlusFiveResult = Self.downsampleOverlay(samples: samples, values: atPlusFiveValues, maxDepth: maxD)
+        self.hasAtPlusFiveData = atPlusFiveResult.hasData
+        self.atPlusFiveDisplayRange = atPlusFiveResult.range
+        self.atPlusFivePoints = atPlusFiveResult.points
 
-            let targetCount = 300
-            let stride = max(1, samples.count / targetCount)
-            let halfWindow = max(5, samples.count / 40)
-            var pts: [AtPlusFiveTtsDataPoint] = []
-            pts.reserveCapacity(targetCount + 2)
-            var si = 0
-            var idx = 0
-            while si < samples.count {
-                let t = Float(samples[si].tSec) / 60.0
-                let wStart = max(0, si - halfWindow)
-                let wEnd = min(samples.count - 1, si + halfWindow)
-                var sum: Float = 0
-                var count = 0
-                for j in wStart ... wEnd {
-                    if let v = samples[j].atPlusFiveTtsMin {
-                        sum += Float(v)
-                        count += 1
-                    }
-                }
-                if count > 0 {
-                    let avg = sum / Float(count)
-                    let fraction = (avg - range.min) / rangeDelta
-                    let normalized = -(maxD * (1.0 - fraction))
-                    pts.append(AtPlusFiveTtsDataPoint(id: idx, timeMinutes: t, normalizedValue: normalized))
-                    idx += 1
-                }
-                si += stride
-            }
-            if let last = samples.last, let v = last.atPlusFiveTtsMin {
-                let lastT = Float(last.tSec) / 60.0
-                if pts.last?.timeMinutes != lastT {
-                    let fraction = (Float(v) - range.min) / rangeDelta
-                    let normalized = -(maxD * (1.0 - fraction))
-                    pts.append(AtPlusFiveTtsDataPoint(id: idx, timeMinutes: lastT, normalizedValue: normalized))
-                }
-            }
-            self.atPlusFivePoints = pts
-        } else {
-            self.atPlusFiveDisplayRange = nil
-            self.atPlusFivePoints = []
-        }
+        // Δ+5 TTS overlay
+        let deltaFiveValues: [Float?] = samples.map { s in s.deltaFiveTtsMin.map { Float($0) } }
+        let deltaFiveResult = Self.downsampleOverlay(samples: samples, values: deltaFiveValues, maxDepth: maxD)
+        self.hasDeltaFiveData = deltaFiveResult.hasData
+        self.deltaFiveDisplayRange = deltaFiveResult.range
+        self.deltaFivePoints = deltaFiveResult.points
 
-        // Δ+5 TTS pass: same pattern, source = deltaFiveTtsMin (can be negative).
-        let anyDeltaFive = samples.contains { $0.deltaFiveTtsMin != nil }
-        self.hasDeltaFiveData = anyDeltaFive
-        if anyDeltaFive {
-            var minVal: Float = .greatestFiniteMagnitude
-            var maxVal: Float = -.greatestFiniteMagnitude
-            for s in samples {
-                if let v = s.deltaFiveTtsMin {
-                    let f = Float(v)
-                    if f < minVal { minVal = f }
-                    if f > maxVal { maxVal = f }
-                }
+        // SurfGF overlay (lazy — only run Bühlmann simulation when requested)
+        if needsSurfGf {
+            let sampleInputs = samples.map { s in
+                SampleInput(
+                    tSec: s.tSec,
+                    depthM: s.depthM,
+                    tempC: s.tempC,
+                    setpointPpo2: s.setpointPpo2,
+                    ceilingM: s.ceilingM,
+                    gf99: s.gf99,
+                    gasmixIndex: s.gasmixIndex.map { Int32($0) },
+                    ppo2: s.ppo2_1 ?? s.setpointPpo2
+                )
             }
-            let span = maxVal - minVal
-            let pad = span > 0.1 ? span * 0.15 : max(abs(minVal) * 0.1, 1)
-            let range = (min: minVal - pad, max: maxVal + pad)
-            let rangeDelta = range.max - range.min
-            self.deltaFiveDisplayRange = range
-
-            let targetCount = 300
-            let stride = max(1, samples.count / targetCount)
-            let halfWindow = max(5, samples.count / 40)
-            var pts: [DeltaFiveTtsDataPoint] = []
-            pts.reserveCapacity(targetCount + 2)
-            var si = 0
-            var idx = 0
-            while si < samples.count {
-                let t = Float(samples[si].tSec) / 60.0
-                let wStart = max(0, si - halfWindow)
-                let wEnd = min(samples.count - 1, si + halfWindow)
-                var sum: Float = 0
-                var count = 0
-                for j in wStart ... wEnd {
-                    if let v = samples[j].deltaFiveTtsMin {
-                        sum += Float(v)
-                        count += 1
-                    }
-                }
-                if count > 0 {
-                    let avg = sum / Float(count)
-                    let fraction = (avg - range.min) / rangeDelta
-                    let normalized = -(maxD * (1.0 - fraction))
-                    pts.append(DeltaFiveTtsDataPoint(id: idx, timeMinutes: t, normalizedValue: normalized))
-                    idx += 1
-                }
-                si += stride
+            let gasMixInputs = gasMixes.map { mix in
+                GasMixInput(
+                    mixIndex: Int32(mix.mixIndex),
+                    o2Fraction: Double(mix.o2Fraction),
+                    heFraction: Double(mix.heFraction)
+                )
             }
-            if let last = samples.last, let v = last.deltaFiveTtsMin {
-                let lastT = Float(last.tSec) / 60.0
-                if pts.last?.timeMinutes != lastT {
-                    let fraction = (Float(v) - range.min) / rangeDelta
-                    let normalized = -(maxD * (1.0 - fraction))
-                    pts.append(DeltaFiveTtsDataPoint(id: idx, timeMinutes: lastT, normalizedValue: normalized))
-                }
-            }
-            self.deltaFivePoints = pts
-        } else {
-            self.deltaFiveDisplayRange = nil
-            self.deltaFivePoints = []
-        }
-
-        // SurfGF pass: compute via Rust Bühlmann simulation, then downsample + normalize.
-        let sampleInputs = samples.map { s in
-            SampleInput(
-                tSec: s.tSec,
-                depthM: s.depthM,
-                tempC: s.tempC,
-                setpointPpo2: s.setpointPpo2,
-                ceilingM: s.ceilingM,
-                gf99: s.gf99,
-                gasmixIndex: s.gasmixIndex.map { Int32($0) },
-                ppo2: s.ppo2_1 ?? s.setpointPpo2
+            let surfGfResult = DivelogCompute.computeSurfaceGf(
+                samples: sampleInputs,
+                gasMixes: gasMixInputs
             )
-        }
-        let gasMixInputs = gasMixes.map { mix in
-            GasMixInput(
-                mixIndex: Int32(mix.mixIndex),
-                o2Fraction: Double(mix.o2Fraction),
-                heFraction: Double(mix.heFraction)
-            )
-        }
-        let surfGfResult = DivelogCompute.computeSurfaceGf(
-            samples: sampleInputs,
-            gasMixes: gasMixInputs
-        )
 
-        // Build lookup by tSec for joining with samples (also stored for tooltip use)
-        var surfGfLookupLocal: [Int32: Float] = [:]
-        for pt in surfGfResult {
-            surfGfLookupLocal[pt.tSec] = pt.surfaceGf
-        }
-        self.surfGfLookup = surfGfLookupLocal
+            var surfGfLookupLocal: [Int32: Float] = [:]
+            for pt in surfGfResult {
+                surfGfLookupLocal[pt.tSec] = pt.surfaceGf
+            }
+            self.surfGfLookup = surfGfLookupLocal
 
-        let anySurfGf = surfGfResult.contains { $0.surfaceGf > 0.1 }
-        self.hasSurfGfData = anySurfGf
-        if anySurfGf {
-            var minSgf: Float = .greatestFiniteMagnitude
-            var maxSgf: Float = -.greatestFiniteMagnitude
-            for pt in surfGfResult where pt.surfaceGf > 0.1 {
-                if pt.surfaceGf < minSgf { minSgf = pt.surfaceGf }
-                if pt.surfaceGf > maxSgf { maxSgf = pt.surfaceGf }
+            let surfGfValues: [Float?] = samples.map { s in
+                guard let sgf = surfGfLookupLocal[s.tSec], sgf > 0.1 else { return nil }
+                return sgf
             }
-            let span = maxSgf - minSgf
-            let pad = span > 0.1 ? span * 0.15 : max(minSgf * 0.1, 1)
-            let range = (min: minSgf - pad, max: maxSgf + pad)
-            let rangeDelta = range.max - range.min
-            self.surfGfDisplayRange = range
-
-            let targetCount = 300
-            let stride = max(1, samples.count / targetCount)
-            let halfWindow = max(5, samples.count / 40)
-            var pts: [SurfGfDataPoint] = []
-            pts.reserveCapacity(targetCount + 2)
-            var si = 0
-            var idx = 0
-            while si < samples.count {
-                let t = Float(samples[si].tSec) / 60.0
-                let wStart = max(0, si - halfWindow)
-                let wEnd = min(samples.count - 1, si + halfWindow)
-                var sum: Float = 0
-                var count = 0
-                for j in wStart ... wEnd {
-                    if let sgf = surfGfLookupLocal[samples[j].tSec], sgf > 0.1 {
-                        sum += sgf
-                        count += 1
-                    }
-                }
-                if count > 0 {
-                    let avg = sum / Float(count)
-                    let fraction = (avg - range.min) / rangeDelta
-                    let normalized = -(maxD * (1.0 - fraction))
-                    pts.append(SurfGfDataPoint(id: idx, timeMinutes: t, normalizedValue: normalized))
-                    idx += 1
-                }
-                si += stride
-            }
-            if let last = samples.last, let sgf = surfGfLookupLocal[last.tSec], sgf > 0.1 {
-                let lastT = Float(last.tSec) / 60.0
-                if pts.last?.timeMinutes != lastT {
-                    let fraction = (sgf - range.min) / rangeDelta
-                    let normalized = -(maxD * (1.0 - fraction))
-                    pts.append(SurfGfDataPoint(id: idx, timeMinutes: lastT, normalizedValue: normalized))
-                }
-            }
-            self.surfGfPoints = pts
+            let surfGfRes = Self.downsampleOverlay(samples: samples, values: surfGfValues, maxDepth: maxD)
+            self.hasSurfGfData = surfGfRes.hasData
+            self.surfGfDisplayRange = surfGfRes.range
+            self.surfGfPoints = surfGfRes.points
         } else {
+            self.hasSurfGfData = false
             self.surfGfDisplayRange = nil
             self.surfGfPoints = []
+            self.surfGfLookup = [:]
         }
     }
 
     /// Padded Y domain bounds (negative depth scale).
     var domainMin: Float { -(maxDepth * 1.15) }
     var domainMax: Float { maxDepth * 0.05 }
+
+    // MARK: - Downsample helper
+
+    /// Downsample, smooth, and normalize an overlay series to the depth Y-axis.
+    ///
+    /// - Parameters:
+    ///   - samples: Full-resolution dive samples (for timing information).
+    ///   - values: One value per sample (`nil` = no data at that point).
+    ///   - maxDepth: Maximum displayed depth (positive), used for Y-axis normalization.
+    /// - Returns: Whether data exists, the display range, and the downsampled points.
+    private static func downsampleOverlay(
+        samples: [DiveSample],
+        values: [Float?],
+        maxDepth: Float
+    ) -> (hasData: Bool, range: (min: Float, max: Float)?, points: [OverlayDataPoint]) {
+        guard samples.count == values.count else {
+            return (false, nil, [])
+        }
+
+        var minVal: Float = .greatestFiniteMagnitude
+        var maxVal: Float = -.greatestFiniteMagnitude
+        var anyData = false
+        for v in values {
+            if let v {
+                anyData = true
+                if v < minVal { minVal = v }
+                if v > maxVal { maxVal = v }
+            }
+        }
+        guard anyData else { return (false, nil, []) }
+
+        let span = maxVal - minVal
+        let pad = span > 0.1 ? span * 0.15 : max(abs(minVal) * 0.1, 1)
+        let range = (min: minVal - pad, max: maxVal + pad)
+        let rangeDelta = range.max - range.min
+
+        let targetCount = 300
+        let stride = max(1, samples.count / targetCount)
+        let halfWindow = max(5, samples.count / 40)
+        var pts: [OverlayDataPoint] = []
+        pts.reserveCapacity(targetCount + 2)
+        var si = 0
+        var idx = 0
+        while si < samples.count {
+            let t = Float(samples[si].tSec) / 60.0
+            let wStart = max(0, si - halfWindow)
+            let wEnd = min(samples.count - 1, si + halfWindow)
+            var sum: Float = 0
+            var count = 0
+            for j in wStart ... wEnd {
+                if let v = values[j] {
+                    sum += v
+                    count += 1
+                }
+            }
+            if count > 0 {
+                let avg = sum / Float(count)
+                let fraction = (avg - range.min) / rangeDelta
+                let normalized = -(maxDepth * (1.0 - fraction))
+                pts.append(OverlayDataPoint(id: idx, timeMinutes: t, normalizedValue: normalized))
+                idx += 1
+            }
+            si += stride
+        }
+        // Always include last sample
+        if let lastVal = values[samples.count - 1] {
+            let lastT = Float(samples[samples.count - 1].tSec) / 60.0
+            if pts.last?.timeMinutes != lastT {
+                let fraction = (lastVal - range.min) / rangeDelta
+                let normalized = -(maxDepth * (1.0 - fraction))
+                pts.append(OverlayDataPoint(id: idx, timeMinutes: lastT, normalizedValue: normalized))
+            }
+        }
+
+        return (true, range, pts)
+    }
+
+    // MARK: - Lookup helpers
 
     /// Binary search for the nearest depth point to a given time.
     func nearestDepthPoint(to time: Float) -> DepthDataPoint? {
@@ -650,7 +534,7 @@ struct DepthProfileChartData {
     }
 
     /// SurfGF display string for the nearest sample time, using precomputed lookup.
-    func nearestSurfGfDisplay(to time: Float, samples: [DiveSample], surfGfLookup: [Int32: Float]) -> String? {
+    func nearestSurfGfDisplay(to time: Float, samples: [DiveSample]) -> String? {
         guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
         guard let sgf = surfGfLookup[samples[idx].tSec], sgf > 0.1 else { return nil }
         return String(format: "%.0f%%", sgf)
@@ -747,7 +631,7 @@ struct DepthProfileChart: View {
 
     private var selectedSurfGfDisplay: String? {
         guard let selectedTime, showSurfGf, let data = chartData, data.hasSurfGfData else { return nil }
-        return data.nearestSurfGfDisplay(to: selectedTime, samples: samples, surfGfLookup: data.surfGfLookup)
+        return data.nearestSurfGfDisplay(to: selectedTime, samples: samples)
     }
 
     // MARK: - Accessibility
@@ -786,11 +670,16 @@ struct DepthProfileChart: View {
     // MARK: - Body
 
     var body: some View {
-        Group {
-            if let data = chartData {
-                chartContent(data: data)
-            } else {
-                Color.clear
+        VStack(spacing: 2) {
+            readoutBar
+                .opacity(selectedTime != nil ? 1 : 0)
+
+            Group {
+                if let data = chartData {
+                    chartContent(data: data)
+                } else {
+                    Color.clear
+                }
             }
         }
         .padding(.leading, 4)
@@ -808,6 +697,9 @@ struct DepthProfileChart: View {
         }
         .onChange(of: gasMixes.count) { _, _ in
             buildChartData()
+        }
+        .onChange(of: showSurfGf) { _, newValue in
+            if newValue { buildChartData() }
         }
     }
 
@@ -1022,12 +914,6 @@ struct DepthProfileChart: View {
                     )
             }
         }
-        .overlay(alignment: .top) {
-            if selectedTime != nil {
-                readoutBar
-                    .offset(y: -24)
-            }
-        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(chartAccessibilityLabel)
     }
@@ -1101,7 +987,8 @@ struct DepthProfileChart: View {
             samples: samples,
             depthUnit: depthUnit,
             temperatureUnit: temperatureUnit,
-            gasMixes: gasMixes
+            gasMixes: gasMixes,
+            needsSurfGf: showSurfGf
         )
     }
 }
@@ -1129,27 +1016,10 @@ struct CeilingDataPoint: Identifiable {
     let ceilingDepth: Float
 }
 
-struct Gf99DataPoint: Identifiable {
+/// Shared data point type for all overlay series (GF99, @+5, Δ+5, SurfGF).
+struct OverlayDataPoint: Identifiable {
     let id: Int
     let timeMinutes: Float
     /// Negative normalized value mapped to depth Y-axis.
-    let normalizedValue: Float
-}
-
-struct AtPlusFiveTtsDataPoint: Identifiable {
-    let id: Int
-    let timeMinutes: Float
-    let normalizedValue: Float
-}
-
-struct DeltaFiveTtsDataPoint: Identifiable {
-    let id: Int
-    let timeMinutes: Float
-    let normalizedValue: Float
-}
-
-struct SurfGfDataPoint: Identifiable {
-    let id: Int
-    let timeMinutes: Float
     let normalizedValue: Float
 }
