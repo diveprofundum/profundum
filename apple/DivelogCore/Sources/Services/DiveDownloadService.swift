@@ -330,6 +330,68 @@ private func parseDiveData(
     dc_parser_get_field(p, DC_FIELD_DIVEMODE, 0, &diveMode)
     let isCcr = diveMode == DC_DIVEMODE_CCR || diveMode == DC_DIVEMODE_SCR
 
+    // Temperature fields
+    var minTemp: Double = 0
+    let minTempStatus = dc_parser_get_field(p, DC_FIELD_TEMPERATURE_MINIMUM, 0, &minTemp)
+
+    var maxTemp: Double = 0
+    let maxTempStatus = dc_parser_get_field(p, DC_FIELD_TEMPERATURE_MAXIMUM, 0, &maxTemp)
+
+    // Deco model & GF settings
+    var decomodel = dc_decomodel_t()
+    let decoStatus = dc_parser_get_field(p, DC_FIELD_DECOMODEL, 0, &decomodel)
+    var gfLow: Int?, gfHigh: Int?, decoModelStr: String?
+    if decoStatus == DC_STATUS_SUCCESS {
+        switch decomodel.type {
+        case DC_DECOMODEL_BUHLMANN: decoModelStr = "buhlmann"
+        case DC_DECOMODEL_VPM: decoModelStr = "vpm"
+        case DC_DECOMODEL_RGBM: decoModelStr = "rgbm"
+        default: break
+        }
+        if decomodel.type == DC_DECOMODEL_BUHLMANN {
+            gfLow = Int(decomodel.params.gf.low)
+            gfHigh = Int(decomodel.params.gf.high)
+        }
+    }
+
+    // Gas mixes
+    var gasmixCount: UInt32 = 0
+    dc_parser_get_field(p, DC_FIELD_GASMIX_COUNT, 0, &gasmixCount)
+    var parsedGasMixes: [ParsedGasMix] = []
+    for i in 0..<Int(gasmixCount) {
+        var mix = dc_gasmix_t()
+        if dc_parser_get_field(p, DC_FIELD_GASMIX, UInt32(i), &mix) == DC_STATUS_SUCCESS {
+            let usage: String? = {
+                switch mix.usage {
+                case DC_USAGE_OXYGEN: return "oxygen"
+                case DC_USAGE_DILUENT: return "diluent"
+                case DC_USAGE_SIDEMOUNT: return "sidemount"
+                default: return nil
+                }
+            }()
+            parsedGasMixes.append(ParsedGasMix(
+                index: i, o2Fraction: Float(mix.oxygen),
+                heFraction: Float(mix.helium), usage: usage
+            ))
+        }
+    }
+
+    // Salinity
+    var salinity = dc_salinity_t()
+    let salStatus = dc_parser_get_field(p, DC_FIELD_SALINITY, 0, &salinity)
+    let salinityStr: String? = {
+        guard salStatus == DC_STATUS_SUCCESS else { return nil }
+        switch salinity.type {
+        case DC_WATER_FRESH: return "fresh"
+        case DC_WATER_SALT: return "salt"
+        default: return nil
+        }
+    }()
+
+    // Atmospheric pressure
+    var atmospheric: Double = 0
+    let atmStatus = dc_parser_get_field(p, DC_FIELD_ATMOSPHERIC, 0, &atmospheric)
+
     // Parse samples
     var sampleContext = SampleCallbackContext()
     withUnsafeMutablePointer(to: &sampleContext) { ptr in
@@ -338,14 +400,7 @@ private func parseDiveData(
 
     // Commit the final in-progress sample
     if sampleContext.currentTime > 0 || !sampleContext.samples.isEmpty {
-        sampleContext.samples.append(ParsedSample(
-            tSec: sampleContext.currentTime,
-            depthM: sampleContext.currentDepth,
-            tempC: sampleContext.currentTemp,
-            setpointPpo2: sampleContext.currentSetpoint,
-            ceilingM: sampleContext.currentCeiling,
-            gf99: sampleContext.currentGf99
-        ))
+        sampleContext.commitCurrentSample()
     }
 
     // Extract per-sample PNF fields (GF99, @+5 TTS) from raw binary.
@@ -358,18 +413,44 @@ private func parseDiveData(
         }
     }
 
+    #if DEBUG
+    let ppo2Samples = sampleContext.samples.filter {
+        $0.ppo2_1 != nil || $0.ppo2_2 != nil || $0.ppo2_3 != nil
+    }.count
+    NSLog(
+        "[BLEParse] PPO2 callbacks: \(sampleContext.ppo2CallbackCount), "
+        + "samples with PPO2: \(ppo2Samples)/\(sampleContext.samples.count), "
+        + "isCCR: \(isCcr)"
+    )
+    #endif
+
+    // Compute avg depth from samples when parser returns 0
+    let avgFromSamples: Float = {
+        guard !sampleContext.samples.isEmpty else { return 0 }
+        let sum = sampleContext.samples.reduce(Float(0)) { $0 + $1.depthM }
+        return sum / Float(sampleContext.samples.count)
+    }()
+
     let endTimeUnix = startTimeUnix + Int64(diveTime)
 
     return DiveDataMapper.clipSurfaceTimeout(ParsedDive(
         startTimeUnix: startTimeUnix,
         endTimeUnix: endTimeUnix,
         maxDepthM: Float(maxDepth),
-        avgDepthM: Float(avgDepth),
+        avgDepthM: avgDepth > 0 ? Float(avgDepth) : avgFromSamples,
         bottomTimeSec: Int32(diveTime),
         isCcr: isCcr,
         decoRequired: sampleContext.maxCeiling > 0,
         fingerprint: fingerprint,
-        samples: sampleContext.samples
+        samples: sampleContext.samples,
+        minTempC: minTempStatus == DC_STATUS_SUCCESS ? Float(minTemp) : nil,
+        maxTempC: maxTempStatus == DC_STATUS_SUCCESS ? Float(maxTemp) : nil,
+        gfLow: gfLow,
+        gfHigh: gfHigh,
+        decoModel: decoModelStr,
+        salinity: salinityStr,
+        surfacePressureBar: atmStatus == DC_STATUS_SUCCESS ? Float(atmospheric) : nil,
+        gasMixes: parsedGasMixes
     ))
 }
 
@@ -383,7 +464,58 @@ private struct SampleCallbackContext {
     var currentSetpoint: Float?
     var currentCeiling: Float?
     var currentGf99: Float?
+    var currentPpo2_1: Float?
+    var currentPpo2_2: Float?
+    var currentPpo2_3: Float?
+    var currentCns: Float?
+    var currentTankPressure1: Float?
+    var currentTankPressure2: Float?
+    var currentTtsSec: Int?
+    var currentNdlSec: Int?
+    var currentDecoStopDepthM: Float?
+    var currentRbtSec: Int?
+    var currentGasmixIndex: Int?
     var maxCeiling: Float = 0
+    var ppo2CallbackCount: Int = 0
+
+    mutating func commitCurrentSample() {
+        samples.append(ParsedSample(
+            tSec: currentTime,
+            depthM: currentDepth,
+            tempC: currentTemp,
+            setpointPpo2: currentSetpoint,
+            ceilingM: currentCeiling,
+            gf99: currentGf99,
+            ppo2_1: currentPpo2_1,
+            ppo2_2: currentPpo2_2,
+            ppo2_3: currentPpo2_3,
+            cns: currentCns,
+            tankPressure1Bar: currentTankPressure1,
+            tankPressure2Bar: currentTankPressure2,
+            ttsSec: currentTtsSec,
+            ndlSec: currentNdlSec,
+            decoStopDepthM: currentDecoStopDepthM,
+            rbtSec: currentRbtSec,
+            gasmixIndex: currentGasmixIndex
+        ))
+    }
+
+    mutating func resetPerSampleFields() {
+        currentSetpoint = nil
+        currentCeiling = nil
+        currentGf99 = nil
+        currentPpo2_1 = nil
+        currentPpo2_2 = nil
+        currentPpo2_3 = nil
+        currentCns = nil
+        currentTankPressure1 = nil
+        currentTankPressure2 = nil
+        currentTtsSec = nil
+        currentNdlSec = nil
+        currentDecoStopDepthM = nil
+        currentRbtSec = nil
+        currentGasmixIndex = nil
+    }
 }
 
 /// C callback invoked by `dc_parser_samples_foreach` for each sample field.
@@ -399,22 +531,12 @@ private func sampleCallback(
 
     switch type {
     case DC_SAMPLE_TIME:
-        // Commit previous sample if we have data
         if ctx.pointee.currentTime > 0 || !ctx.pointee.samples.isEmpty {
-            let sample = ParsedSample(
-                tSec: ctx.pointee.currentTime,
-                depthM: ctx.pointee.currentDepth,
-                tempC: ctx.pointee.currentTemp,
-                setpointPpo2: ctx.pointee.currentSetpoint,
-                ceilingM: ctx.pointee.currentCeiling,
-                gf99: ctx.pointee.currentGf99
-            )
-            ctx.pointee.samples.append(sample)
+            ctx.pointee.commitCurrentSample()
         }
-        ctx.pointee.currentTime = Int32(v.time)
-        ctx.pointee.currentSetpoint = nil
-        ctx.pointee.currentCeiling = nil
-        ctx.pointee.currentGf99 = nil
+        // libdivecomputer reports time in milliseconds; convert to seconds
+        ctx.pointee.currentTime = Int32(v.time / 1000)
+        ctx.pointee.resetPerSampleFields()
 
     case DC_SAMPLE_DEPTH:
         ctx.pointee.currentDepth = Float(v.depth)
@@ -425,9 +547,47 @@ private func sampleCallback(
     case DC_SAMPLE_SETPOINT:
         ctx.pointee.currentSetpoint = Float(v.setpoint)
 
+    case DC_SAMPLE_PPO2:
+        let ppo2 = v.ppo2
+        ctx.pointee.ppo2CallbackCount += 1
+        switch ppo2.sensor {
+        case 0: ctx.pointee.currentPpo2_1 = Float(ppo2.value)
+        case 1: ctx.pointee.currentPpo2_2 = Float(ppo2.value)
+        case 2: ctx.pointee.currentPpo2_3 = Float(ppo2.value)
+        default:
+            // DC_SENSOR_NONE (0xFFFFFFFF): computer's averaged/voted PPO2.
+            // Store as ppo2_1 when per-sensor data isn't available.
+            if ctx.pointee.currentPpo2_1 == nil {
+                ctx.pointee.currentPpo2_1 = Float(ppo2.value)
+            }
+        }
+
+    case DC_SAMPLE_CNS:
+        ctx.pointee.currentCns = Float(v.cns)
+
+    case DC_SAMPLE_PRESSURE:
+        let press = v.pressure
+        let bar = Float(press.value)
+        switch press.tank {
+        case 0: ctx.pointee.currentTankPressure1 = bar
+        case 1: ctx.pointee.currentTankPressure2 = bar
+        default: break
+        }
+
+    case DC_SAMPLE_RBT:
+        ctx.pointee.currentRbtSec = Int(v.rbt)
+
+    case DC_SAMPLE_GASMIX:
+        ctx.pointee.currentGasmixIndex = Int(v.gasmix)
+
     case DC_SAMPLE_DECO:
         let deco = v.deco
         ctx.pointee.currentCeiling = Float(deco.depth)
+        ctx.pointee.currentTtsSec = Int(deco.tts)
+        if deco.type == DC_DECO_NDL.rawValue {
+            ctx.pointee.currentNdlSec = Int(deco.time)
+        }
+        ctx.pointee.currentDecoStopDepthM = Float(deco.depth)
         if Float(deco.depth) > ctx.pointee.maxCeiling {
             ctx.pointee.maxCeiling = Float(deco.depth)
         }
