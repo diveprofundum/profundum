@@ -18,6 +18,13 @@ namespace divelog_compute {
 
     // Function info for UI
     sequence<FunctionInfo> supported_functions();
+
+    // Bühlmann ZHL-16C tissue simulation — compute Surface Gradient Factor
+    sequence<SurfaceGfPoint> compute_surface_gf(
+        sequence<SampleInput> samples,
+        sequence<GasMixInput> gas_mixes,
+        f64? surface_pressure_bar
+    );
 };
 
 // ============================================================================
@@ -103,4 +110,20 @@ dictionary FunctionInfo {
     string signature;
     string description;
     u32 arg_count;
+};
+
+// ============================================================================
+// Bühlmann ZHL-16C Types
+// ============================================================================
+
+dictionary GasMixInput {
+    i32 mix_index;
+    f64 o2_fraction;
+    f64 he_fraction;
+};
+
+dictionary SurfaceGfPoint {
+    i32 t_sec;
+    f32 surface_gf;
+    u8 leading_compartment;
 };

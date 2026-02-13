@@ -9,6 +9,7 @@
 // Allow clippy lint that triggers on generated UniFFI code
 #![allow(clippy::empty_line_after_doc_comments)]
 
+pub mod buhlmann;
 pub mod error;
 pub mod formula;
 pub mod metrics;
@@ -18,6 +19,7 @@ use std::collections::HashMap;
 uniffi::include_scaffolding!("divelog_compute");
 
 // Re-export public types for Rust consumers
+pub use buhlmann::{GasMixInput, SurfaceGfPoint};
 pub use error::FormulaError;
 pub use formula::{compute, validate, validate_with_variables, FunctionInfo};
 pub use metrics::{DepthClass, DiveInput, DiveStats, SampleInput, SegmentStats};
@@ -70,6 +72,15 @@ fn compute_segment_stats(
 /// Get list of supported functions for UI display.
 fn supported_functions() -> Vec<FunctionInfo> {
     formula::supported_functions()
+}
+
+/// Compute Surface Gradient Factor via Bühlmann ZHL-16C tissue simulation.
+fn compute_surface_gf(
+    samples: Vec<SampleInput>,
+    gas_mixes: Vec<GasMixInput>,
+    surface_pressure_bar: Option<f64>,
+) -> Vec<SurfaceGfPoint> {
+    buhlmann::compute_surface_gf(&samples, &gas_mixes, surface_pressure_bar)
 }
 
 #[cfg(test)]

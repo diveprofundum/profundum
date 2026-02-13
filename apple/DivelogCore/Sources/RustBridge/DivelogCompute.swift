@@ -45,6 +45,19 @@ public enum DivelogCompute {
         // Call the UniFFI-generated free function
         DivelogCore.supportedFunctions()
     }
+
+    /// Compute Surface Gradient Factor via Bühlmann ZHL-16C tissue simulation.
+    public static func computeSurfaceGf(
+        samples: [SampleInput],
+        gasMixes: [GasMixInput],
+        surfacePressureBar: Double? = nil
+    ) -> [SurfaceGfPoint] {
+        DivelogCore.computeSurfaceGf(
+            samples: samples,
+            gasMixes: gasMixes,
+            surfacePressureBar: surfacePressureBar
+        )
+    }
 }
 
 // Note: DiveInput, SampleInput, DiveStats, SegmentStats, FunctionInfo, DepthClass, and FormulaError

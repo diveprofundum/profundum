@@ -144,7 +144,7 @@ jobs:
           key: spm-${{ runner.os }}-${{ hashFiles('apple/DivelogCore/Package.resolved') }}
           restore-keys: spm-${{ runner.os }}-
 
-      - name: Build XCFramework
+      - name: Build XCFramework (includes UniFFI binding generation)
         run: make xcframework
 
       - name: Run Swift tests
