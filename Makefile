@@ -46,11 +46,11 @@ libdivecomputer-xcframework:
 # ──────────────────────────────────────────────────────────────
 
 # Build the Swift package (verifies xcframework is linkable)
-swift-build: xcframework
+swift-build: swift-bindings
 	cd apple/DivelogCore && swift build
 
-# Run Swift tests (rebuilds xcframework first if Rust sources changed)
-swift-test: xcframework
+# Run Swift tests (rebuilds xcframework + bindings first if Rust sources changed)
+swift-test: swift-bindings
 	cd apple/DivelogCore && swift test
 
 # ──────────────────────────────────────────────────────────────
