@@ -18,9 +18,30 @@ struct DepthProfileChartData {
     let ceilingPoints: [CeilingDataPoint]
     let hasGf99Data: Bool
     let gf99DisplayRange: (min: Float, max: Float)?
-    let gf99Points: [Gf99DataPoint]
+    let gf99Points: [OverlayDataPoint]
 
-    init(samples: [DiveSample], depthUnit: DepthUnit, temperatureUnit: TemperatureUnit) {
+    let hasAtPlusFiveData: Bool
+    let atPlusFiveDisplayRange: (min: Float, max: Float)?
+    let atPlusFivePoints: [OverlayDataPoint]
+
+    let hasDeltaFiveData: Bool
+    let deltaFiveDisplayRange: (min: Float, max: Float)?
+    let deltaFivePoints: [OverlayDataPoint]
+
+    let hasSurfGfData: Bool
+    let surfGfDisplayRange: (min: Float, max: Float)?
+    let surfGfPoints: [OverlayDataPoint]
+    /// SurfGF lookup by sample tSec for tooltip display.
+    let surfGfLookup: [Int32: Float]
+
+    // swiftlint:disable:next function_body_length
+    init(
+        samples: [DiveSample],
+        depthUnit: DepthUnit,
+        temperatureUnit: TemperatureUnit,
+        gasMixes: [GasMix] = [],
+        needsSurfGf: Bool = false
+    ) {
         var maxD: Float = 0
         var minC: Float = .greatestFiniteMagnitude
         var maxC: Float = -.greatestFiniteMagnitude
@@ -216,71 +237,159 @@ struct DepthProfileChartData {
             self.ceilingPoints = []
         }
 
-        // GF99 pass: downsample + smooth, normalize to depth Y-axis (same pattern as temperature).
-        let anyGf99 = samples.contains { ($0.gf99 ?? 0) > 0 }
-        self.hasGf99Data = anyGf99
-        if anyGf99 {
-            var minGf: Float = .greatestFiniteMagnitude
-            var maxGf: Float = -.greatestFiniteMagnitude
-            for s in samples {
-                if let g = s.gf99, g > 0 {
-                    if g < minGf { minGf = g }
-                    if g > maxGf { maxGf = g }
-                }
-            }
-            let gfSpan = maxGf - minGf
-            let gfPad = gfSpan > 0.1 ? gfSpan * 0.15 : max(minGf * 0.1, 1)
-            let gfRange = (min: minGf - gfPad, max: maxGf + gfPad)
-            let gfRangeDelta = gfRange.max - gfRange.min
-            self.gf99DisplayRange = gfRange
+        // GF99 overlay
+        let gf99Values: [Float?] = samples.map { s in
+            guard let g = s.gf99, g > 0 else { return nil }
+            return g
+        }
+        let gf99Result = Self.downsampleOverlay(samples: samples, values: gf99Values, maxDepth: maxD)
+        self.hasGf99Data = gf99Result.hasData
+        self.gf99DisplayRange = gf99Result.range
+        self.gf99Points = gf99Result.points
 
-            let gfTargetCount = 300
-            let gfStride = max(1, samples.count / gfTargetCount)
-            let gfHalfWindow = max(5, samples.count / 40)
-            var gf99Pts: [Gf99DataPoint] = []
-            gf99Pts.reserveCapacity(gfTargetCount + 2)
-            var gi = 0
-            var gfIdx = 0
-            while gi < samples.count {
-                let t = Float(samples[gi].tSec) / 60.0
-                let wStart = max(0, gi - gfHalfWindow)
-                let wEnd = min(samples.count - 1, gi + gfHalfWindow)
-                var gfSum: Float = 0
-                var gfCount = 0
-                for j in wStart ... wEnd {
-                    if let g = samples[j].gf99, g > 0 {
-                        gfSum += g
-                        gfCount += 1
-                    }
-                }
-                if gfCount > 0 {
-                    let avgGf = gfSum / Float(gfCount)
-                    let fraction = (avgGf - gfRange.min) / gfRangeDelta
-                    let normalized = -(maxD * (1.0 - fraction))
-                    gf99Pts.append(Gf99DataPoint(id: gfIdx, timeMinutes: t, normalizedValue: normalized))
-                    gfIdx += 1
-                }
-                gi += gfStride
+        // @+5 TTS overlay
+        let atPlusFiveValues: [Float?] = samples.map { s in s.atPlusFiveTtsMin.map { Float($0) } }
+        let atPlusFiveResult = Self.downsampleOverlay(samples: samples, values: atPlusFiveValues, maxDepth: maxD)
+        self.hasAtPlusFiveData = atPlusFiveResult.hasData
+        self.atPlusFiveDisplayRange = atPlusFiveResult.range
+        self.atPlusFivePoints = atPlusFiveResult.points
+
+        // Δ+5 TTS overlay
+        let deltaFiveValues: [Float?] = samples.map { s in s.deltaFiveTtsMin.map { Float($0) } }
+        let deltaFiveResult = Self.downsampleOverlay(samples: samples, values: deltaFiveValues, maxDepth: maxD)
+        self.hasDeltaFiveData = deltaFiveResult.hasData
+        self.deltaFiveDisplayRange = deltaFiveResult.range
+        self.deltaFivePoints = deltaFiveResult.points
+
+        // SurfGF overlay (lazy — only run Bühlmann simulation when requested)
+        if needsSurfGf {
+            let sampleInputs = samples.map { s in
+                SampleInput(
+                    tSec: s.tSec,
+                    depthM: s.depthM,
+                    tempC: s.tempC,
+                    setpointPpo2: s.setpointPpo2,
+                    ceilingM: s.ceilingM,
+                    gf99: s.gf99,
+                    gasmixIndex: s.gasmixIndex.map { Int32($0) },
+                    ppo2: s.ppo2_1 ?? s.setpointPpo2
+                )
             }
-            // Always include last sample
-            if let last = samples.last, let g = last.gf99, g > 0 {
-                let lastT = Float(last.tSec) / 60.0
-                if gf99Pts.last?.timeMinutes != lastT {
-                    let fraction = (g - gfRange.min) / gfRangeDelta
-                    let normalized = -(maxD * (1.0 - fraction))
-                    gf99Pts.append(Gf99DataPoint(id: gfIdx, timeMinutes: lastT, normalizedValue: normalized))
-                }
+            let gasMixInputs = gasMixes.map { mix in
+                GasMixInput(
+                    mixIndex: Int32(mix.mixIndex),
+                    o2Fraction: Double(mix.o2Fraction),
+                    heFraction: Double(mix.heFraction)
+                )
             }
-            self.gf99Points = gf99Pts
+            let surfGfResult = DivelogCompute.computeSurfaceGf(
+                samples: sampleInputs,
+                gasMixes: gasMixInputs
+            )
+
+            var surfGfLookupLocal: [Int32: Float] = [:]
+            for pt in surfGfResult {
+                surfGfLookupLocal[pt.tSec] = pt.surfaceGf
+            }
+            self.surfGfLookup = surfGfLookupLocal
+
+            let surfGfValues: [Float?] = samples.map { s in
+                guard let sgf = surfGfLookupLocal[s.tSec], sgf > 0.1 else { return nil }
+                return sgf
+            }
+            let surfGfRes = Self.downsampleOverlay(samples: samples, values: surfGfValues, maxDepth: maxD)
+            self.hasSurfGfData = surfGfRes.hasData
+            self.surfGfDisplayRange = surfGfRes.range
+            self.surfGfPoints = surfGfRes.points
         } else {
-            self.gf99DisplayRange = nil
-            self.gf99Points = []
+            self.hasSurfGfData = false
+            self.surfGfDisplayRange = nil
+            self.surfGfPoints = []
+            self.surfGfLookup = [:]
         }
     }
 
     /// Padded Y domain bounds (negative depth scale).
     var domainMin: Float { -(maxDepth * 1.15) }
     var domainMax: Float { maxDepth * 0.05 }
+
+    // MARK: - Downsample helper
+
+    /// Downsample, smooth, and normalize an overlay series to the depth Y-axis.
+    ///
+    /// - Parameters:
+    ///   - samples: Full-resolution dive samples (for timing information).
+    ///   - values: One value per sample (`nil` = no data at that point).
+    ///   - maxDepth: Maximum displayed depth (positive), used for Y-axis normalization.
+    /// - Returns: Whether data exists, the display range, and the downsampled points.
+    private static func downsampleOverlay(
+        samples: [DiveSample],
+        values: [Float?],
+        maxDepth: Float
+    ) -> (hasData: Bool, range: (min: Float, max: Float)?, points: [OverlayDataPoint]) {
+        guard samples.count == values.count else {
+            return (false, nil, [])
+        }
+
+        var minVal: Float = .greatestFiniteMagnitude
+        var maxVal: Float = -.greatestFiniteMagnitude
+        var anyData = false
+        for v in values {
+            if let v {
+                anyData = true
+                if v < minVal { minVal = v }
+                if v > maxVal { maxVal = v }
+            }
+        }
+        guard anyData else { return (false, nil, []) }
+
+        let span = maxVal - minVal
+        let pad = span > 0.1 ? span * 0.15 : max(abs(minVal) * 0.1, 1)
+        let range = (min: minVal - pad, max: maxVal + pad)
+        let rangeDelta = range.max - range.min
+
+        let targetCount = 300
+        let stride = max(1, samples.count / targetCount)
+        let halfWindow = max(5, samples.count / 40)
+        var pts: [OverlayDataPoint] = []
+        pts.reserveCapacity(targetCount + 2)
+        var si = 0
+        var idx = 0
+        while si < samples.count {
+            let t = Float(samples[si].tSec) / 60.0
+            let wStart = max(0, si - halfWindow)
+            let wEnd = min(samples.count - 1, si + halfWindow)
+            var sum: Float = 0
+            var count = 0
+            for j in wStart ... wEnd {
+                if let v = values[j] {
+                    sum += v
+                    count += 1
+                }
+            }
+            if count > 0 {
+                let avg = sum / Float(count)
+                let fraction = (avg - range.min) / rangeDelta
+                let normalized = -(maxDepth * (1.0 - fraction))
+                pts.append(OverlayDataPoint(id: idx, timeMinutes: t, normalizedValue: normalized))
+                idx += 1
+            }
+            si += stride
+        }
+        // Always include last sample
+        if let lastVal = values[samples.count - 1] {
+            let lastT = Float(samples[samples.count - 1].tSec) / 60.0
+            if pts.last?.timeMinutes != lastT {
+                let fraction = (lastVal - range.min) / rangeDelta
+                let normalized = -(maxDepth * (1.0 - fraction))
+                pts.append(OverlayDataPoint(id: idx, timeMinutes: lastT, normalizedValue: normalized))
+            }
+        }
+
+        return (true, range, pts)
+    }
+
+    // MARK: - Lookup helpers
 
     /// Binary search for the nearest depth point to a given time.
     func nearestDepthPoint(to time: Float) -> DepthDataPoint? {
@@ -404,6 +513,53 @@ struct DepthProfileChartData {
         let fraction = (maxDepth + yValue) / maxDepth
         return max(0, range.min + fraction * (range.max - range.min))
     }
+
+    /// @+5 TTS display string for the nearest sample.
+    func nearestAtPlusFiveDisplay(to time: Float, samples: [DiveSample]) -> String? {
+        guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        guard let v = samples[idx].atPlusFiveTtsMin else { return nil }
+        return "\(v) min"
+    }
+
+    /// Δ+5 display string for the nearest sample.
+    func nearestDeltaFiveDisplay(to time: Float, samples: [DiveSample]) -> String? {
+        guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        guard let v = samples[idx].deltaFiveTtsMin else { return nil }
+        if v > 0 {
+            return "+\(v) min"
+        } else if v < 0 {
+            return "\u{2212}\(abs(v)) min"
+        }
+        return "0 min"
+    }
+
+    /// SurfGF display string for the nearest sample time, using precomputed lookup.
+    func nearestSurfGfDisplay(to time: Float, samples: [DiveSample]) -> String? {
+        guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        guard let sgf = surfGfLookup[samples[idx].tSec], sgf > 0.1 else { return nil }
+        return String(format: "%.0f%%", sgf)
+    }
+
+    /// Denormalize a negative Y chart value back to @+5 TTS minutes.
+    func denormalizeAtPlusFive(_ yValue: Float) -> Float {
+        guard let range = atPlusFiveDisplayRange else { return 0 }
+        let fraction = (maxDepth + yValue) / maxDepth
+        return range.min + fraction * (range.max - range.min)
+    }
+
+    /// Denormalize a negative Y chart value back to Δ+5 minutes (can be negative).
+    func denormalizeDeltaFive(_ yValue: Float) -> Float {
+        guard let range = deltaFiveDisplayRange else { return 0 }
+        let fraction = (maxDepth + yValue) / maxDepth
+        return range.min + fraction * (range.max - range.min)
+    }
+
+    /// Denormalize a negative Y chart value back to SurfGF percentage.
+    func denormalizeSurfGf(_ yValue: Float) -> Float {
+        guard let range = surfGfDisplayRange else { return 0 }
+        let fraction = (maxDepth + yValue) / maxDepth
+        return max(0, range.min + fraction * (range.max - range.min))
+    }
 }
 
 // MARK: - Chart view
@@ -414,6 +570,10 @@ struct DepthProfileChart: View {
     var temperatureUnit: TemperatureUnit = .celsius
     var showTemperature: Bool = false
     var showGf99: Bool = false
+    var showAtPlusFive: Bool = false
+    var showDeltaFive: Bool = false
+    var showSurfGf: Bool = false
+    var gasMixes: [GasMix] = []
     var isFullscreen: Bool = false
 
     @State private var chartData: DepthProfileChartData?
@@ -459,6 +619,21 @@ struct DepthProfileChart: View {
         return data.nearestGf99Display(to: selectedTime, samples: samples)
     }
 
+    private var selectedAtPlusFiveDisplay: String? {
+        guard let selectedTime, showAtPlusFive, let data = chartData, data.hasAtPlusFiveData else { return nil }
+        return data.nearestAtPlusFiveDisplay(to: selectedTime, samples: samples)
+    }
+
+    private var selectedDeltaFiveDisplay: String? {
+        guard let selectedTime, showDeltaFive, let data = chartData, data.hasDeltaFiveData else { return nil }
+        return data.nearestDeltaFiveDisplay(to: selectedTime, samples: samples)
+    }
+
+    private var selectedSurfGfDisplay: String? {
+        guard let selectedTime, showSurfGf, let data = chartData, data.hasSurfGfData else { return nil }
+        return data.nearestSurfGfDisplay(to: selectedTime, samples: samples)
+    }
+
     // MARK: - Accessibility
 
     private var chartAccessibilityLabel: String {
@@ -486,17 +661,25 @@ struct DepthProfileChart: View {
                 label += " GF99 overlay active, ranging from \(loStr) to \(hiStr)."
             }
         }
+        if showAtPlusFive, data.hasAtPlusFiveData { label += " @+5 TTS overlay active." }
+        if showDeltaFive, data.hasDeltaFiveData { label += " \u{0394}+5 overlay active." }
+        if showSurfGf, data.hasSurfGfData { label += " SurfGF overlay active." }
         return label
     }
 
     // MARK: - Body
 
     var body: some View {
-        Group {
-            if let data = chartData {
-                chartContent(data: data)
-            } else {
-                Color.clear
+        VStack(spacing: 2) {
+            readoutBar
+                .opacity(selectedTime != nil ? 1 : 0)
+
+            Group {
+                if let data = chartData {
+                    chartContent(data: data)
+                } else {
+                    Color.clear
+                }
             }
         }
         .padding(.leading, 4)
@@ -511,6 +694,12 @@ struct DepthProfileChart: View {
         }
         .onChange(of: temperatureUnit) { _, _ in
             buildChartData()
+        }
+        .onChange(of: gasMixes.count) { _, _ in
+            buildChartData()
+        }
+        .onChange(of: showSurfGf) { _, newValue in
+            if newValue { buildChartData() }
         }
     }
 
@@ -584,6 +773,51 @@ struct DepthProfileChart: View {
     }
 
     @ChartContentBuilder
+    private func atPlusFiveContent(data: DepthProfileChartData) -> some ChartContent {
+        if showAtPlusFive {
+            ForEach(data.atPlusFivePoints) { point in
+                LineMark(
+                    x: .value("Time", point.timeMinutes),
+                    y: .value("Depth", point.normalizedValue),
+                    series: .value("Series", "@+5")
+                )
+                .foregroundStyle(Color.cyan)
+                .lineStyle(StrokeStyle(lineWidth: 2, dash: [6, 3]))
+            }
+        }
+    }
+
+    @ChartContentBuilder
+    private func deltaFiveContent(data: DepthProfileChartData) -> some ChartContent {
+        if showDeltaFive {
+            ForEach(data.deltaFivePoints) { point in
+                LineMark(
+                    x: .value("Time", point.timeMinutes),
+                    y: .value("Depth", point.normalizedValue),
+                    series: .value("Series", "\u{0394}+5")
+                )
+                .foregroundStyle(Color.yellow)
+                .lineStyle(StrokeStyle(lineWidth: 2))
+            }
+        }
+    }
+
+    @ChartContentBuilder
+    private func surfGfContent(data: DepthProfileChartData) -> some ChartContent {
+        if showSurfGf {
+            ForEach(data.surfGfPoints) { point in
+                LineMark(
+                    x: .value("Time", point.timeMinutes),
+                    y: .value("Depth", point.normalizedValue),
+                    series: .value("Series", "SurfGF")
+                )
+                .foregroundStyle(Color.teal)
+                .lineStyle(StrokeStyle(lineWidth: 2))
+            }
+        }
+    }
+
+    @ChartContentBuilder
     private var scrubContent: some ChartContent {
         if let selectedPoint {
             RuleMark(x: .value("Selected", selectedPoint.timeMinutes))
@@ -592,13 +826,6 @@ struct DepthProfileChart: View {
                     lineWidth: isFullscreen ? 1.5 : 1,
                     dash: isFullscreen ? [] : [4, 4]
                 ))
-                .annotation(
-                    position: .top,
-                    spacing: 4,
-                    overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))
-                ) {
-                    tooltipView
-                }
         }
     }
 
@@ -608,6 +835,9 @@ struct DepthProfileChart: View {
             ceilingContent(data: data)
             temperatureContent(data: data)
             gf99Content(data: data)
+            atPlusFiveContent(data: data)
+            deltaFiveContent(data: data)
+            surfGfContent(data: data)
             scrubContent
         }
         .chartYScale(domain: data.domainMin ... data.domainMax)
@@ -638,6 +868,17 @@ struct DepthProfileChart: View {
                             let gf = data.denormalizeGf99(yVal)
                             if gf >= 0 {
                                 Text(String(format: "%.0f%%", gf))
+                            }
+                        }
+                    }
+                }
+            } else if showSurfGf {
+                AxisMarks(position: .trailing, values: .automatic) { value in
+                    AxisValueLabel {
+                        if let yVal = value.as(Float.self) {
+                            let sgf = data.denormalizeSurfGf(yVal)
+                            if sgf >= 0 {
+                                Text(String(format: "%.0f%%", sgf))
                             }
                         }
                     }
@@ -677,56 +918,65 @@ struct DepthProfileChart: View {
         .accessibilityLabel(chartAccessibilityLabel)
     }
 
-    // MARK: - Tooltip
+    // MARK: - Readout Bar
 
-    private var tooltipView: some View {
-        VStack(spacing: 2) {
-            if let depthStr = selectedDepthDisplay {
-                Text(depthStr)
-                    .font(isFullscreen ? .caption : .caption2)
-                    .fontWeight(.semibold)
+    private var readoutBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: isFullscreen ? 12 : 8) {
+                if let depthStr = selectedDepthDisplay {
+                    Text(depthStr)
+                        .fontWeight(.semibold)
+                }
+                if let timeStr = selectedElapsedTime {
+                    Text(timeStr)
+                        .foregroundColor(.secondary)
+                }
+                if let tempStr = selectedTempDisplay {
+                    Text(tempStr)
+                        .foregroundColor(.orange)
+                }
+                if let ceilStr = selectedCeilingDisplay {
+                    Text("CEIL \(ceilStr)")
+                        .foregroundColor(.red)
+                }
+                if let ttsStr = selectedTtsDisplay {
+                    Text("TTS \(ttsStr)")
+                        .foregroundColor(.red)
+                }
+                if let ndlStr = selectedNdlDisplay {
+                    Text("NDL \(ndlStr)")
+                        .foregroundColor(.green)
+                }
+                if let gf99Str = selectedGf99Display {
+                    Text("GF99 \(gf99Str)")
+                        .foregroundColor(.purple)
+                }
+                if let atPlusFiveStr = selectedAtPlusFiveDisplay {
+                    Text("@+5 \(atPlusFiveStr)")
+                        .foregroundColor(.cyan)
+                }
+                if let deltaFiveStr = selectedDeltaFiveDisplay {
+                    Text("\u{0394}+5 \(deltaFiveStr)")
+                        .foregroundColor(.yellow)
+                }
+                if let surfGfStr = selectedSurfGfDisplay {
+                    Text("SurfGF \(surfGfStr)")
+                        .foregroundColor(.teal)
+                }
             }
-            if let timeStr = selectedElapsedTime {
-                Text(timeStr)
-                    .font(isFullscreen ? .caption : .caption2)
-                    .foregroundColor(.secondary)
-            }
-            if let tempStr = selectedTempDisplay {
-                Text(tempStr)
-                    .font(isFullscreen ? .caption : .caption2)
-                    .foregroundColor(.orange)
-            }
-            if let ceilStr = selectedCeilingDisplay {
-                Text("CEIL \(ceilStr)")
-                    .font(isFullscreen ? .caption : .caption2)
-                    .foregroundColor(.red)
-            }
-            if let ttsStr = selectedTtsDisplay {
-                Text("TTS \(ttsStr)")
-                    .font(isFullscreen ? .caption : .caption2)
-                    .foregroundColor(.red)
-            }
-            if let ndlStr = selectedNdlDisplay {
-                Text("NDL \(ndlStr)")
-                    .font(isFullscreen ? .caption : .caption2)
-                    .foregroundColor(.green)
-            }
-            if let gf99Str = selectedGf99Display {
-                Text("GF99 \(gf99Str)")
-                    .font(isFullscreen ? .caption : .caption2)
-                    .foregroundColor(.purple)
-            }
+            .font(isFullscreen ? .caption : .caption2)
         }
-        .padding(4)
-        .background(tooltipBackground)
-        .cornerRadius(4)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(readoutBackground)
+        .cornerRadius(6)
     }
 
-    private var tooltipBackground: some ShapeStyle {
+    private var readoutBackground: some ShapeStyle {
         #if os(iOS)
-        Color(.systemBackground).opacity(0.9)
+        Color(.systemBackground).opacity(0.85)
         #else
-        Color(.windowBackgroundColor).opacity(0.9)
+        Color(.windowBackgroundColor).opacity(0.85)
         #endif
     }
 
@@ -736,7 +986,9 @@ struct DepthProfileChart: View {
         chartData = DepthProfileChartData(
             samples: samples,
             depthUnit: depthUnit,
-            temperatureUnit: temperatureUnit
+            temperatureUnit: temperatureUnit,
+            gasMixes: gasMixes,
+            needsSurfGf: showSurfGf
         )
     }
 }
@@ -764,7 +1016,8 @@ struct CeilingDataPoint: Identifiable {
     let ceilingDepth: Float
 }
 
-struct Gf99DataPoint: Identifiable {
+/// Shared data point type for all overlay series (GF99, @+5, Δ+5, SurfGF).
+struct OverlayDataPoint: Identifiable {
     let id: Int
     let timeMinutes: Float
     /// Negative normalized value mapped to depth Y-axis.

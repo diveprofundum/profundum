@@ -22,6 +22,9 @@ struct DiveDetailView: View {
     @State private var showFullscreenChart = false
     @State private var showTemperature = false
     @State private var showGf99 = false
+    @State private var showAtPlusFive = false
+    @State private var showDeltaFive = false
+    @State private var showSurfGf = false
 
     var onDiveUpdated: (() -> Void)?
 
@@ -38,6 +41,18 @@ struct DiveDetailView: View {
 
     private var hasGf99Data: Bool {
         samples.contains { ($0.gf99 ?? 0) > 0 }
+    }
+
+    private var hasAtPlusFiveData: Bool {
+        samples.contains { $0.atPlusFiveTtsMin != nil }
+    }
+
+    private var hasDeltaFiveData: Bool {
+        samples.contains { $0.deltaFiveTtsMin != nil }
+    }
+
+    private var hasSurfGfData: Bool {
+        samples.contains { $0.depthM > 3.0 }
     }
 
     private var hasPpo2Data: Bool {
@@ -316,35 +331,46 @@ struct DiveDetailView: View {
         return hi - lo > 0.1
     }
 
+    private var anyOverlayAvailable: Bool {
+        hasTemperatureVariation || hasGf99Data || hasAtPlusFiveData || hasDeltaFiveData || hasSurfGfData
+    }
+
+    private var anyOverlayActive: Bool {
+        showTemperature || showGf99 || showAtPlusFive || showDeltaFive || showSurfGf
+    }
+
     private var depthProfileSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 Text("Depth Profile")
                     .font(.headline)
 
-                if hasTemperatureVariation {
-                    ChartOverlayChip(
-                        label: "Temperature",
-                        color: .orange,
-                        isActive: showTemperature
-                    ) {
-                        showTemperature.toggle()
-                    }
-                    .accessibilityIdentifier("temperatureToggle")
-                }
-
-                if hasGf99Data {
-                    ChartOverlayChip(
-                        label: "GF99",
-                        color: .purple,
-                        isActive: showGf99
-                    ) {
-                        showGf99.toggle()
-                    }
-                    .accessibilityIdentifier("gf99Toggle")
-                }
-
                 Spacer()
+
+                if anyOverlayAvailable {
+                    Menu {
+                        if hasTemperatureVariation {
+                            Toggle("Temperature", isOn: $showTemperature)
+                        }
+                        if hasGf99Data {
+                            Toggle("GF99", isOn: $showGf99)
+                        }
+                        if hasAtPlusFiveData {
+                            Toggle("@+5", isOn: $showAtPlusFive)
+                        }
+                        if hasDeltaFiveData {
+                            Toggle("\u{0394}+5", isOn: $showDeltaFive)
+                        }
+                        if hasSurfGfData {
+                            Toggle("SurfGF", isOn: $showSurfGf)
+                        }
+                    } label: {
+                        Image(systemName: "square.3.layers.3d")
+                            .font(.body)
+                            .foregroundStyle(anyOverlayActive ? .primary : .secondary)
+                    }
+                    .accessibilityIdentifier("overlayMenu")
+                }
 
                 Button {
                     showFullscreenChart = true
@@ -362,7 +388,11 @@ struct DiveDetailView: View {
                 depthUnit: appState.depthUnit,
                 temperatureUnit: appState.temperatureUnit,
                 showTemperature: showTemperature,
-                showGf99: showGf99
+                showGf99: showGf99,
+                showAtPlusFive: showAtPlusFive,
+                showDeltaFive: showDeltaFive,
+                showSurfGf: showSurfGf,
+                gasMixes: gasMixes
             )
             .frame(height: 200)
             .background(
@@ -376,7 +406,8 @@ struct DiveDetailView: View {
             DepthProfileFullscreenView(
                 samples: samples,
                 depthUnit: appState.depthUnit,
-                temperatureUnit: appState.temperatureUnit
+                temperatureUnit: appState.temperatureUnit,
+                gasMixes: gasMixes
             )
         }
         #else
@@ -384,7 +415,8 @@ struct DiveDetailView: View {
             DepthProfileFullscreenView(
                 samples: samples,
                 depthUnit: appState.depthUnit,
-                temperatureUnit: appState.temperatureUnit
+                temperatureUnit: appState.temperatureUnit,
+                gasMixes: gasMixes
             )
             .frame(minWidth: 700, minHeight: 500)
         }
@@ -700,7 +732,8 @@ struct DiveDetailView: View {
                     setpointPpo2: sample.setpointPpo2,
                     ceilingM: sample.ceilingM,
                     gf99: sample.gf99,
-                    gasmixIndex: sample.gasmixIndex.map { Int32($0) }
+                    gasmixIndex: sample.gasmixIndex.map { Int32($0) },
+                    ppo2: sample.ppo2_1 ?? sample.setpointPpo2
                 )
             }
 

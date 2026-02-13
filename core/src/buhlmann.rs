@@ -193,8 +193,10 @@ impl TissueState {
 /// Uses a Bühlmann ZHL-16C tissue simulation. Assumes the diver starts
 /// at surface equilibrium on air.
 ///
-/// **Note:** Assumes open-circuit gas fractions. CCR `setpoint_ppo2` is not yet
-/// used to derive effective inspired fractions — a future enhancement.
+/// For CCR dives, if `SampleInput.ppo2` is set, the simulation uses the actual
+/// measured PPO2 to derive effective inspired inert gas fractions (the diluent's
+/// He:N2 ratio is preserved). For OC dives (ppo2 = None), gas mix fractions
+/// are used directly.
 ///
 /// - `samples` — time-ordered depth/time/gas profile.
 /// - `gas_mixes` — gas definitions keyed by `mix_index`. If empty, defaults to air.
@@ -236,10 +238,33 @@ pub fn compute_surface_gf(
                 ((samples[idx - 1].depth_m as f64 + sample.depth_m as f64) / 2.0).max(0.0);
             let ambient_p = surface_p + avg_depth_m * BAR_PER_METER;
 
+            // Determine effective inert gas fractions.
+            // Use the PREVIOUS sample's PPO2, consistent with OC gas switch timing:
+            // the interval [samples[idx-1], samples[idx]] is computed with the gas/PPO2
+            // that was being breathed at the START of the interval.
+            let (fn2, fhe) = if let Some(ppo2) = samples[idx - 1].ppo2 {
+                let ppo2 = (ppo2 as f64).clamp(0.0, ambient_p);
+                let fo2_eff = ppo2 / ambient_p;
+                let f_inert = (1.0 - fo2_eff).max(0.0);
+                // Split inert portion using diluent He:N2 ratio
+                let dil_n2 = (1.0 - current_fo2 - current_fhe).max(0.0);
+                let dil_inert = current_fhe + dil_n2;
+                if dil_inert > 1e-10 {
+                    (
+                        f_inert * dil_n2 / dil_inert,
+                        f_inert * current_fhe / dil_inert,
+                    )
+                } else {
+                    (f_inert, 0.0)
+                }
+            } else {
+                // OC: use gas mix fractions directly
+                ((1.0 - current_fo2 - current_fhe).max(0.0), current_fhe)
+            };
+
             // Inspired gas partial pressures (accounting for water vapour)
-            let fn2 = (1.0 - current_fo2 - current_fhe).max(0.0);
             let p_inspired_n2 = (ambient_p - P_WATER_VAPOR) * fn2;
-            let p_inspired_he = (ambient_p - P_WATER_VAPOR) * current_fhe;
+            let p_inspired_he = (ambient_p - P_WATER_VAPOR) * fhe;
 
             tissues.update(dt_sec, p_inspired_n2, p_inspired_he);
         }
@@ -283,6 +308,7 @@ mod tests {
             ceiling_m: None,
             gf99: None,
             gasmix_index,
+            ppo2: None,
         }
     }
 
@@ -537,6 +563,90 @@ mod tests {
         assert!(
             (80.0..=130.0).contains(&final_gf),
             "30m/20min air SurfGF should be ~100-120%, got {final_gf}"
+        );
+    }
+
+    #[test]
+    fn test_ccr_ppo2_reduces_inert_loading() {
+        // CCR dive at 60m/20min on diluent 10/50 (10% O2, 50% He).
+        //
+        // Real-world CCR pattern: two setpoints configured.
+        //   - Setpoint Low  ≈ 0.7 bar (surface + descent, auto-switch on shallow ascent)
+        //   - Setpoint High ≈ 1.2 bar (bottom, switched manually during/after descent)
+        //
+        // At 60m, ambient ≈ 7.08 bar, so fO2_eff = 1.2/7.08 ≈ 0.169.
+        // The effective inert fraction is ~0.831, much higher O2 than the diluent's 10%.
+        // OC on the same diluent would have fO2 = 0.10, so inert fraction = 0.90.
+        // CCR SurfGF should be lower than OC SurfGF.
+        let mixes = vec![GasMixInput {
+            mix_index: 0,
+            o2_fraction: 0.10,
+            he_fraction: 0.50,
+        }];
+
+        // Build CCR samples: setpoint low (0.7) at surface, setpoint high (1.2) at depth
+        let ccr_samples: Vec<SampleInput> = {
+            let mut s = vec![SampleInput {
+                t_sec: 0,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: Some(0),
+                ppo2: Some(0.7),
+            }];
+            s.push(SampleInput {
+                t_sec: 60,
+                depth_m: 60.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: Some(0),
+                ppo2: Some(1.2),
+            });
+            for i in 2..=20 {
+                s.push(SampleInput {
+                    t_sec: i * 60,
+                    depth_m: 60.0,
+                    temp_c: 20.0,
+                    setpoint_ppo2: None,
+                    ceiling_m: None,
+                    gf99: None,
+                    gasmix_index: Some(0),
+                    ppo2: Some(1.2),
+                });
+            }
+            s
+        };
+
+        // Build OC samples (no ppo2)
+        let oc_samples: Vec<SampleInput> = {
+            let mut s = vec![sample(0, 0.0, Some(0))];
+            s.push(sample(60, 60.0, Some(0)));
+            for i in 2..=20 {
+                s.push(sample(i * 60, 60.0, Some(0)));
+            }
+            s
+        };
+
+        let ccr_result = compute_surface_gf(&ccr_samples, &mixes, None);
+        let oc_result = compute_surface_gf(&oc_samples, &mixes, None);
+
+        let ccr_final = ccr_result.last().unwrap().surface_gf;
+        let oc_final = oc_result.last().unwrap().surface_gf;
+
+        assert!(
+            ccr_final < oc_final,
+            "CCR SurfGF ({ccr_final}) should be lower than OC SurfGF ({oc_final}) \
+             because setpoint high (1.2 bar) reduces effective inert gas loading vs OC diluent"
+        );
+
+        // CCR SurfGF should still be significant at 60m/20min
+        assert!(
+            ccr_final > 30.0,
+            "CCR 60m/20min SurfGF should be meaningful, got {ccr_final}"
         );
     }
 }
