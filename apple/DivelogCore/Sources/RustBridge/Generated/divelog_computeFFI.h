@@ -261,6 +261,11 @@ RustBuffer uniffi_divelog_compute_fn_func_compute_dive_stats(RustBuffer dive, Ru
 RustBuffer uniffi_divelog_compute_fn_func_compute_segment_stats(int32_t start_t_sec, int32_t end_t_sec, RustBuffer samples, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_DIVELOG_COMPUTE_FN_FUNC_COMPUTE_SURFACE_GF
+#define UNIFFI_FFIDEF_UNIFFI_DIVELOG_COMPUTE_FN_FUNC_COMPUTE_SURFACE_GF
+RustBuffer uniffi_divelog_compute_fn_func_compute_surface_gf(RustBuffer samples, RustBuffer gas_mixes, RustBuffer surface_pressure_bar, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_DIVELOG_COMPUTE_FN_FUNC_EVALUATE_FORMULA
 #define UNIFFI_FFIDEF_UNIFFI_DIVELOG_COMPUTE_FN_FUNC_EVALUATE_FORMULA
 double uniffi_divelog_compute_fn_func_evaluate_formula(RustBuffer expression, RustBuffer variables, RustCallStatus *_Nonnull out_status
@@ -571,6 +576,12 @@ uint16_t uniffi_divelog_compute_checksum_func_compute_dive_stats(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_DIVELOG_COMPUTE_CHECKSUM_FUNC_COMPUTE_SEGMENT_STATS
 #define UNIFFI_FFIDEF_UNIFFI_DIVELOG_COMPUTE_CHECKSUM_FUNC_COMPUTE_SEGMENT_STATS
 uint16_t uniffi_divelog_compute_checksum_func_compute_segment_stats(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_DIVELOG_COMPUTE_CHECKSUM_FUNC_COMPUTE_SURFACE_GF
+#define UNIFFI_FFIDEF_UNIFFI_DIVELOG_COMPUTE_CHECKSUM_FUNC_COMPUTE_SURFACE_GF
+uint16_t uniffi_divelog_compute_checksum_func_compute_surface_gf(void
     
 );
 #endif

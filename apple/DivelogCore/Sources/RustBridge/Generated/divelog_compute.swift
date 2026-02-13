@@ -399,6 +399,22 @@ fileprivate class UniffiHandleMap<T> {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt8: FfiConverterPrimitive {
+    typealias FfiType = UInt8
+    typealias SwiftType = UInt8
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt8 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: UInt8, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
     typealias FfiType = UInt32
     typealias SwiftType = UInt32
@@ -860,6 +876,80 @@ public func FfiConverterTypeFunctionInfo_lower(_ value: FunctionInfo) -> RustBuf
 }
 
 
+public struct GasMixInput {
+    public var mixIndex: Int32
+    public var o2Fraction: Double
+    public var heFraction: Double
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(mixIndex: Int32, o2Fraction: Double, heFraction: Double) {
+        self.mixIndex = mixIndex
+        self.o2Fraction = o2Fraction
+        self.heFraction = heFraction
+    }
+}
+
+
+
+extension GasMixInput: Equatable, Hashable {
+    public static func ==(lhs: GasMixInput, rhs: GasMixInput) -> Bool {
+        if lhs.mixIndex != rhs.mixIndex {
+            return false
+        }
+        if lhs.o2Fraction != rhs.o2Fraction {
+            return false
+        }
+        if lhs.heFraction != rhs.heFraction {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(mixIndex)
+        hasher.combine(o2Fraction)
+        hasher.combine(heFraction)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGasMixInput: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GasMixInput {
+        return
+            try GasMixInput(
+                mixIndex: FfiConverterInt32.read(from: &buf), 
+                o2Fraction: FfiConverterDouble.read(from: &buf), 
+                heFraction: FfiConverterDouble.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: GasMixInput, into buf: inout [UInt8]) {
+        FfiConverterInt32.write(value.mixIndex, into: &buf)
+        FfiConverterDouble.write(value.o2Fraction, into: &buf)
+        FfiConverterDouble.write(value.heFraction, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGasMixInput_lift(_ buf: RustBuffer) throws -> GasMixInput {
+    return try FfiConverterTypeGasMixInput.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGasMixInput_lower(_ value: GasMixInput) -> RustBuffer {
+    return FfiConverterTypeGasMixInput.lower(value)
+}
+
+
 public struct SampleInput {
     public var tSec: Int32
     public var depthM: Float
@@ -1069,6 +1159,80 @@ public func FfiConverterTypeSegmentStats_lift(_ buf: RustBuffer) throws -> Segme
 #endif
 public func FfiConverterTypeSegmentStats_lower(_ value: SegmentStats) -> RustBuffer {
     return FfiConverterTypeSegmentStats.lower(value)
+}
+
+
+public struct SurfaceGfPoint {
+    public var tSec: Int32
+    public var surfaceGf: Float
+    public var leadingCompartment: UInt8
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(tSec: Int32, surfaceGf: Float, leadingCompartment: UInt8) {
+        self.tSec = tSec
+        self.surfaceGf = surfaceGf
+        self.leadingCompartment = leadingCompartment
+    }
+}
+
+
+
+extension SurfaceGfPoint: Equatable, Hashable {
+    public static func ==(lhs: SurfaceGfPoint, rhs: SurfaceGfPoint) -> Bool {
+        if lhs.tSec != rhs.tSec {
+            return false
+        }
+        if lhs.surfaceGf != rhs.surfaceGf {
+            return false
+        }
+        if lhs.leadingCompartment != rhs.leadingCompartment {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(tSec)
+        hasher.combine(surfaceGf)
+        hasher.combine(leadingCompartment)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSurfaceGfPoint: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SurfaceGfPoint {
+        return
+            try SurfaceGfPoint(
+                tSec: FfiConverterInt32.read(from: &buf), 
+                surfaceGf: FfiConverterFloat.read(from: &buf), 
+                leadingCompartment: FfiConverterUInt8.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SurfaceGfPoint, into buf: inout [UInt8]) {
+        FfiConverterInt32.write(value.tSec, into: &buf)
+        FfiConverterFloat.write(value.surfaceGf, into: &buf)
+        FfiConverterUInt8.write(value.leadingCompartment, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSurfaceGfPoint_lift(_ buf: RustBuffer) throws -> SurfaceGfPoint {
+    return try FfiConverterTypeSurfaceGfPoint.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSurfaceGfPoint_lower(_ value: SurfaceGfPoint) -> RustBuffer {
+    return FfiConverterTypeSurfaceGfPoint.lower(value)
 }
 
 // Note that we don't yet support `indirect` for enums.
@@ -1303,6 +1467,30 @@ fileprivate struct FfiConverterOptionFloat: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionDouble: FfiConverterRustBuffer {
+    typealias SwiftType = Double?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterDouble.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterDouble.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
     typealias SwiftType = String?
 
@@ -1377,6 +1565,31 @@ fileprivate struct FfiConverterSequenceTypeFunctionInfo: FfiConverterRustBuffer 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeGasMixInput: FfiConverterRustBuffer {
+    typealias SwiftType = [GasMixInput]
+
+    public static func write(_ value: [GasMixInput], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeGasMixInput.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [GasMixInput] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [GasMixInput]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeGasMixInput.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeSampleInput: FfiConverterRustBuffer {
     typealias SwiftType = [SampleInput]
 
@@ -1394,6 +1607,31 @@ fileprivate struct FfiConverterSequenceTypeSampleInput: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeSampleInput.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeSurfaceGfPoint: FfiConverterRustBuffer {
+    typealias SwiftType = [SurfaceGfPoint]
+
+    public static func write(_ value: [SurfaceGfPoint], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeSurfaceGfPoint.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [SurfaceGfPoint] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [SurfaceGfPoint]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeSurfaceGfPoint.read(from: &buf))
         }
         return seq
     }
@@ -1438,6 +1676,15 @@ public func computeSegmentStats(startTSec: Int32, endTSec: Int32, samples: [Samp
         FfiConverterInt32.lower(startTSec),
         FfiConverterInt32.lower(endTSec),
         FfiConverterSequenceTypeSampleInput.lower(samples),$0
+    )
+})
+}
+public func computeSurfaceGf(samples: [SampleInput], gasMixes: [GasMixInput], surfacePressureBar: Double?) -> [SurfaceGfPoint] {
+    return try!  FfiConverterSequenceTypeSurfaceGfPoint.lift(try! rustCall() {
+    uniffi_divelog_compute_fn_func_compute_surface_gf(
+        FfiConverterSequenceTypeSampleInput.lower(samples),
+        FfiConverterSequenceTypeGasMixInput.lower(gasMixes),
+        FfiConverterOptionDouble.lower(surfacePressureBar),$0
     )
 })
 }
@@ -1490,6 +1737,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_divelog_compute_checksum_func_compute_segment_stats() != 10909) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_divelog_compute_checksum_func_compute_surface_gf() != 36748) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_divelog_compute_checksum_func_evaluate_formula() != 23125) {
