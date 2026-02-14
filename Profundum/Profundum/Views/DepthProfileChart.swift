@@ -915,13 +915,15 @@ struct DepthProfileChart: View {
                 .foregroundStyle(marker.color.opacity(0.6))
                 .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                 .annotation(position: .top, alignment: .leading, spacing: 2) {
-                    Text(marker.gasLabel)
-                        .font(.system(size: isFullscreen ? 10 : 8, weight: .semibold))
-                        .foregroundStyle(marker.color)
-                        .padding(.horizontal, 3)
-                        .padding(.vertical, 1)
-                        .background(annotationBackground)
-                        .cornerRadius(3)
+                    if selectedTime == nil {
+                        Text(marker.gasLabel)
+                            .font(.system(size: isFullscreen ? 10 : 8, weight: .semibold))
+                            .foregroundStyle(marker.color)
+                            .padding(.horizontal, 3)
+                            .padding(.vertical, 1)
+                            .background(annotationBackground)
+                            .cornerRadius(3)
+                    }
                 }
         }
     }
@@ -933,13 +935,15 @@ struct DepthProfileChart: View {
                 .foregroundStyle(Color.pink.opacity(0.6))
                 .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                 .annotation(position: .top, alignment: .leading, spacing: 2) {
-                    Text(String(format: "SP %.1f", marker.setpoint))
-                        .font(.system(size: isFullscreen ? 10 : 8, weight: .semibold))
-                        .foregroundStyle(Color.pink)
-                        .padding(.horizontal, 3)
-                        .padding(.vertical, 1)
-                        .background(annotationBackground)
-                        .cornerRadius(3)
+                    if selectedTime == nil {
+                        Text(String(format: "SP %.1f", marker.setpoint))
+                            .font(.system(size: isFullscreen ? 10 : 8, weight: .semibold))
+                            .foregroundStyle(Color.pink)
+                            .padding(.horizontal, 3)
+                            .padding(.vertical, 1)
+                            .background(annotationBackground)
+                            .cornerRadius(3)
+                    }
                 }
         }
     }
