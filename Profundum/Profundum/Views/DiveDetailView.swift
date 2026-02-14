@@ -678,17 +678,7 @@ struct DiveDetailView: View {
     }
 
     private func gasMixLabel(_ mix: GasMix) -> String {
-        let o2 = Int(mix.o2Fraction * 100)
-        let he = Int(mix.heFraction * 100)
-        if he > 0 {
-            return "Tx \(o2)/\(he)"
-        } else if o2 == 21 {
-            return "Air"
-        } else if o2 == 100 {
-            return "O2"
-        } else {
-            return "Nx\(o2)"
-        }
+        DepthProfileChartData.gasLabel(o2: mix.o2Fraction, he: mix.heFraction)
     }
 
     private func generateExport() {

@@ -34,6 +34,9 @@ struct DepthProfileChartData {
     /// SurfGF lookup by sample tSec for tooltip display.
     let surfGfLookup: [Int32: Float]
 
+    let gasSwitchMarkers: [GasSwitchMarker]
+    let setpointSwitchMarkers: [SetpointSwitchMarker]
+
     // swiftlint:disable:next function_body_length
     init(
         samples: [DiveSample],
@@ -307,6 +310,41 @@ struct DepthProfileChartData {
             self.surfGfPoints = []
             self.surfGfLookup = [:]
         }
+
+        // Gas switch detection
+        var gasSwitchMarkersLocal: [GasSwitchMarker] = []
+        var prevGasmixIdx: Int?
+        for s in samples {
+            guard let idx = s.gasmixIndex else { continue }
+            if let prev = prevGasmixIdx, idx != prev {
+                let mix = gasMixes.first(where: { $0.mixIndex == idx })
+                let label = Self.gasLabel(o2: mix?.o2Fraction ?? 0.21, he: mix?.heFraction ?? 0)
+                gasSwitchMarkersLocal.append(GasSwitchMarker(
+                    id: gasSwitchMarkersLocal.count,
+                    timeMinutes: Float(s.tSec) / 60.0,
+                    gasLabel: label,
+                    color: Self.gasColor(index: idx)
+                ))
+            }
+            prevGasmixIdx = idx
+        }
+        self.gasSwitchMarkers = gasSwitchMarkersLocal
+
+        // Setpoint switch detection
+        var spSwitchMarkersLocal: [SetpointSwitchMarker] = []
+        var prevSetpoint: Float?
+        for s in samples {
+            guard let sp = s.setpointPpo2 else { continue }
+            if let prev = prevSetpoint, abs(sp - prev) > 0.05 {
+                spSwitchMarkersLocal.append(SetpointSwitchMarker(
+                    id: spSwitchMarkersLocal.count,
+                    timeMinutes: Float(s.tSec) / 60.0,
+                    setpoint: sp
+                ))
+            }
+            prevSetpoint = sp
+        }
+        self.setpointSwitchMarkers = spSwitchMarkersLocal
     }
 
     /// Padded Y domain bounds (negative depth scale).
@@ -387,6 +425,29 @@ struct DepthProfileChartData {
         }
 
         return (true, range, pts)
+    }
+
+    // MARK: - Gas label helpers
+
+    /// Human-readable gas mix label from O2 and He fractions (0–1 scale).
+    static func gasLabel(o2: Float, he: Float) -> String {
+        let o2Pct = Int(o2 * 100)
+        let hePct = Int(he * 100)
+        if hePct > 0 {
+            return "Tx \(o2Pct)/\(hePct)"
+        } else if o2Pct == 21 {
+            return "Air"
+        } else if o2Pct == 100 {
+            return "O2"
+        } else {
+            return "Nx\(o2Pct)"
+        }
+    }
+
+    /// Rotating color palette for gas switch markers.
+    static func gasColor(index: Int) -> Color {
+        let palette: [Color] = [.mint, .green, .orange, .pink]
+        return palette[index % palette.count]
     }
 
     // MARK: - Lookup helpers
@@ -491,6 +552,14 @@ struct DepthProfileChartData {
         guard let ndl = samples[idx].ndlSec, ndl > 0 else { return nil }
         let minutes = ndl / 60
         return "\(minutes) min"
+    }
+
+    /// Gas label for the nearest sample, looking up gasmixIndex in the provided gas mixes.
+    func nearestGasDisplay(to time: Float, samples: [DiveSample], gasMixes: [GasMix]) -> String? {
+        guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        guard let mixIdx = samples[idx].gasmixIndex else { return nil }
+        let mix = gasMixes.first(where: { $0.mixIndex == mixIdx })
+        return Self.gasLabel(o2: mix?.o2Fraction ?? 0.21, he: mix?.heFraction ?? 0)
     }
 
     /// Denormalize a negative Y chart value back to display temperature.
@@ -634,6 +703,20 @@ struct DepthProfileChart: View {
         return data.nearestSurfGfDisplay(to: selectedTime, samples: samples)
     }
 
+    private var selectedGasDisplay: String? {
+        guard let selectedTime, let data = chartData else { return nil }
+        guard !data.gasSwitchMarkers.isEmpty else { return nil }
+        return data.nearestGasDisplay(to: selectedTime, samples: samples, gasMixes: gasMixes)
+    }
+
+    private var selectedSetpointDisplay: String? {
+        guard let selectedTime, let data = chartData else { return nil }
+        guard !data.setpointSwitchMarkers.isEmpty else { return nil }
+        guard let idx = data.nearestSampleIndex(to: selectedTime, in: samples) else { return nil }
+        guard let sp = samples[idx].setpointPpo2 else { return nil }
+        return String(format: "SP %.2f", sp)
+    }
+
     // MARK: - Accessibility
 
     private var chartAccessibilityLabel: String {
@@ -664,6 +747,14 @@ struct DepthProfileChart: View {
         if showAtPlusFive, data.hasAtPlusFiveData { label += " @+5 TTS overlay active." }
         if showDeltaFive, data.hasDeltaFiveData { label += " \u{0394}+5 overlay active." }
         if showSurfGf, data.hasSurfGfData { label += " SurfGF overlay active." }
+        if !data.gasSwitchMarkers.isEmpty {
+            let n = data.gasSwitchMarkers.count
+            label += " \(n) gas switch\(n == 1 ? "" : "es") marked."
+        }
+        if !data.setpointSwitchMarkers.isEmpty {
+            let n = data.setpointSwitchMarkers.count
+            label += " \(n) setpoint switch\(n == 1 ? "" : "es") marked."
+        }
         return label
     }
 
@@ -818,6 +909,46 @@ struct DepthProfileChart: View {
     }
 
     @ChartContentBuilder
+    private func gasSwitchContent(data: DepthProfileChartData) -> some ChartContent {
+        ForEach(data.gasSwitchMarkers) { marker in
+            RuleMark(x: .value("Time", marker.timeMinutes))
+                .foregroundStyle(marker.color.opacity(0.6))
+                .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                .annotation(position: .top, alignment: .leading, spacing: 2) {
+                    if selectedTime == nil {
+                        Text(marker.gasLabel)
+                            .font(.system(size: isFullscreen ? 10 : 8, weight: .semibold))
+                            .foregroundStyle(marker.color)
+                            .padding(.horizontal, 3)
+                            .padding(.vertical, 1)
+                            .background(annotationBackground)
+                            .cornerRadius(3)
+                    }
+                }
+        }
+    }
+
+    @ChartContentBuilder
+    private func setpointSwitchContent(data: DepthProfileChartData) -> some ChartContent {
+        ForEach(data.setpointSwitchMarkers) { marker in
+            RuleMark(x: .value("Time", marker.timeMinutes))
+                .foregroundStyle(Color.pink.opacity(0.6))
+                .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                .annotation(position: .top, alignment: .leading, spacing: 2) {
+                    if selectedTime == nil {
+                        Text(String(format: "SP %.1f", marker.setpoint))
+                            .font(.system(size: isFullscreen ? 10 : 8, weight: .semibold))
+                            .foregroundStyle(Color.pink)
+                            .padding(.horizontal, 3)
+                            .padding(.vertical, 1)
+                            .background(annotationBackground)
+                            .cornerRadius(3)
+                    }
+                }
+        }
+    }
+
+    @ChartContentBuilder
     private var scrubContent: some ChartContent {
         if let selectedPoint {
             RuleMark(x: .value("Selected", selectedPoint.timeMinutes))
@@ -838,6 +969,8 @@ struct DepthProfileChart: View {
             atPlusFiveContent(data: data)
             deltaFiveContent(data: data)
             surfGfContent(data: data)
+            gasSwitchContent(data: data)
+            setpointSwitchContent(data: data)
             scrubContent
         }
         .chartYScale(domain: data.domainMin ... data.domainMax)
@@ -931,6 +1064,14 @@ struct DepthProfileChart: View {
                     Text(timeStr)
                         .foregroundColor(.secondary)
                 }
+                if let gasStr = selectedGasDisplay {
+                    Text(gasStr)
+                        .foregroundColor(.mint)
+                }
+                if let spStr = selectedSetpointDisplay {
+                    Text(spStr)
+                        .foregroundColor(.pink)
+                }
                 if let tempStr = selectedTempDisplay {
                     Text(tempStr)
                         .foregroundColor(.orange)
@@ -980,6 +1121,14 @@ struct DepthProfileChart: View {
         #endif
     }
 
+    private var annotationBackground: some ShapeStyle {
+        #if os(iOS)
+        Color(.systemBackground).opacity(0.75)
+        #else
+        Color(.windowBackgroundColor).opacity(0.75)
+        #endif
+    }
+
     // MARK: - Helpers
 
     private func buildChartData() {
@@ -1022,4 +1171,17 @@ struct OverlayDataPoint: Identifiable {
     let timeMinutes: Float
     /// Negative normalized value mapped to depth Y-axis.
     let normalizedValue: Float
+}
+
+struct GasSwitchMarker: Identifiable {
+    let id: Int
+    let timeMinutes: Float
+    let gasLabel: String
+    let color: Color
+}
+
+struct SetpointSwitchMarker: Identifiable {
+    let id: Int
+    let timeMinutes: Float
+    let setpoint: Float
 }
