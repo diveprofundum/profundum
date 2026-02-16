@@ -160,22 +160,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: core -> target
-
-      - name: Install cargo-audit and cargo-deny
-        run: cargo install cargo-audit cargo-deny
-
       - name: Check for known vulnerabilities
-        run: cargo audit
-        working-directory: core
+        uses: rustsec/audit-check@v2.0.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check licenses, advisories, and bans
-        run: cargo deny check
-        working-directory: core
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: core/Cargo.toml
 
   # ─────────────────────────────────────────────────────────
   # Version check: ensure VERSION file, Cargo.toml, and
