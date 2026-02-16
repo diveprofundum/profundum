@@ -1,6 +1,6 @@
 .PHONY: all test clean rust-test swift-test lint rust-lint swift-lint swift-build \
        xcframework swift-bindings libdivecomputer-xcframework verify help \
-       version-check version-sync
+       version-check version-sync security audit deny mutants
 
 # ──────────────────────────────────────────────────────────────
 # Default target
@@ -71,6 +71,25 @@ clean:
 	rm -rf apple/DivelogCore/.build
 
 # ──────────────────────────────────────────────────────────────
+# Security & mutation testing
+# ──────────────────────────────────────────────────────────────
+
+# Run all security checks (cargo audit + cargo deny)
+security: audit deny
+
+# Check Rust dependencies for known vulnerabilities (RustSec advisory DB)
+audit:
+	cd core && cargo audit
+
+# Check license compliance, advisories, and dependency bans
+deny:
+	cd core && cargo deny check
+
+# Run mutation testing on the Rust compute core (slow — use locally, not in CI)
+mutants:
+	cd core && cargo mutants --timeout 60
+
+# ──────────────────────────────────────────────────────────────
 # Versioning (single version for the whole monorepo)
 # ──────────────────────────────────────────────────────────────
 
@@ -105,6 +124,12 @@ help:
 	@echo "  make rust-lint                  Run Rust linters (cargo fmt, clippy)"
 	@echo "  make swift-lint                 Run SwiftLint on Swift sources"
 	@echo "  make verify                     Verify XCFramework integrity"
+	@echo ""
+	@echo "Security & mutation testing:"
+	@echo "  make security                   Run all security checks (audit + deny)"
+	@echo "  make audit                      Check deps for known vulnerabilities"
+	@echo "  make deny                       Check license compliance + advisories"
+	@echo "  make mutants                    Run mutation testing on Rust core"
 	@echo ""
 	@echo "Versioning:"
 	@echo "  make version-check              Verify all manifests match VERSION"

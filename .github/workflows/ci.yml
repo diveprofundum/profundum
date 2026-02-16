@@ -151,6 +151,33 @@ jobs:
         run: cd apple/DivelogCore && swift test
 
   # ─────────────────────────────────────────────────────────
+  # Security: dependency audit + license/advisory compliance
+  # ─────────────────────────────────────────────────────────
+  security:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core -> target
+
+      - name: Install cargo-audit and cargo-deny
+        run: cargo install cargo-audit cargo-deny
+
+      - name: Check for known vulnerabilities
+        run: cargo audit
+        working-directory: core
+
+      - name: Check licenses, advisories, and bans
+        run: cargo deny check
+        working-directory: core
+
+  # ─────────────────────────────────────────────────────────
   # Version check: ensure VERSION file, Cargo.toml, and
   # Xcode project are in sync.
   # ─────────────────────────────────────────────────────────
