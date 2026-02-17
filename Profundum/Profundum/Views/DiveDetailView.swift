@@ -532,9 +532,9 @@ struct DiveDetailView: View {
     }
 
     private var ppo2ChartAccessibilityLabel: String {
-        let data = PPO2ChartData(samples: samples)
-        let sensorMode = data.hasPerSensorData ? "3 sensors" : "averaged"
-        let maxValue = data.dataPoints.map(\.value).max() ?? 0
+        let hasPerSensor = samples.contains { $0.ppo2_2 != nil || $0.ppo2_3 != nil }
+        let sensorMode = hasPerSensor ? "3 sensors" : "averaged"
+        let maxValue = samples.compactMap(\.ppo2_1).max() ?? 0
         return "PPO2 sensor chart. \(sensorMode). Maximum PPO2 \(String(format: "%.2f", maxValue)) bar."
     }
 
@@ -834,13 +834,10 @@ struct PPO2Chart: View {
     let samples: [DiveSample]
 
     @State private var selectedTime: Float?
-
-    private var chartData: PPO2ChartData {
-        PPO2ChartData(samples: samples)
-    }
+    @State private var chartData: PPO2ChartData?
 
     private var colorScale: KeyValuePairs<String, Color> {
-        if chartData.hasPerSensorData {
+        if chartData?.hasPerSensorData == true {
             return ["S1": .red, "S2": .green, "S3": .blue]
         } else {
             return ["PPO2": .cyan]
@@ -848,8 +845,7 @@ struct PPO2Chart: View {
     }
 
     private var selectedPoints: [PPO2DataPoint] {
-        guard let selectedTime else { return [] }
-        let data = chartData
+        guard let selectedTime, let data = chartData else { return [] }
         // Find the closest time
         guard let closestTime = data.dataPoints.min(by: {
             abs($0.timeMinutes - selectedTime) < abs($1.timeMinutes - selectedTime)
@@ -860,8 +856,8 @@ struct PPO2Chart: View {
     }
 
     var body: some View {
-        let data = chartData
-
+        Group {
+        if let data = chartData {
         Chart {
             ForEach(data.dataPoints) { point in
                 LineMark(
@@ -936,6 +932,16 @@ struct PPO2Chart: View {
             }
         }
         .padding(.leading, 4)
+        } else {
+            Color.clear
+        }
+        }
+        .onAppear {
+            chartData = PPO2ChartData(samples: samples)
+        }
+        .onChange(of: samples.count) { _, _ in
+            chartData = PPO2ChartData(samples: samples)
+        }
     }
 
     private var tooltipBackground: some ShapeStyle {
