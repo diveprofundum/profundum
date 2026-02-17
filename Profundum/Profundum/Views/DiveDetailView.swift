@@ -329,13 +329,6 @@ struct DiveDetailView: View {
                 )
             }
 
-            if let consumed = gasConsumedBar {
-                let converted = UnitFormatter.pressure(consumed, unit: appState.pressureUnit)
-                StatCard(
-                    title: "Gas Used",
-                    value: String(format: "%.0f %@", converted, UnitFormatter.pressureLabel(appState.pressureUnit))
-                )
-            }
         }
     }
 
@@ -549,13 +542,6 @@ struct DiveDetailView: View {
         let values = samples.compactMap(\.setpointPpo2).filter { $0 > 0 }
         guard !values.isEmpty else { return 0 }
         return values.reduce(0, +) / Float(values.count)
-    }
-
-    private var gasConsumedBar: Float? {
-        guard let first = samples.first(where: { $0.tankPressure1Bar != nil })?.tankPressure1Bar,
-              let last = samples.last(where: { $0.tankPressure1Bar != nil })?.tankPressure1Bar else { return nil }
-        let consumed = first - last
-        return consumed > 0 ? consumed : nil
     }
 
     private var calculatedFieldsSection: some View {
