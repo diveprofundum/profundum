@@ -34,6 +34,19 @@ struct DepthProfileChartData {
     /// SurfGF lookup by sample tSec for tooltip display.
     let surfGfLookup: [Int32: Float]
 
+    // PPO2 overlay (averaged single-line)
+    let hasPpo2Data: Bool
+    let ppo2DisplayRange: (min: Float, max: Float)?
+    let ppo2Points: [OverlayDataPoint]
+
+    // Tank pressure overlays
+    let hasTankPressure1Data: Bool
+    let tankPressure1DisplayRange: (min: Float, max: Float)?
+    let tankPressure1Points: [OverlayDataPoint]
+    let hasTankPressure2Data: Bool
+    let tankPressure2DisplayRange: (min: Float, max: Float)?
+    let tankPressure2Points: [OverlayDataPoint]
+
     let gasSwitchMarkers: [GasSwitchMarker]
     let setpointSwitchMarkers: [SetpointSwitchMarker]
 
@@ -310,6 +323,30 @@ struct DepthProfileChartData {
             self.surfGfPoints = []
             self.surfGfLookup = [:]
         }
+
+        // PPO2 overlay (averaged — uses ppo2_1 which stores sensor average or DC_SENSOR_NONE value)
+        let ppo2Values: [Float?] = samples.map { s in
+            if let p = s.ppo2_1, p > 0 { return p }
+            return nil
+        }
+        let ppo2Result = Self.downsampleOverlay(samples: samples, values: ppo2Values, maxDepth: maxD)
+        self.hasPpo2Data = ppo2Result.hasData
+        self.ppo2DisplayRange = ppo2Result.range
+        self.ppo2Points = ppo2Result.points
+
+        // Tank pressure 1
+        let tp1Values: [Float?] = samples.map { $0.tankPressure1Bar }
+        let tp1Result = Self.downsampleOverlay(samples: samples, values: tp1Values, maxDepth: maxD)
+        self.hasTankPressure1Data = tp1Result.hasData
+        self.tankPressure1DisplayRange = tp1Result.range
+        self.tankPressure1Points = tp1Result.points
+
+        // Tank pressure 2
+        let tp2Values: [Float?] = samples.map { $0.tankPressure2Bar }
+        let tp2Result = Self.downsampleOverlay(samples: samples, values: tp2Values, maxDepth: maxD)
+        self.hasTankPressure2Data = tp2Result.hasData
+        self.tankPressure2DisplayRange = tp2Result.range
+        self.tankPressure2Points = tp2Result.points
 
         // Gas switch detection
         var gasSwitchMarkersLocal: [GasSwitchMarker] = []
@@ -609,6 +646,29 @@ struct DepthProfileChartData {
         return String(format: "%.0f%%", sgf)
     }
 
+    /// PPO2 display string for the nearest sample.
+    func nearestPpo2Display(to time: Float, samples: [DiveSample]) -> String? {
+        guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        guard let p = samples[idx].ppo2_1, p > 0 else { return nil }
+        return String(format: "%.2f", p)
+    }
+
+    /// Tank pressure 1 display string for the nearest sample, formatted with unit.
+    func nearestTankPressure1Display(to time: Float, samples: [DiveSample], unit: PressureUnit) -> String? {
+        guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        guard let bar = samples[idx].tankPressure1Bar else { return nil }
+        let converted = UnitFormatter.pressure(bar, unit: unit)
+        return String(format: "%.0f %@", converted, UnitFormatter.pressureLabel(unit))
+    }
+
+    /// Tank pressure 2 display string for the nearest sample, formatted with unit.
+    func nearestTankPressure2Display(to time: Float, samples: [DiveSample], unit: PressureUnit) -> String? {
+        guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
+        guard let bar = samples[idx].tankPressure2Bar else { return nil }
+        let converted = UnitFormatter.pressure(bar, unit: unit)
+        return String(format: "%.0f %@", converted, UnitFormatter.pressureLabel(unit))
+    }
+
     /// Denormalize a negative Y chart value back to @+5 TTS minutes.
     func denormalizeAtPlusFive(_ yValue: Float) -> Float {
         guard let range = atPlusFiveDisplayRange else { return 0 }
@@ -643,6 +703,9 @@ struct DepthProfileChart: View {
     var showDeltaFive: Bool = false
     var showSurfGf: Bool = false
     var gasMixes: [GasMix] = []
+    var showPpo2: Bool = false
+    var showTankPressure: Bool = false
+    var pressureUnit: PressureUnit = .bar
     var isFullscreen: Bool = false
 
     @State private var chartData: DepthProfileChartData?
@@ -703,6 +766,21 @@ struct DepthProfileChart: View {
         return data.nearestSurfGfDisplay(to: selectedTime, samples: samples)
     }
 
+    private var selectedPpo2Display: String? {
+        guard let selectedTime, showPpo2, let data = chartData, data.hasPpo2Data else { return nil }
+        return data.nearestPpo2Display(to: selectedTime, samples: samples)
+    }
+
+    private var selectedTankPressure1Display: String? {
+        guard let selectedTime, showTankPressure, let data = chartData, data.hasTankPressure1Data else { return nil }
+        return data.nearestTankPressure1Display(to: selectedTime, samples: samples, unit: pressureUnit)
+    }
+
+    private var selectedTankPressure2Display: String? {
+        guard let selectedTime, showTankPressure, let data = chartData, data.hasTankPressure2Data else { return nil }
+        return data.nearestTankPressure2Display(to: selectedTime, samples: samples, unit: pressureUnit)
+    }
+
     private var selectedGasDisplay: String? {
         guard let selectedTime, let data = chartData else { return nil }
         guard !data.gasSwitchMarkers.isEmpty else { return nil }
@@ -747,6 +825,10 @@ struct DepthProfileChart: View {
         if showAtPlusFive, data.hasAtPlusFiveData { label += " @+5 TTS overlay active." }
         if showDeltaFive, data.hasDeltaFiveData { label += " \u{0394}+5 overlay active." }
         if showSurfGf, data.hasSurfGfData { label += " SurfGF overlay active." }
+        if showPpo2, data.hasPpo2Data { label += " PPO2 overlay active." }
+        if showTankPressure, data.hasTankPressure1Data || data.hasTankPressure2Data {
+            label += " Tank pressure overlay active."
+        }
         if !data.gasSwitchMarkers.isEmpty {
             let n = data.gasSwitchMarkers.count
             label += " \(n) gas switch\(n == 1 ? "" : "es") marked."
@@ -872,7 +954,7 @@ struct DepthProfileChart: View {
                     y: .value("Depth", point.normalizedValue),
                     series: .value("Series", "@+5")
                 )
-                .foregroundStyle(Color.cyan)
+                .foregroundStyle(Color.green)
                 .lineStyle(StrokeStyle(lineWidth: 2, dash: [6, 3]))
             }
         }
@@ -903,6 +985,45 @@ struct DepthProfileChart: View {
                     series: .value("Series", "SurfGF")
                 )
                 .foregroundStyle(Color.teal)
+                .lineStyle(StrokeStyle(lineWidth: 2))
+            }
+        }
+    }
+
+    @ChartContentBuilder
+    private func ppo2Content(data: DepthProfileChartData) -> some ChartContent {
+        if showPpo2 {
+            ForEach(data.ppo2Points) { point in
+                LineMark(
+                    x: .value("Time", point.timeMinutes),
+                    y: .value("Depth", point.normalizedValue),
+                    series: .value("Series", "PPO2")
+                )
+                .foregroundStyle(Color.cyan)
+                .lineStyle(StrokeStyle(lineWidth: 2))
+            }
+        }
+    }
+
+    @ChartContentBuilder
+    private func tankPressureContent(data: DepthProfileChartData) -> some ChartContent {
+        if showTankPressure {
+            ForEach(data.tankPressure1Points) { point in
+                LineMark(
+                    x: .value("Time", point.timeMinutes),
+                    y: .value("Depth", point.normalizedValue),
+                    series: .value("Series", "Tank1")
+                )
+                .foregroundStyle(Color.indigo)
+                .lineStyle(StrokeStyle(lineWidth: 2))
+            }
+            ForEach(data.tankPressure2Points) { point in
+                LineMark(
+                    x: .value("Time", point.timeMinutes),
+                    y: .value("Depth", point.normalizedValue),
+                    series: .value("Series", "Tank2")
+                )
+                .foregroundStyle(Color.brown)
                 .lineStyle(StrokeStyle(lineWidth: 2))
             }
         }
@@ -969,6 +1090,8 @@ struct DepthProfileChart: View {
             atPlusFiveContent(data: data)
             deltaFiveContent(data: data)
             surfGfContent(data: data)
+            ppo2Content(data: data)
+            tankPressureContent(data: data)
             gasSwitchContent(data: data)
             setpointSwitchContent(data: data)
             scrubContent
@@ -1013,15 +1136,6 @@ struct DepthProfileChart: View {
                             if sgf >= 0 {
                                 Text(String(format: "%.0f%%", sgf))
                             }
-                        }
-                    }
-                }
-            } else if showTemperature {
-                AxisMarks(position: .trailing, values: .automatic) { value in
-                    AxisValueLabel {
-                        if let yVal = value.as(Float.self) {
-                            let temp = data.denormalizeTemp(yVal)
-                            Text(String(format: "%.1f%@", temp, UnitFormatter.temperatureLabel(temperatureUnit)))
                         }
                     }
                 }
@@ -1094,7 +1208,7 @@ struct DepthProfileChart: View {
                 }
                 if let atPlusFiveStr = selectedAtPlusFiveDisplay {
                     Text("@+5 \(atPlusFiveStr)")
-                        .foregroundColor(.cyan)
+                        .foregroundColor(.green)
                 }
                 if let deltaFiveStr = selectedDeltaFiveDisplay {
                     Text("\u{0394}+5 \(deltaFiveStr)")
@@ -1103,6 +1217,19 @@ struct DepthProfileChart: View {
                 if let surfGfStr = selectedSurfGfDisplay {
                     Text("SurfGF \(surfGfStr)")
                         .foregroundColor(.teal)
+                }
+                if let ppo2Str = selectedPpo2Display {
+                    Text("PPO2 \(ppo2Str)")
+                        .foregroundColor(.cyan)
+                }
+                if let tp1Str = selectedTankPressure1Display {
+                    let label = chartData?.hasTankPressure2Data == true ? "T1" : "Tank"
+                    Text("\(label) \(tp1Str)")
+                        .foregroundColor(.indigo)
+                }
+                if let tp2Str = selectedTankPressure2Display {
+                    Text("T2 \(tp2Str)")
+                        .foregroundColor(.brown)
                 }
             }
             .font(isFullscreen ? .caption : .caption2)

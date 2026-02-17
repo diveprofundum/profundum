@@ -25,6 +25,8 @@ struct DiveDetailView: View {
     @State private var showAtPlusFive = false
     @State private var showDeltaFive = false
     @State private var showSurfGf = false
+    @State private var showPpo2 = false
+    @State private var showTankPressure = false
 
     var onDiveUpdated: (() -> Void)?
 
@@ -56,7 +58,11 @@ struct DiveDetailView: View {
     }
 
     private var hasPpo2Data: Bool {
-        samples.contains { $0.ppo2_1 != nil || $0.ppo2_2 != nil || $0.ppo2_3 != nil }
+        samples.contains { ($0.ppo2_1 ?? 0) > 0 }
+    }
+
+    private var hasTankPressureData: Bool {
+        samples.contains { $0.tankPressure1Bar != nil || $0.tankPressure2Bar != nil }
     }
 
     var body: some View {
@@ -322,6 +328,7 @@ struct DiveDetailView: View {
                     )
                 )
             }
+
         }
     }
 
@@ -333,10 +340,12 @@ struct DiveDetailView: View {
 
     private var anyOverlayAvailable: Bool {
         hasTemperatureVariation || hasGf99Data || hasAtPlusFiveData || hasDeltaFiveData || hasSurfGfData
+            || hasPpo2Data || hasTankPressureData
     }
 
     private var anyOverlayActive: Bool {
         showTemperature || showGf99 || showAtPlusFive || showDeltaFive || showSurfGf
+            || showPpo2 || showTankPressure
     }
 
     private var depthProfileSection: some View {
@@ -363,6 +372,12 @@ struct DiveDetailView: View {
                         }
                         if hasSurfGfData {
                             Toggle("SurfGF", isOn: $showSurfGf)
+                        }
+                        if hasPpo2Data {
+                            Toggle("PPO2", isOn: $showPpo2)
+                        }
+                        if hasTankPressureData {
+                            Toggle("Tank Pressure", isOn: $showTankPressure)
                         }
                     } label: {
                         Image(systemName: "square.3.layers.3d")
@@ -392,7 +407,10 @@ struct DiveDetailView: View {
                 showAtPlusFive: showAtPlusFive,
                 showDeltaFive: showDeltaFive,
                 showSurfGf: showSurfGf,
-                gasMixes: gasMixes
+                gasMixes: gasMixes,
+                showPpo2: showPpo2,
+                showTankPressure: showTankPressure,
+                pressureUnit: appState.pressureUnit
             )
             .frame(height: 200)
             .background(
@@ -407,7 +425,8 @@ struct DiveDetailView: View {
                 samples: samples,
                 depthUnit: appState.depthUnit,
                 temperatureUnit: appState.temperatureUnit,
-                gasMixes: gasMixes
+                gasMixes: gasMixes,
+                pressureUnit: appState.pressureUnit
             )
         }
         #else
@@ -416,7 +435,8 @@ struct DiveDetailView: View {
                 samples: samples,
                 depthUnit: appState.depthUnit,
                 temperatureUnit: appState.temperatureUnit,
-                gasMixes: gasMixes
+                gasMixes: gasMixes,
+                pressureUnit: appState.pressureUnit
             )
             .frame(minWidth: 700, minHeight: 500)
         }
