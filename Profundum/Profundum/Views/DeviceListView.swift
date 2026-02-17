@@ -202,7 +202,8 @@ struct DeviceDetailView: View {
     var body: some View {
         Form {
             Section("Device Information") {
-                if let manufacturer = device.manufacturer, !manufacturer.isEmpty {
+                if let manufacturer = device.manufacturer,
+                   !manufacturer.isEmpty, manufacturer != device.model {
                     LabeledContent("Manufacturer", value: manufacturer)
                 }
                 LabeledContent("Model", value: device.model)

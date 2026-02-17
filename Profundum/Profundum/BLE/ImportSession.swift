@@ -334,7 +334,8 @@ class ImportSession: ObservableObject {
         peripheral: CBPeripheral
     ) -> Device {
         let bleUuid = peripheral.identifier.uuidString
-        let model = discovered.knownComputer?.vendorName
+        let vendorName = discovered.knownComputer?.vendorName
+        let model = vendorName
             ?? discovered.name
             ?? "Unknown Dive Computer"
 
@@ -343,6 +344,10 @@ class ImportSession: ObservableObject {
             if var existing = try diveService?.listDevices(includeArchived: true)
                 .first(where: { $0.bleUuid == bleUuid }) {
                 existing.lastSyncUnix = Int64(Date().timeIntervalSince1970)
+                // Backfill manufacturer if not set
+                if (existing.manufacturer ?? "").isEmpty, let vendorName {
+                    existing.manufacturer = vendorName
+                }
                 do {
                     try diveService?.saveDevice(existing)
                 } catch {
@@ -360,7 +365,8 @@ class ImportSession: ObservableObject {
             serialNumber: "",
             firmwareVersion: "",
             lastSyncUnix: Int64(Date().timeIntervalSince1970),
-            bleUuid: bleUuid
+            bleUuid: bleUuid,
+            manufacturer: vendorName
         )
         do {
             try diveService?.saveDevice(device)
@@ -390,19 +396,23 @@ class ImportSession: ObservableObject {
         updated.lastSyncUnix = Int64(Date().timeIntervalSince1970)
         do {
             try diveService?.saveDevice(updated)
+        } catch {
+            importLog.error("Failed to save device info: \(error.localizedDescription)")
+            return
+        }
 
-            // Cross-source merge: check if a device with the same serial already exists
-            // (e.g. from Shearwater Cloud import) and merge them
+        // Cross-source merge: check if a device with the same serial already exists
+        // (e.g. from Shearwater Cloud import) and merge them
+        do {
             if let serial = result.serialNumber, !serial.isEmpty,
-               let existing = try diveService?.findDeviceBySerial(serial),
-               existing.id != updated.id {
+               let existing = try diveService?.findDeviceBySerial(serial, excludingId: updated.id) {
                 importLog.info(
                     "Found existing device \(existing.id) with serial \(serial) — merging"
                 )
                 try diveService?.mergeDevices(winnerId: existing.id, loserId: updated.id)
             }
         } catch {
-            importLog.error("Failed to update device info: \(error.localizedDescription)")
+            importLog.error("Failed to merge devices: \(error.localizedDescription)")
         }
     }
 }

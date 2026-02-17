@@ -79,9 +79,20 @@ public final class ShearwaterCloudImportService: Sendable {
         var siteLocationMap: [String: String] = [:]  // siteName → Location
         var uniqueTeammateNames = Set<String>()
 
+        // Build serial → hardware type mapping from data_bytes_2 JSON in the same pass
+        var serialToHwType: [String: String] = [:]
+
         for row in rows {
             let serial = stringFromRow(row, column: "SerialNumber") ?? ""
             uniqueSerials.insert(serial.isEmpty ? "" : serial)
+
+            // Extract HARDWARE_TYPE_KEY for the first row of each serial
+            if serialToHwType[serial] == nil {
+                let meta: DiveMetadata? = decodeJSON(row["data_bytes_2"] as DatabaseValue)
+                if let hwType = meta?.HARDWARE_TYPE_KEY, !hwType.isEmpty {
+                    serialToHwType[serial] = hwType
+                }
+            }
 
             if let siteName = stringFromRow(row, column: "Site"), !siteName.isEmpty {
                 uniqueSiteNames.insert(siteName)
@@ -98,25 +109,15 @@ public final class ShearwaterCloudImportService: Sendable {
             }
         }
 
-        // Build serial → hardware type mapping from data_bytes_2 JSON
-        var serialToHwType: [String: String] = [:]
-        for row in rows {
-            let serial = stringFromRow(row, column: "SerialNumber") ?? ""
-            if serialToHwType[serial] != nil { continue }
-            let meta: DiveMetadata? = decodeJSON(row["data_bytes_2"] as DatabaseValue)
-            if let hwType = meta?.HARDWARE_TYPE_KEY, !hwType.isEmpty {
-                serialToHwType[serial] = hwType
-            }
-        }
-
         try database.dbQueue.write { db in
             // Create/match devices
             for serial in uniqueSerials {
                 let displaySerial = serial.isEmpty ? "unknown" : serial
                 let hwType = serialToHwType[serial]
-                let model = hwType ?? (serial.isEmpty ? "Unknown" : "Unknown")
+                let model = hwType ?? "Unknown"
 
-                // Try to find existing device by serial number
+                // Try to find existing device by serial number (includes archived — intentional
+                // so we reuse the same device ID and backfill metadata on re-import)
                 if var existing = try Device
                     .filter(Column("serial_number") == displaySerial)
                     .fetchOne(db) {
@@ -127,8 +128,8 @@ public final class ShearwaterCloudImportService: Sendable {
                         existing.manufacturer = "Shearwater"
                         changed = true
                     }
-                    let genericModels: Set<String> = ["Shearwater", "Shearwater (Unknown)", "Unknown"]
-                    if genericModels.contains(existing.model), let hwType, !hwType.isEmpty {
+                    if Device.genericModelNames.contains(existing.model),
+                       let hwType, !hwType.isEmpty {
                         existing.model = hwType
                         changed = true
                     }

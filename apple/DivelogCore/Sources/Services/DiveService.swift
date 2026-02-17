@@ -68,13 +68,19 @@ public final class DiveService: Sendable {
     }
 
     /// Find an active device by serial number, excluding empty/unknown serials.
-    public func findDeviceBySerial(_ serial: String) throws -> Device? {
+    /// - Parameters:
+    ///   - serial: The serial number to search for.
+    ///   - excludingId: Optional device ID to exclude from results (prevents self-match).
+    public func findDeviceBySerial(_ serial: String, excludingId: String? = nil) throws -> Device? {
         guard !serial.isEmpty, serial != "unknown" else { return nil }
         return try database.dbQueue.read { db in
-            try Device
+            var request = Device
                 .filter(Column("serial_number") == serial)
                 .filter(Column("is_active") == true)
-                .fetchOne(db)
+            if let excludingId {
+                request = request.filter(Column("id") != excludingId)
+            }
+            return try request.fetchOne(db)
         }
     }
 
@@ -87,7 +93,8 @@ public final class DiveService: Sendable {
     /// - Returns: `true` if the merge succeeded, `false` if either device was not found.
     @discardableResult
     public func mergeDevices(winnerId: String, loserId: String) throws -> Bool {
-        try database.dbQueue.write { db in
+        guard winnerId != loserId else { return false }
+        return try database.dbQueue.write { db in
             guard var winner = try Device.fetchOne(db, key: winnerId),
                   var loser = try Device.fetchOne(db, key: loserId) else {
                 return false
@@ -121,9 +128,9 @@ public final class DiveService: Sendable {
             if (winner.manufacturer ?? "").isEmpty, let loserMfr = loser.manufacturer, !loserMfr.isEmpty {
                 winner.manufacturer = loserMfr
             }
-            // Only take loser's model if it's more specific (not just "Shearwater")
-            let genericModels: Set<String> = ["Shearwater", "Shearwater (Unknown)", "Unknown Dive Computer"]
-            if genericModels.contains(winner.model), !genericModels.contains(loser.model) {
+            // Only take loser's model if it's more specific
+            if Device.genericModelNames.contains(winner.model),
+               !Device.genericModelNames.contains(loser.model) {
                 winner.model = loser.model
             }
 

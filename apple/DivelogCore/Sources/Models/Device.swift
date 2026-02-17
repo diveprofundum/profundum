@@ -43,10 +43,20 @@ public struct Device: Identifiable, Equatable, Hashable, Sendable {
         self.manufacturer = manufacturer
     }
 
+    /// Model names that are placeholders and should be replaced by more specific values.
+    public static let genericModelNames: Set<String> = [
+        "Shearwater", "Shearwater (Unknown)", "Unknown Dive Computer", "Unknown"
+    ]
+
     /// A human-readable name combining manufacturer and model when they differ.
     public var displayName: String {
-        if let manufacturer, !manufacturer.isEmpty, !model.isEmpty, model != manufacturer {
-            return "\(manufacturer) \(model)"
+        if let manufacturer, !manufacturer.isEmpty {
+            if model.isEmpty {
+                return manufacturer
+            }
+            if model != manufacturer, !model.hasPrefix(manufacturer) {
+                return "\(manufacturer) \(model)"
+            }
         }
         return model
     }
