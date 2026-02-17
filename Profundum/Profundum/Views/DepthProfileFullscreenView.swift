@@ -6,6 +6,7 @@ struct DepthProfileFullscreenView: View {
     let depthUnit: DepthUnit
     let temperatureUnit: TemperatureUnit
     var gasMixes: [GasMix] = []
+    var pressureUnit: PressureUnit = .bar
 
     @Environment(\.dismiss) private var dismiss
     @State private var showTemperature = false
@@ -13,6 +14,8 @@ struct DepthProfileFullscreenView: View {
     @State private var showAtPlusFive = false
     @State private var showDeltaFive = false
     @State private var showSurfGf = false
+    @State private var showPpo2 = false
+    @State private var showTankPressure = false
 
     private var hasGf99Data: Bool {
         samples.contains { ($0.gf99 ?? 0) > 0 }
@@ -28,6 +31,14 @@ struct DepthProfileFullscreenView: View {
 
     private var hasSurfGfData: Bool {
         samples.contains { $0.depthM > 3.0 }
+    }
+
+    private var hasPpo2Data: Bool {
+        samples.contains { ($0.ppo2_1 ?? 0) > 0 }
+    }
+
+    private var hasTankPressureData: Bool {
+        samples.contains { $0.tankPressure1Bar != nil || $0.tankPressure2Bar != nil }
     }
 
     private var hasTemperatureVariation: Bool {
@@ -66,7 +77,7 @@ struct DepthProfileFullscreenView: View {
                 if hasAtPlusFiveData {
                     ChartOverlayChip(
                         label: "@+5",
-                        color: .cyan,
+                        color: .green,
                         isActive: showAtPlusFive
                     ) {
                         showAtPlusFive.toggle()
@@ -90,6 +101,26 @@ struct DepthProfileFullscreenView: View {
                         isActive: showSurfGf
                     ) {
                         showSurfGf.toggle()
+                    }
+                }
+
+                if hasPpo2Data {
+                    ChartOverlayChip(
+                        label: "PPO2",
+                        color: .cyan,
+                        isActive: showPpo2
+                    ) {
+                        showPpo2.toggle()
+                    }
+                }
+
+                if hasTankPressureData {
+                    ChartOverlayChip(
+                        label: "Tank",
+                        color: .indigo,
+                        isActive: showTankPressure
+                    ) {
+                        showTankPressure.toggle()
                     }
                 }
 
@@ -120,6 +151,9 @@ struct DepthProfileFullscreenView: View {
                 showDeltaFive: showDeltaFive,
                 showSurfGf: showSurfGf,
                 gasMixes: gasMixes,
+                showPpo2: showPpo2,
+                showTankPressure: showTankPressure,
+                pressureUnit: pressureUnit,
                 isFullscreen: true
             )
             .frame(maxHeight: .infinity)
