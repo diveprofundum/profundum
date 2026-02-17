@@ -170,7 +170,7 @@ struct DeviceRowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(device.model)
+                Text(device.displayName)
                     .font(.headline)
                 if !device.isActive {
                     Text("Archived")
@@ -202,6 +202,9 @@ struct DeviceDetailView: View {
     var body: some View {
         Form {
             Section("Device Information") {
+                if let manufacturer = device.manufacturer, !manufacturer.isEmpty {
+                    LabeledContent("Manufacturer", value: manufacturer)
+                }
                 LabeledContent("Model", value: device.model)
                 LabeledContent("Serial Number", value: device.serialNumber)
                 if !device.firmwareVersion.isEmpty {
@@ -219,7 +222,7 @@ struct DeviceDetailView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle(device.model)
+        .navigationTitle(device.displayName)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif

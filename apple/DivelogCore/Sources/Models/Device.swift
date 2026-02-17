@@ -16,6 +16,8 @@ public struct Device: Identifiable, Equatable, Hashable, Sendable {
     public var productId: Int?
     /// CoreBluetooth peripheral UUID for reconnection.
     public var bleUuid: String?
+    /// Manufacturer name (e.g. "Shearwater"). Nullable for backwards compat.
+    public var manufacturer: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -26,7 +28,8 @@ public struct Device: Identifiable, Equatable, Hashable, Sendable {
         isActive: Bool = true,
         vendorId: Int? = nil,
         productId: Int? = nil,
-        bleUuid: String? = nil
+        bleUuid: String? = nil,
+        manufacturer: String? = nil
     ) {
         self.id = id
         self.model = model
@@ -37,6 +40,15 @@ public struct Device: Identifiable, Equatable, Hashable, Sendable {
         self.vendorId = vendorId
         self.productId = productId
         self.bleUuid = bleUuid
+        self.manufacturer = manufacturer
+    }
+
+    /// A human-readable name combining manufacturer and model when they differ.
+    public var displayName: String {
+        if let manufacturer, !manufacturer.isEmpty, !model.isEmpty, model != manufacturer {
+            return "\(manufacturer) \(model)"
+        }
+        return model
     }
 }
 
@@ -55,5 +67,6 @@ extension Device: Codable, FetchableRecord, PersistableRecord {
         case vendorId = "vendor_id"
         case productId = "product_id"
         case bleUuid = "ble_uuid"
+        case manufacturer
     }
 }

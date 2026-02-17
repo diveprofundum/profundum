@@ -67,6 +67,77 @@ public final class DiveService: Sendable {
         }
     }
 
+    /// Find an active device by serial number, excluding empty/unknown serials.
+    public func findDeviceBySerial(_ serial: String) throws -> Device? {
+        guard !serial.isEmpty, serial != "unknown" else { return nil }
+        return try database.dbQueue.read { db in
+            try Device
+                .filter(Column("serial_number") == serial)
+                .filter(Column("is_active") == true)
+                .fetchOne(db)
+        }
+    }
+
+    /// Merge two device records: reassign all dives/samples/fingerprints from loser to winner,
+    /// merge metadata (prefer non-empty fields), and archive the loser.
+    ///
+    /// - Parameters:
+    ///   - winnerId: The device ID to keep (receives all references).
+    ///   - loserId: The device ID to merge away (archived after merge).
+    /// - Returns: `true` if the merge succeeded, `false` if either device was not found.
+    @discardableResult
+    public func mergeDevices(winnerId: String, loserId: String) throws -> Bool {
+        try database.dbQueue.write { db in
+            guard var winner = try Device.fetchOne(db, key: winnerId),
+                  var loser = try Device.fetchOne(db, key: loserId) else {
+                return false
+            }
+
+            // Reassign dives, samples, and source fingerprints from loser to winner
+            try db.execute(
+                sql: "UPDATE dives SET device_id = ? WHERE device_id = ?",
+                arguments: [winnerId, loserId]
+            )
+            try db.execute(
+                sql: "UPDATE samples SET device_id = ? WHERE device_id = ?",
+                arguments: [winnerId, loserId]
+            )
+            try db.execute(
+                sql: "UPDATE dive_source_fingerprints SET device_id = ? WHERE device_id = ?",
+                arguments: [winnerId, loserId]
+            )
+
+            // Merge metadata: prefer non-empty values from loser onto winner
+            if (winner.bleUuid ?? "").isEmpty, let loserBle = loser.bleUuid, !loserBle.isEmpty {
+                winner.bleUuid = loserBle
+            }
+            if winner.serialNumber.isEmpty || winner.serialNumber == "unknown",
+               !loser.serialNumber.isEmpty, loser.serialNumber != "unknown" {
+                winner.serialNumber = loser.serialNumber
+            }
+            if winner.firmwareVersion.isEmpty, !loser.firmwareVersion.isEmpty {
+                winner.firmwareVersion = loser.firmwareVersion
+            }
+            if (winner.manufacturer ?? "").isEmpty, let loserMfr = loser.manufacturer, !loserMfr.isEmpty {
+                winner.manufacturer = loserMfr
+            }
+            // Only take loser's model if it's more specific (not just "Shearwater")
+            let genericModels: Set<String> = ["Shearwater", "Shearwater (Unknown)", "Unknown Dive Computer"]
+            if genericModels.contains(winner.model), !genericModels.contains(loser.model) {
+                winner.model = loser.model
+            }
+
+            try winner.update(db)
+
+            // Clear bleUuid on loser to prevent ambiguous lookup, then archive
+            loser.bleUuid = nil
+            loser.isActive = false
+            try loser.update(db)
+
+            return true
+        }
+    }
+
     // MARK: - Site Operations
 
     public func saveSite(_ site: Site, tags: [String] = []) throws {
@@ -293,8 +364,8 @@ public final class DiveService: Sendable {
                     .fetchAll(db)
                 sourceDeviceNames = devices.map { device in
                     device.serialNumber != "unknown"
-                        ? "\(device.model) (\(device.serialNumber))"
-                        : device.model
+                        ? "\(device.displayName) (\(device.serialNumber))"
+                        : device.displayName
                 }
             }
 

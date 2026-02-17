@@ -189,7 +189,7 @@ struct NewDiveSheet: View {
             Picker("Device", selection: $selectedDeviceId) {
                 Text("Select device").tag(nil as String?)
                 ForEach(devices, id: \.id) { device in
-                    Text(device.model).tag(device.id as String?)
+                    Text(device.displayName).tag(device.id as String?)
                 }
             }
 
