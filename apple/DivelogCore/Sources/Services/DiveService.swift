@@ -114,16 +114,26 @@ public final class DiveService: Sendable {
                 arguments: [winnerId, loserId]
             )
 
-            // Merge metadata: prefer non-empty values from loser onto winner
-            if (winner.bleUuid ?? "").isEmpty, let loserBle = loser.bleUuid, !loserBle.isEmpty {
+            // Merge metadata onto winner.
+            // Freshness-sensitive fields (bleUuid, firmwareVersion, lastSyncUnix):
+            // always prefer loser's non-empty value — the loser is the just-connected
+            // BLE device, so its values are authoritative. If we kept a stale winner
+            // bleUuid, the next sync would fail to match and create another duplicate.
+            if let loserBle = loser.bleUuid, !loserBle.isEmpty {
                 winner.bleUuid = loserBle
             }
+            if !loser.firmwareVersion.isEmpty {
+                winner.firmwareVersion = loser.firmwareVersion
+            }
+            let loserSync = loser.lastSyncUnix ?? 0
+            let winnerSync = winner.lastSyncUnix ?? 0
+            if loserSync > winnerSync {
+                winner.lastSyncUnix = loser.lastSyncUnix
+            }
+            // Identity fields: prefer non-empty (either direction)
             if winner.serialNumber.isEmpty || winner.serialNumber == "unknown",
                !loser.serialNumber.isEmpty, loser.serialNumber != "unknown" {
                 winner.serialNumber = loser.serialNumber
-            }
-            if winner.firmwareVersion.isEmpty, !loser.firmwareVersion.isEmpty {
-                winner.firmwareVersion = loser.firmwareVersion
             }
             if (winner.manufacturer ?? "").isEmpty, let loserMfr = loser.manufacturer, !loserMfr.isEmpty {
                 winner.manufacturer = loserMfr

@@ -202,6 +202,73 @@ final class DeviceMergeTests: XCTestCase {
         XCTAssertEqual(winner?.model, "Petrel 3")
     }
 
+    // MARK: - Freshness-sensitive merge fields
+
+    func testMergeDevicesOverwritesWinnerBleUuid() throws {
+        let cloudDevice = Device(model: "Petrel 3", serialNumber: "A31F4CE2",
+                                 firmwareVersion: "1.0", bleUuid: "OLD-UUID",
+                                 manufacturer: "Shearwater")
+        let bleDevice = Device(model: "Petrel 3", serialNumber: "A31F4CE2",
+                               firmwareVersion: "1.2.3", bleUuid: "NEW-UUID")
+        try diveService.saveDevice(cloudDevice)
+        try diveService.saveDevice(bleDevice)
+
+        try diveService.mergeDevices(winnerId: cloudDevice.id, loserId: bleDevice.id)
+
+        let winner = try diveService.getDevice(id: cloudDevice.id)
+        // Loser's bleUuid should overwrite winner's stale value
+        XCTAssertEqual(winner?.bleUuid, "NEW-UUID")
+        // Loser's firmware should overwrite winner's older version
+        XCTAssertEqual(winner?.firmwareVersion, "1.2.3")
+    }
+
+    func testMergeDevicesKeepsWinnerBleUuidWhenLoserEmpty() throws {
+        let cloudDevice = Device(model: "Petrel 3", serialNumber: "A31F4CE2",
+                                 firmwareVersion: "", bleUuid: "EXISTING-UUID",
+                                 manufacturer: "Shearwater")
+        let bleDevice = Device(model: "Petrel 3", serialNumber: "A31F4CE2",
+                               firmwareVersion: "")
+        try diveService.saveDevice(cloudDevice)
+        try diveService.saveDevice(bleDevice)
+
+        try diveService.mergeDevices(winnerId: cloudDevice.id, loserId: bleDevice.id)
+
+        let winner = try diveService.getDevice(id: cloudDevice.id)
+        XCTAssertEqual(winner?.bleUuid, "EXISTING-UUID")
+    }
+
+    func testMergeDevicesTakesNewerLastSyncUnix() throws {
+        let cloudDevice = Device(model: "Petrel 3", serialNumber: "A31F4CE2",
+                                 firmwareVersion: "", lastSyncUnix: 1000,
+                                 manufacturer: "Shearwater")
+        let bleDevice = Device(model: "Petrel 3", serialNumber: "A31F4CE2",
+                               firmwareVersion: "", lastSyncUnix: 2000,
+                               bleUuid: "BLE-UUID")
+        try diveService.saveDevice(cloudDevice)
+        try diveService.saveDevice(bleDevice)
+
+        try diveService.mergeDevices(winnerId: cloudDevice.id, loserId: bleDevice.id)
+
+        let winner = try diveService.getDevice(id: cloudDevice.id)
+        XCTAssertEqual(winner?.lastSyncUnix, 2000)
+    }
+
+    func testMergeDevicesKeepsWinnerLastSyncWhenNewer() throws {
+        let cloudDevice = Device(model: "Petrel 3", serialNumber: "A31F4CE2",
+                                 firmwareVersion: "", lastSyncUnix: 3000,
+                                 manufacturer: "Shearwater")
+        let bleDevice = Device(model: "Petrel 3", serialNumber: "A31F4CE2",
+                               firmwareVersion: "", lastSyncUnix: 1000,
+                               bleUuid: "BLE-UUID")
+        try diveService.saveDevice(cloudDevice)
+        try diveService.saveDevice(bleDevice)
+
+        try diveService.mergeDevices(winnerId: cloudDevice.id, loserId: bleDevice.id)
+
+        let winner = try diveService.getDevice(id: cloudDevice.id)
+        XCTAssertEqual(winner?.lastSyncUnix, 3000)
+    }
+
     // MARK: - genericModelNames
 
     func testGenericModelNamesCoversAllPlaceholders() {
