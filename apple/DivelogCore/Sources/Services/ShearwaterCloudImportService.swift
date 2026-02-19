@@ -79,9 +79,20 @@ public final class ShearwaterCloudImportService: Sendable {
         var siteLocationMap: [String: String] = [:]  // siteName → Location
         var uniqueTeammateNames = Set<String>()
 
+        // Build serial → hardware type mapping from data_bytes_2 JSON in the same pass
+        var serialToHwType: [String: String] = [:]
+
         for row in rows {
             let serial = stringFromRow(row, column: "SerialNumber") ?? ""
             uniqueSerials.insert(serial.isEmpty ? "" : serial)
+
+            // Extract HARDWARE_TYPE_KEY for the first row of each serial
+            if serialToHwType[serial] == nil {
+                let meta: DiveMetadata? = decodeJSON(row["data_bytes_2"] as DatabaseValue)
+                if let hwType = meta?.HARDWARE_TYPE_KEY, !hwType.isEmpty {
+                    serialToHwType[serial] = hwType
+                }
+            }
 
             if let siteName = stringFromRow(row, column: "Site"), !siteName.isEmpty {
                 uniqueSiteNames.insert(siteName)
@@ -102,18 +113,35 @@ public final class ShearwaterCloudImportService: Sendable {
             // Create/match devices
             for serial in uniqueSerials {
                 let displaySerial = serial.isEmpty ? "unknown" : serial
-                let model = serial.isEmpty ? "Shearwater (Unknown)" : "Shearwater"
+                let hwType = serialToHwType[serial]
+                let model = hwType ?? "Unknown"
 
-                // Try to find existing device by serial number
-                if let existing = try Device
+                // Try to find existing device by serial number (includes archived — intentional
+                // so we reuse the same device ID and backfill metadata on re-import)
+                if var existing = try Device
                     .filter(Column("serial_number") == displaySerial)
                     .fetchOne(db) {
                     serialToDeviceId[serial] = existing.id
+                    // Backfill manufacturer and model on existing devices
+                    var changed = false
+                    if (existing.manufacturer ?? "").isEmpty {
+                        existing.manufacturer = "Shearwater"
+                        changed = true
+                    }
+                    if Device.genericModelNames.contains(existing.model),
+                       let hwType, !hwType.isEmpty {
+                        existing.model = hwType
+                        changed = true
+                    }
+                    if changed {
+                        try existing.update(db)
+                    }
                 } else {
                     let device = Device(
                         model: model,
                         serialNumber: displaySerial,
-                        firmwareVersion: ""
+                        firmwareVersion: "",
+                        manufacturer: "Shearwater"
                     )
                     try device.insert(db)
                     serialToDeviceId[serial] = device.id
@@ -1287,4 +1315,5 @@ private struct CalculatedValues: Decodable {
 private struct DiveMetadata: Decodable {
     let DIVE_NUMBER_KEY: Int?
     let DIVE_START_TIME: Int64?
+    let HARDWARE_TYPE_KEY: String?
 }

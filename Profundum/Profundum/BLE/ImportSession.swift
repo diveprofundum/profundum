@@ -217,12 +217,8 @@ class ImportSession: ObservableObject {
                     }
                 )
 
-                // Update device with serial/firmware if available
-                await self.updateDeviceInfo(
-                    device: device,
-                    serial: result.serialNumber,
-                    firmware: result.firmwareVersion
-                )
+                // Update device with serial/firmware/vendor/product and merge cross-source
+                await self.updateDeviceInfo(device: device, result: result)
 
                 BLEPeripheralTransport.enableLogging = false
                 let saved = counts.saved
@@ -231,10 +227,10 @@ class ImportSession: ObservableObject {
                     self.phase = .completed(ImportResult(
                         newDives: saved,
                         skippedDives: skipped,
-                        deviceName: device.model
+                        deviceName: device.displayName
                     ))
                     self.statusMessage = saved > 0
-                        ? "\(saved) new dive\(saved == 1 ? "" : "s") imported from \(device.model)."
+                        ? "\(saved) new dive\(saved == 1 ? "" : "s") imported from \(device.displayName)."
                         : "All dives already imported."
                 }
             } catch DiveComputerError.cancelled {
@@ -247,7 +243,7 @@ class ImportSession: ObservableObject {
                         self.phase = .completed(ImportResult(
                             newDives: saved,
                             skippedDives: skipped,
-                            deviceName: device.model
+                            deviceName: device.displayName
                         ))
                         let plural = saved == 1 ? "" : "s"
                         self.statusMessage = "Cancelled. \(saved) dive\(plural) saved before cancellation."
@@ -267,7 +263,7 @@ class ImportSession: ObservableObject {
                         self.phase = .completed(ImportResult(
                             newDives: saved,
                             skippedDives: skipped,
-                            deviceName: device.model
+                            deviceName: device.displayName
                         ))
                         let plural = saved == 1 ? "" : "s"
                         self.statusMessage = "Connection lost. \(saved) dive\(plural) saved before the error."
@@ -317,7 +313,7 @@ class ImportSession: ObservableObject {
                     self.connectionTimeoutTask?.cancel()
                     let device = self.createOrUpdateDevice(for: discovered, peripheral: peripheral)
                     self.phase = .paired(device)
-                    self.statusMessage = "Connected to \(device.model)"
+                    self.statusMessage = "Connected to \(device.displayName)"
                 }
             }
             .store(in: &cancellables)
@@ -338,7 +334,8 @@ class ImportSession: ObservableObject {
         peripheral: CBPeripheral
     ) -> Device {
         let bleUuid = peripheral.identifier.uuidString
-        let model = discovered.knownComputer?.vendorName
+        let vendorName = discovered.knownComputer?.vendorName
+        let model = vendorName
             ?? discovered.name
             ?? "Unknown Dive Computer"
 
@@ -347,6 +344,10 @@ class ImportSession: ObservableObject {
             if var existing = try diveService?.listDevices(includeArchived: true)
                 .first(where: { $0.bleUuid == bleUuid }) {
                 existing.lastSyncUnix = Int64(Date().timeIntervalSince1970)
+                // Backfill manufacturer if not set
+                if (existing.manufacturer ?? "").isEmpty, let vendorName {
+                    existing.manufacturer = vendorName
+                }
                 do {
                     try diveService?.saveDevice(existing)
                 } catch {
@@ -364,7 +365,8 @@ class ImportSession: ObservableObject {
             serialNumber: "",
             firmwareVersion: "",
             lastSyncUnix: Int64(Date().timeIntervalSince1970),
-            bleUuid: bleUuid
+            bleUuid: bleUuid,
+            manufacturer: vendorName
         )
         do {
             try diveService?.saveDevice(device)
@@ -375,20 +377,42 @@ class ImportSession: ObservableObject {
     }
 
     @MainActor
-    private func updateDeviceInfo(device: Device, serial: String?, firmware: String?) {
-        guard serial != nil || firmware != nil else { return }
+    private func updateDeviceInfo(device: Device, result: DownloadResult) {
+        guard result.serialNumber != nil || result.firmwareVersion != nil
+            || result.vendorName != nil || result.productName != nil else { return }
         var updated = device
-        if let serial, !serial.isEmpty {
+        if let serial = result.serialNumber, !serial.isEmpty {
             updated.serialNumber = serial
         }
-        if let firmware, !firmware.isEmpty {
+        if let firmware = result.firmwareVersion, !firmware.isEmpty {
             updated.firmwareVersion = firmware
+        }
+        if let vendor = result.vendorName, !vendor.isEmpty {
+            updated.manufacturer = vendor
+        }
+        if let product = result.productName, !product.isEmpty {
+            updated.model = product
         }
         updated.lastSyncUnix = Int64(Date().timeIntervalSince1970)
         do {
             try diveService?.saveDevice(updated)
         } catch {
-            importLog.error("Failed to update device info: \(error.localizedDescription)")
+            importLog.error("Failed to save device info: \(error.localizedDescription)")
+            return
+        }
+
+        // Cross-source merge: check if a device with the same serial already exists
+        // (e.g. from Shearwater Cloud import) and merge them
+        do {
+            if let serial = result.serialNumber, !serial.isEmpty,
+               let existing = try diveService?.findDeviceBySerial(serial, excludingId: updated.id) {
+                importLog.info(
+                    "Found existing device \(existing.id) with serial \(serial) — merging"
+                )
+                try diveService?.mergeDevices(winnerId: existing.id, loserId: updated.id)
+            }
+        } catch {
+            importLog.error("Failed to merge devices: \(error.localizedDescription)")
         }
     }
 }

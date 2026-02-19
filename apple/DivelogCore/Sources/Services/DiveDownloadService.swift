@@ -16,11 +16,21 @@ public struct DownloadResult: Sendable {
     public let totalDives: Int
     public let serialNumber: String?
     public let firmwareVersion: String?
+    public let vendorName: String?
+    public let productName: String?
 
-    public init(totalDives: Int, serialNumber: String? = nil, firmwareVersion: String? = nil) {
+    public init(
+        totalDives: Int,
+        serialNumber: String? = nil,
+        firmwareVersion: String? = nil,
+        vendorName: String? = nil,
+        productName: String? = nil
+    ) {
         self.totalDives = totalDives
         self.serialNumber = serialNumber
         self.firmwareVersion = firmwareVersion
+        self.vendorName = vendorName
+        self.productName = productName
     }
 }
 
@@ -113,6 +123,16 @@ public final class DiveDownloadService: DiveDownloader, @unchecked Sendable {
         let descriptor = try findDescriptor(deviceName: deviceName, context: context.pointer)
         defer { dc_descriptor_free(descriptor) }
 
+        // Extract vendor/product names from descriptor
+        let vendorName: String? = {
+            guard let cStr = dc_descriptor_get_vendor(descriptor) else { return nil }
+            return String(cString: cStr)
+        }()
+        let productName: String? = {
+            guard let cStr = dc_descriptor_get_product(descriptor) else { return nil }
+            return String(cString: cStr)
+        }()
+
         // 3. Open iostream via BLE transport bridge
         let bridge = IOStreamBridge(transport: transport)
         let iostream = try bridge.open(context: context.pointer)
@@ -172,7 +192,9 @@ public final class DiveDownloadService: DiveDownloader, @unchecked Sendable {
         return DownloadResult(
             totalDives: callbackContext.diveCount,
             serialNumber: devInfo.serialNumber,
-            firmwareVersion: devInfo.firmwareVersion
+            firmwareVersion: devInfo.firmwareVersion,
+            vendorName: vendorName,
+            productName: productName
         )
     }
 

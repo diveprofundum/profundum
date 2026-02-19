@@ -375,6 +375,15 @@ public final class DivelogDatabase: Sendable {
             """)
         }
 
+        // Migration 13: Add manufacturer column to devices, backfill from model, add serial index
+        migrator.registerMigration("013_device_manufacturer") { db in
+            try db.execute(sql: """
+                ALTER TABLE devices ADD COLUMN manufacturer TEXT;
+                UPDATE devices SET manufacturer = model WHERE manufacturer IS NULL;
+                CREATE INDEX IF NOT EXISTS idx_devices_serial ON devices(serial_number);
+            """)
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

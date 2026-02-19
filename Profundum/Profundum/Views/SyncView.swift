@@ -183,7 +183,7 @@ struct SyncView: View {
                 .fontWeight(.semibold)
 
             VStack(spacing: 4) {
-                Text(device.model)
+                Text(device.displayName)
                     .font(.headline)
                 if let bleUuid = device.bleUuid {
                     Text(bleUuid)
