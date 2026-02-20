@@ -241,7 +241,7 @@ struct DiveDetailView: View {
                     if sourceCount > 1 {
                         Menu {
                             ForEach(
-                                sourceDeviceMap.sorted(by: { $0.key < $1.key }),
+                                sourceDeviceMap.sorted(by: { $0.value < $1.value }),
                                 id: \.key
                             ) { deviceId, name in
                                 Button {
@@ -568,7 +568,7 @@ struct DiveDetailView: View {
             Text("PPO2 Sensors")
                 .font(.headline)
 
-            PPO2Chart(samples: samples)
+            PPO2Chart(samples: chartSamples)
                 .frame(height: 160)
                 .background(Color.gray.opacity(0.1))
                 .cornerRadius(12)
@@ -729,10 +729,7 @@ struct DiveDetailView: View {
             loadedTeammateIds = detail.teammateIds
             loadedEquipmentIds = detail.equipmentIds
             sourceDeviceMap = detail.sourceDeviceMap
-            sourceCount = max(
-                Set(detail.sourceFingerprints.map(\.deviceId)).count,
-                detail.sourceDeviceMap.count
-            )
+            sourceCount = detail.sourceDeviceMap.count
             if selectedDeviceId == nil {
                 selectedDeviceId = dive.deviceId
             }

@@ -383,11 +383,8 @@ public final class DiveService: Sendable {
                     .filter(deviceIds.contains(Column("id")))
                     .fetchAll(db)
                 for device in devices {
-                    let name = device.serialNumber != "unknown"
-                        ? "\(device.displayName) (\(device.serialNumber))"
-                        : device.displayName
-                    sourceDeviceNames.append(name)
-                    sourceDeviceMap[device.id] = name
+                    sourceDeviceNames.append(device.detailDisplayName)
+                    sourceDeviceMap[device.id] = device.detailDisplayName
                 }
             }
 
@@ -398,10 +395,7 @@ public final class DiveService: Sendable {
                     .filter(sampleDeviceIds.contains(Column("id")))
                     .fetchAll(db)
                 for device in extraDevices {
-                    let name = device.serialNumber != "unknown"
-                        ? "\(device.displayName) (\(device.serialNumber))"
-                        : device.displayName
-                    sourceDeviceMap[device.id] = name
+                    sourceDeviceMap[device.id] = device.detailDisplayName
                 }
             }
 

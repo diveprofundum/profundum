@@ -693,6 +693,176 @@ final class DivelogCoreTests: XCTestCase {
         XCTAssertTrue(detail.sourceDeviceMap.values.first?.contains("Detail Test") ?? false)
     }
 
+    func testGetDiveDetail_multiDevice_sampleOnlyDevice() throws {
+        // Device A has a fingerprint, device B only appears in samples
+        let deviceA = Device(model: "Petrel 3", serialNumber: "AAA1", firmwareVersion: "1.0", manufacturer: "Shearwater")
+        let deviceB = Device(model: "Perdix AI", serialNumber: "BBB2", firmwareVersion: "2.0", manufacturer: "Shearwater")
+        try diveService.saveDevice(deviceA)
+        try diveService.saveDevice(deviceB)
+
+        let dive = Dive(
+            deviceId: deviceA.id,
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000
+        )
+        try diveService.saveDive(dive, tags: [], teammateIds: [], equipmentIds: [])
+
+        // Samples from both devices
+        let samples = [
+            DiveSample(diveId: dive.id, deviceId: deviceA.id, tSec: 0, depthM: 0.0, tempC: 22.0),
+            DiveSample(diveId: dive.id, deviceId: deviceB.id, tSec: 0, depthM: 0.0, tempC: 22.0),
+            DiveSample(diveId: dive.id, deviceId: deviceA.id, tSec: 60, depthM: 15.0, tempC: 20.0),
+            DiveSample(diveId: dive.id, deviceId: deviceB.id, tSec: 60, depthM: 15.0, tempC: 20.0),
+        ]
+        try diveService.saveSamples(samples)
+
+        // Only device A has a fingerprint
+        try diveService.saveSourceFingerprints([
+            DiveSourceFingerprint(diveId: dive.id, deviceId: deviceA.id, fingerprint: Data([0x01]))
+        ])
+
+        let detail = try diveService.getDiveDetail(diveId: dive.id)
+
+        // sourceDeviceMap should contain BOTH devices (A from fingerprint, B from samples)
+        XCTAssertEqual(detail.sourceDeviceMap.count, 2)
+        XCTAssertNotNil(detail.sourceDeviceMap[deviceA.id])
+        XCTAssertNotNil(detail.sourceDeviceMap[deviceB.id])
+        XCTAssertTrue(detail.sourceDeviceMap[deviceA.id]?.contains("Petrel 3") ?? false)
+        XCTAssertTrue(detail.sourceDeviceMap[deviceB.id]?.contains("Perdix AI") ?? false)
+
+        // sourceDeviceNames only includes fingerprint devices (device A)
+        XCTAssertEqual(detail.sourceDeviceNames.count, 1)
+
+        // Filtering by device A should only return device A's samples
+        let filteredA = detail.samples.filter { $0.deviceId == deviceA.id }
+        XCTAssertEqual(filteredA.count, 2)
+
+        // Filtering by device B should only return device B's samples
+        let filteredB = detail.samples.filter { $0.deviceId == deviceB.id }
+        XCTAssertEqual(filteredB.count, 2)
+    }
+
+    func testGetDiveDetail_multiDevice_equalSampleCounts() throws {
+        // Two devices with same number of samples — verifies data is distinguishable
+        let deviceA = Device(model: "Petrel 3", serialNumber: "AAA1", firmwareVersion: "1.0")
+        let deviceB = Device(model: "Perdix AI", serialNumber: "BBB2", firmwareVersion: "2.0")
+        try diveService.saveDevice(deviceA)
+        try diveService.saveDevice(deviceB)
+
+        let dive = Dive(
+            deviceId: deviceA.id,
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            isCcr: true
+        )
+        try diveService.saveDive(dive, tags: [], teammateIds: [], equipmentIds: [])
+
+        // Both devices have 3 samples each (equal count)
+        // Device A has setpoint 0.7, device B has setpoint 1.2
+        let samples = [
+            DiveSample(diveId: dive.id, deviceId: deviceA.id, tSec: 0, depthM: 0.0, tempC: 22.0, setpointPpo2: 0.7),
+            DiveSample(diveId: dive.id, deviceId: deviceB.id, tSec: 0, depthM: 0.0, tempC: 22.0, setpointPpo2: 1.2),
+            DiveSample(diveId: dive.id, deviceId: deviceA.id, tSec: 60, depthM: 15.0, tempC: 20.0, setpointPpo2: 0.7),
+            DiveSample(diveId: dive.id, deviceId: deviceB.id, tSec: 60, depthM: 15.0, tempC: 20.0, setpointPpo2: 1.2),
+            DiveSample(diveId: dive.id, deviceId: deviceA.id, tSec: 120, depthM: 30.0, tempC: 18.0, setpointPpo2: 0.7),
+            DiveSample(diveId: dive.id, deviceId: deviceB.id, tSec: 120, depthM: 30.0, tempC: 18.0, setpointPpo2: 1.2),
+        ]
+        try diveService.saveSamples(samples)
+
+        try diveService.saveSourceFingerprints([
+            DiveSourceFingerprint(diveId: dive.id, deviceId: deviceA.id, fingerprint: Data([0x01])),
+            DiveSourceFingerprint(diveId: dive.id, deviceId: deviceB.id, fingerprint: Data([0x02])),
+        ])
+
+        let detail = try diveService.getDiveDetail(diveId: dive.id)
+
+        // Both devices should be in the map
+        XCTAssertEqual(detail.sourceDeviceMap.count, 2)
+        XCTAssertEqual(detail.samples.count, 6)
+
+        // Filtering produces equal-sized arrays with different data
+        let filteredA = detail.samples.filter { $0.deviceId == deviceA.id }
+        let filteredB = detail.samples.filter { $0.deviceId == deviceB.id }
+        XCTAssertEqual(filteredA.count, 3)
+        XCTAssertEqual(filteredB.count, 3)
+
+        // Setpoints are distinct per device — this is the oscillation scenario
+        XCTAssertTrue(filteredA.allSatisfy { $0.setpointPpo2 == 0.7 })
+        XCTAssertTrue(filteredB.allSatisfy { $0.setpointPpo2 == 1.2 })
+    }
+
+    func testGetDiveDetail_noFingerprints_deviceFromSamplesOnly() throws {
+        // Edge case: dive has no fingerprints at all, only sample device_ids
+        let device = Device(model: "OSTC", serialNumber: "unknown", firmwareVersion: "1.0")
+        try diveService.saveDevice(device)
+
+        let dive = Dive(
+            deviceId: device.id,
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 20.0,
+            avgDepthM: 12.0,
+            bottomTimeSec: 2000
+        )
+        try diveService.saveDive(dive, tags: [], teammateIds: [], equipmentIds: [])
+
+        let samples = [
+            DiveSample(diveId: dive.id, deviceId: device.id, tSec: 0, depthM: 0.0, tempC: 22.0),
+            DiveSample(diveId: dive.id, deviceId: device.id, tSec: 60, depthM: 10.0, tempC: 20.0),
+        ]
+        try diveService.saveSamples(samples)
+
+        // No fingerprints saved
+
+        let detail = try diveService.getDiveDetail(diveId: dive.id)
+
+        // sourceDeviceMap should still pick up device from samples
+        XCTAssertEqual(detail.sourceDeviceMap.count, 1)
+        XCTAssertEqual(detail.sourceDeviceMap[device.id], "OSTC")  // "unknown" serial omitted
+        XCTAssertEqual(detail.sourceDeviceNames.count, 0)  // no fingerprints → no names
+        XCTAssertEqual(detail.sourceFingerprints.count, 0)
+    }
+
+    func testGetDiveDetail_samplesWithNilDeviceId() throws {
+        // Edge case: samples with nil device_id should not appear in sourceDeviceMap
+        let device = Device(model: "Petrel 3", serialNumber: "AAA1", firmwareVersion: "1.0")
+        try diveService.saveDevice(device)
+
+        let dive = Dive(
+            deviceId: device.id,
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000
+        )
+        try diveService.saveDive(dive, tags: [], teammateIds: [], equipmentIds: [])
+
+        // Mix of nil and non-nil device IDs
+        let samples = [
+            DiveSample(diveId: dive.id, deviceId: nil, tSec: 0, depthM: 0.0, tempC: 22.0),
+            DiveSample(diveId: dive.id, deviceId: device.id, tSec: 60, depthM: 15.0, tempC: 20.0),
+            DiveSample(diveId: dive.id, deviceId: nil, tSec: 120, depthM: 30.0, tempC: 18.0),
+        ]
+        try diveService.saveSamples(samples)
+
+        try diveService.saveSourceFingerprints([
+            DiveSourceFingerprint(diveId: dive.id, deviceId: device.id, fingerprint: Data([0x01]))
+        ])
+
+        let detail = try diveService.getDiveDetail(diveId: dive.id)
+
+        // Only one device in the map (nil device_ids are ignored by compactMap)
+        XCTAssertEqual(detail.sourceDeviceMap.count, 1)
+        XCTAssertNotNil(detail.sourceDeviceMap[device.id])
+    }
+
     // MARK: - Export Tests
 
     func testExportDivesSubset() throws {
