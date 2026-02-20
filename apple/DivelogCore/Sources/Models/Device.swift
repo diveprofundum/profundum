@@ -60,6 +60,13 @@ public struct Device: Identifiable, Equatable, Hashable, Sendable {
         }
         return model
     }
+
+    /// Display name with serial number appended when available (e.g. "Petrel 3 (A31F4CE2)").
+    public var detailDisplayName: String {
+        serialNumber != "unknown"
+            ? "\(displayName) (\(serialNumber))"
+            : displayName
+    }
 }
 
 // MARK: - GRDB Conformance

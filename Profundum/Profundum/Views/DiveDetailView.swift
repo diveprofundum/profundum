@@ -13,8 +13,8 @@ struct DiveDetailView: View {
     @State private var loadedTeammateIds: [String] = []
     @State private var loadedEquipmentIds: [String] = []
     @State private var sourceCount: Int = 0
-    @State private var sourceDeviceNames: [String] = []
-    @State private var showSourceDevices = false
+    @State private var sourceDeviceMap: [String: String] = [:]
+    @State private var selectedDeviceId: String?
     @State private var surfaceIntervalSec: Int64?
     @State private var formulaResults: [(name: String, value: Double)] = []
     @State private var errorMessage: String?
@@ -63,6 +63,13 @@ struct DiveDetailView: View {
 
     private var hasTankPressureData: Bool {
         samples.contains { $0.tankPressure1Bar != nil || $0.tankPressure2Bar != nil }
+    }
+
+    /// Samples filtered to the selected device for chart display.
+    private var chartSamples: [DiveSample] {
+        guard let deviceId = selectedDeviceId else { return samples }
+        let filtered = samples.filter { $0.deviceId == deviceId }
+        return filtered.isEmpty ? samples : filtered
     }
 
     var body: some View {
@@ -232,29 +239,25 @@ struct DiveDetailView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     if sourceCount > 1 {
-                        Button {
-                            showSourceDevices = true
-                        } label: {
-                            Badge(text: "\(sourceCount) computers", color: .purple)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Dive recorded by \(sourceCount) computers")
-                        .popover(isPresented: $showSourceDevices) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Source Computers")
-                                    .font(.headline)
-                                    .padding(.bottom, 2)
-                                ForEach(sourceDeviceNames, id: \.self) { name in
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "cpu")
-                                            .foregroundColor(.secondary)
+                        Menu {
+                            ForEach(
+                                sourceDeviceMap.sorted(by: { $0.value < $1.value }),
+                                id: \.key
+                            ) { deviceId, name in
+                                Button {
+                                    selectedDeviceId = deviceId
+                                } label: {
+                                    if deviceId == selectedDeviceId {
+                                        Label(name, systemImage: "checkmark")
+                                    } else {
                                         Text(name)
                                     }
                                 }
                             }
-                            .padding()
-                            .frame(minWidth: 200)
+                        } label: {
+                            Badge(text: "\(sourceCount) computers", color: .purple)
                         }
+                        .accessibilityLabel("Select source computer for chart")
                     }
 
                     ForEach(predefinedTags, id: \.self) { tag in
@@ -399,7 +402,7 @@ struct DiveDetailView: View {
             }
 
             DepthProfileChart(
-                samples: samples,
+                samples: chartSamples,
                 depthUnit: appState.depthUnit,
                 temperatureUnit: appState.temperatureUnit,
                 showTemperature: showTemperature,
@@ -422,7 +425,7 @@ struct DiveDetailView: View {
         #if os(iOS)
         .fullScreenCover(isPresented: $showFullscreenChart) {
             DepthProfileFullscreenView(
-                samples: samples,
+                samples: chartSamples,
                 depthUnit: appState.depthUnit,
                 temperatureUnit: appState.temperatureUnit,
                 gasMixes: gasMixes,
@@ -432,7 +435,7 @@ struct DiveDetailView: View {
         #else
         .sheet(isPresented: $showFullscreenChart) {
             DepthProfileFullscreenView(
-                samples: samples,
+                samples: chartSamples,
                 depthUnit: appState.depthUnit,
                 temperatureUnit: appState.temperatureUnit,
                 gasMixes: gasMixes,
@@ -565,7 +568,7 @@ struct DiveDetailView: View {
             Text("PPO2 Sensors")
                 .font(.headline)
 
-            PPO2Chart(samples: samples)
+            PPO2Chart(samples: chartSamples)
                 .frame(height: 160)
                 .background(Color.gray.opacity(0.1))
                 .cornerRadius(12)
@@ -725,8 +728,11 @@ struct DiveDetailView: View {
             gasMixes = detail.gasMixes
             loadedTeammateIds = detail.teammateIds
             loadedEquipmentIds = detail.equipmentIds
-            sourceCount = Set(detail.sourceFingerprints.map(\.deviceId)).count
-            sourceDeviceNames = detail.sourceDeviceNames
+            sourceDeviceMap = detail.sourceDeviceMap
+            sourceCount = detail.sourceDeviceMap.count
+            if selectedDeviceId == nil {
+                selectedDeviceId = dive.deviceId
+            }
 
             let diveInput = DiveInput(
                 startTimeUnix: dive.startTimeUnix,
