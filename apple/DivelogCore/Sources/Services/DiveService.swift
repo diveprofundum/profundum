@@ -340,6 +340,8 @@ public final class DiveService: Sendable {
         public let equipmentIds: [String]
         public let sourceFingerprints: [DiveSourceFingerprint]
         public let sourceDeviceNames: [String]
+        /// Maps device ID → human-readable display name for all source devices.
+        public let sourceDeviceMap: [String: String]
     }
 
     /// Load all dive relations in a single read transaction (eliminates N+1 queries).
@@ -373,16 +375,33 @@ public final class DiveService: Sendable {
                 .fetchAll(db)
 
             // Batch-fetch device names for all source fingerprint device IDs
-            let deviceIds = Array(Set(sourceFingerprints.map(\.deviceId)))
+            let deviceIds = Set(sourceFingerprints.map(\.deviceId))
             var sourceDeviceNames: [String] = []
+            var sourceDeviceMap: [String: String] = [:]
             if !deviceIds.isEmpty {
                 let devices = try Device
                     .filter(deviceIds.contains(Column("id")))
                     .fetchAll(db)
-                sourceDeviceNames = devices.map { device in
-                    device.serialNumber != "unknown"
+                for device in devices {
+                    let name = device.serialNumber != "unknown"
                         ? "\(device.displayName) (\(device.serialNumber))"
                         : device.displayName
+                    sourceDeviceNames.append(name)
+                    sourceDeviceMap[device.id] = name
+                }
+            }
+
+            // Also include devices referenced by samples but not in fingerprints
+            let sampleDeviceIds = Set(samples.compactMap(\.deviceId)).subtracting(deviceIds)
+            if !sampleDeviceIds.isEmpty {
+                let extraDevices = try Device
+                    .filter(sampleDeviceIds.contains(Column("id")))
+                    .fetchAll(db)
+                for device in extraDevices {
+                    let name = device.serialNumber != "unknown"
+                        ? "\(device.displayName) (\(device.serialNumber))"
+                        : device.displayName
+                    sourceDeviceMap[device.id] = name
                 }
             }
 
@@ -393,7 +412,8 @@ public final class DiveService: Sendable {
                 teammateIds: teammateIds,
                 equipmentIds: equipmentIds,
                 sourceFingerprints: sourceFingerprints,
-                sourceDeviceNames: sourceDeviceNames
+                sourceDeviceNames: sourceDeviceNames,
+                sourceDeviceMap: sourceDeviceMap
             )
         }
     }

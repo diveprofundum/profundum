@@ -689,6 +689,8 @@ final class DivelogCoreTests: XCTestCase {
         XCTAssertEqual(detail.sourceFingerprints.count, 1)
         XCTAssertEqual(detail.sourceDeviceNames.count, 1)
         XCTAssertTrue(detail.sourceDeviceNames.first?.contains("Detail Test") ?? false)
+        XCTAssertEqual(detail.sourceDeviceMap.count, 1)
+        XCTAssertTrue(detail.sourceDeviceMap.values.first?.contains("Detail Test") ?? false)
     }
 
     // MARK: - Export Tests
