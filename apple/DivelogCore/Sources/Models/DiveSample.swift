@@ -115,3 +115,14 @@ extension DiveSample: Codable, FetchableRecord, PersistableRecord {
 extension DiveSample {
     static let dive = belongsTo(Dive.self)
 }
+
+// MARK: - Cache Key
+
+extension Array where Element == DiveSample {
+    /// Lightweight O(1) identity key for change detection — avoids deep array comparison.
+    /// Uses first/last sample IDs plus count, which changes on any realistic data swap
+    /// (device switch, reload, append/remove). Assumes sample IDs are unique and stable.
+    public var cacheKey: String {
+        "\(first?.id ?? "")-\(last?.id ?? "")-\(count)"
+    }
+}

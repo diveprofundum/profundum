@@ -711,11 +711,6 @@ struct DepthProfileChart: View {
     @State private var chartData: DepthProfileChartData?
     @State private var selectedTime: Float?
 
-    /// Lightweight identity key for sample data — avoids deep array comparison.
-    private var sampleCacheKey: String {
-        "\(samples.first?.id ?? "")-\(samples.last?.id ?? "")-\(samples.count)"
-    }
-
     private var selectedPoint: DepthDataPoint? {
         guard let selectedTime, let data = chartData else { return nil }
         return data.nearestDepthPoint(to: selectedTime)
@@ -864,7 +859,7 @@ struct DepthProfileChart: View {
         .onAppear {
             buildChartData()
         }
-        .onChange(of: sampleCacheKey) { _, _ in
+        .onChange(of: samples.cacheKey) { _, _ in
             buildChartData()
         }
         .onChange(of: depthUnit) { _, _ in
