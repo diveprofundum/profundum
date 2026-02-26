@@ -421,7 +421,7 @@ private func parseDiveData(
     }
 
     // Commit the final in-progress sample
-    if sampleContext.currentTime > 0 || !sampleContext.samples.isEmpty {
+    if sampleContext.currentTime >= 0 || !sampleContext.samples.isEmpty {
         sampleContext.commitCurrentSample()
     }
 
@@ -480,7 +480,7 @@ private func parseDiveData(
 
 private struct SampleCallbackContext {
     var samples: [ParsedSample] = []
-    var currentTime: Int32 = 0
+    var currentTime: Int32 = -1
     var currentDepth: Float = 0
     var currentTemp: Float = 0
     var currentSetpoint: Float?
@@ -553,7 +553,7 @@ private func sampleCallback(
 
     switch type {
     case DC_SAMPLE_TIME:
-        if ctx.pointee.currentTime > 0 || !ctx.pointee.samples.isEmpty {
+        if ctx.pointee.currentTime >= 0 || !ctx.pointee.samples.isEmpty {
             ctx.pointee.commitCurrentSample()
         }
         // libdivecomputer reports time in milliseconds; convert to seconds
