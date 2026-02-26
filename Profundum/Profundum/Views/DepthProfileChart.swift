@@ -859,7 +859,7 @@ struct DepthProfileChart: View {
         .onAppear {
             buildChartData()
         }
-        .onChange(of: samples.count) { _, _ in
+        .onChange(of: samples.cacheKey) { _, _ in
             buildChartData()
         }
         .onChange(of: depthUnit) { _, _ in
@@ -868,7 +868,7 @@ struct DepthProfileChart: View {
         .onChange(of: temperatureUnit) { _, _ in
             buildChartData()
         }
-        .onChange(of: gasMixes.count) { _, _ in
+        .onChange(of: gasMixes) { _, _ in
             buildChartData()
         }
         .onChange(of: showSurfGf) { _, newValue in
