@@ -98,6 +98,63 @@ final class ClipSurfaceTimeoutTests: XCTestCase {
         XCTAssertEqual(clipped.endTimeUnix, dive.endTimeUnix)
     }
 
+    func testClippingRecalculatesAvgDepthFromClippedSamples() {
+        // Last 2 surface samples should be clipped.
+        // Remaining intervals:
+        // [0,10] at 20m and [10,20] at 30m => (20*10 + 30*10) / 20 = 25
+        let samples: [ParsedSample] = [
+            makeSample(tSec: 0, depthM: 20.0),
+            makeSample(tSec: 10, depthM: 30.0),
+            makeSample(tSec: 20, depthM: 10.0), // Last > 1.0m
+            makeSample(tSec: 30, depthM: 0.0),  // Padding
+            makeSample(tSec: 40, depthM: 0.0),  // Padding
+        ]
+
+        var dive = makeDive(bottomTimeSec: 40, samples: samples)
+        dive.avgDepthM = 99.0
+
+        let clipped = DiveDataMapper.clipSurfaceTimeout(dive)
+
+        XCTAssertEqual(clipped.samples.count, 3)
+        XCTAssertEqual(clipped.avgDepthM, 25.0, accuracy: 0.0001)
+        XCTAssertNotEqual(clipped.avgDepthM, dive.avgDepthM)
+    }
+
+    func testNoClippingKeepsAvgDepthUnchanged() {
+        // Last sample is still deeper than threshold, so no clipping should occur.
+        let samples: [ParsedSample] = [
+            makeSample(tSec: 0, depthM: 5.0),
+            makeSample(tSec: 10, depthM: 15.0),
+            makeSample(tSec: 20, depthM: 2.0), // Last > 1.0m
+        ]
+
+        var dive = makeDive(bottomTimeSec: 20, samples: samples)
+        dive.avgDepthM = 12.34
+
+        let clipped = DiveDataMapper.clipSurfaceTimeout(dive)
+
+        XCTAssertEqual(clipped.samples.count, samples.count)
+        XCTAssertEqual(clipped.avgDepthM, 12.34, accuracy: 0.0001)
+    }
+
+    func testAvgDepthUsesTimeWeightedIntervals() {
+        // Known time-weighted average check with uneven intervals.
+        // Clipped samples are at t=[0,3,13]:
+        // dt=[3,10], depths=[12,18] => (12*3 + 18*10) / 13 = 216/13
+        let samples: [ParsedSample] = [
+            makeSample(tSec: 0, depthM: 12.0),
+            makeSample(tSec: 3, depthM: 18.0),
+            makeSample(tSec: 13, depthM: 6.0),  // Last > 1.0m
+            makeSample(tSec: 18, depthM: 0.0),  // Padding
+        ]
+
+        let dive = makeDive(bottomTimeSec: 18, samples: samples)
+        let clipped = DiveDataMapper.clipSurfaceTimeout(dive)
+
+        let expected: Float = 216.0 / 13.0
+        XCTAssertEqual(clipped.avgDepthM, expected, accuracy: 0.0001)
+    }
+
     func testEmptySamplesReturnsUnchanged() {
         let dive = makeDive(samples: [])
         let clipped = DiveDataMapper.clipSurfaceTimeout(dive)
@@ -187,7 +244,7 @@ final class ClipSurfaceTimeoutTests: XCTestCase {
         let samples: [ParsedSample] = [
             makeSample(tSec: 0, depthM: 0.0),
             makeSample(tSec: 300, depthM: 20.0),
-            makeSample(tSec: 600, depthM: 0.0),
+            makeSample(tSec: 600, depthM: 2.0),
         ]
 
         let dive = ParsedDive(

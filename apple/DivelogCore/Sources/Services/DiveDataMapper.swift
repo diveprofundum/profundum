@@ -181,7 +181,8 @@ public enum DiveDataMapper {
     ///
     /// Shearwater computers stay in dive mode for up to 10 minutes after surfacing.
     /// This finds the last sample where `depthM > surfaceThresholdM` and clips
-    /// everything after it, recalculating `endTimeUnix` and `bottomTimeSec`.
+    /// everything after it, recalculating `endTimeUnix`, `bottomTimeSec`, and
+    /// `avgDepthM` (time-weighted from clipped samples).
     ///
     /// Mid-dive surface intervals are preserved because we find the *last* descent,
     /// not the first surface.
@@ -200,7 +201,29 @@ public enum DiveDataMapper {
         clipped.samples = Array(dive.samples[0...lastDeepIndex])
         clipped.bottomTimeSec = dive.samples[lastDeepIndex].tSec
         clipped.endTimeUnix = dive.startTimeUnix + Int64(clipped.bottomTimeSec)
+        if let recalculatedAvgDepthM = timeWeightedAvgDepthM(clipped.samples) {
+            clipped.avgDepthM = recalculatedAvgDepthM
+        }
         return clipped
+    }
+
+    private static func timeWeightedAvgDepthM(_ samples: [ParsedSample]) -> Float? {
+        guard samples.count >= 2 else { return nil }
+
+        var weightedDepthSumM: Float = 0
+        var totalDurationSec: Float = 0
+
+        for idx in 0 ..< (samples.count - 1) {
+            let dtSec = samples[idx + 1].tSec - samples[idx].tSec
+            guard dtSec > 0 else { continue }
+
+            let dt = Float(dtSec)
+            weightedDepthSumM += samples[idx].depthM * dt
+            totalDurationSec += dt
+        }
+
+        guard totalDurationSec > 0 else { return nil }
+        return weightedDepthSumM / totalDurationSec
     }
 
     /// Converts a `ParsedDive` into a `Dive`, its `[DiveSample]`, and `[GasMix]`.
