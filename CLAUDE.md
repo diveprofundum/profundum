@@ -186,6 +186,28 @@ Variables available for segment formulas:
 - Thresholds: 95% project (both Rust and Swift), 90% patch (new code)
 - Install locally: `cargo install cargo-llvm-cov`
 
+### Validation Suite (required for all code changes)
+
+**Before opening a PR**, run the full validation suite locally:
+
+| Step | Command | Notes |
+|------|---------|-------|
+| 1. Lint | `make lint` | Rust fmt + clippy, SwiftLint strict |
+| 2. Tests | `make test` | Rust + Swift test suites |
+| 3. Build | `xcodebuild build -project Profundum/Profundum.xcodeproj -scheme Profundum -destination 'platform=macOS' -quiet` | macOS build |
+| 4. Security | `make security` | cargo audit + cargo deny |
+| 5. Mutation testing | `make mutants` | Rust compute core (slow, local only) |
+| 6. Version check | `make version-check` | Only if manifests changed |
+
+**After opening the PR**, run code reviews:
+
+| Step | Action | Notes |
+|------|--------|-------|
+| 7. Self-review | Run `/review-pr` skill | Structured review against project checklist |
+| 8. Second-opinion review | Send diff to Codex MCP | Independent review for bugs, edge cases, improvements |
+
+All 8 steps are mandatory. Do not skip any step.
+
 ## Project Phase
 
 **Completed:**

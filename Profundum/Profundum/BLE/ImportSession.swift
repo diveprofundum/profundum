@@ -249,9 +249,20 @@ class ImportSession: ObservableObject {
                         deviceName: device.displayName,
                         autoStopped: autoStopped
                     ))
-                    self.statusMessage = saved > 0
-                        ? "\(saved) new dive\(saved == 1 ? "" : "s") imported from \(device.displayName)."
-                        : "All dives already imported."
+                    if saved > 0 && merged > 0 {
+                        let sp = saved == 1 ? "" : "s"
+                        let mp = merged == 1 ? "" : "s"
+                        self.statusMessage =
+                            "\(saved) new dive\(sp) imported, \(merged) dive\(mp) merged from \(device.displayName)."
+                    } else if saved > 0 {
+                        let sp = saved == 1 ? "" : "s"
+                        self.statusMessage = "\(saved) new dive\(sp) imported from \(device.displayName)."
+                    } else if merged > 0 {
+                        let mp = merged == 1 ? "" : "s"
+                        self.statusMessage = "\(merged) dive\(mp) merged from \(device.displayName)."
+                    } else {
+                        self.statusMessage = "All dives already imported."
+                    }
                 }
             } catch DiveComputerError.cancelled {
                 importLog.info("Import cancelled — dumping I/O trace")
