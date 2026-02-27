@@ -38,6 +38,8 @@ make swift-bindings    # Regenerate UniFFI Swift bindings
 make version-check     # Verify VERSION, Cargo.toml, Xcode project are in sync
 make version-sync V=0.2.0  # Set new version and sync to all manifests
 make verify            # Check XCFramework integrity
+make coverage          # Generate lcov coverage reports (Rust + Swift)
+make coverage-report   # Generate HTML coverage reports
 make clean             # Clean all build artifacts
 make help              # Show all available targets
 ```
@@ -46,6 +48,7 @@ make help              # Show all available targets
 GitHub Actions (`.github/workflows/ci.yml`) with path-filtered jobs:
 - **`rust-lint`** / **`rust-test`** — triggered by changes to `core/**`
 - **`swift-test`** — triggered by changes to `core/**`, `apple/**`, or `Profundum/**` (runs on macOS, rebuilds xcframework)
+- **`coverage`** — collects Rust + Swift coverage, uploads to Codecov (95% project / 90% patch thresholds)
 - **`version-check`** — ensures VERSION file matches all manifests
 
 ### Versioning
@@ -170,6 +173,18 @@ Variables available for segment formulas:
 - **Stateless Rust**: Rust compute core has no state, no storage dependencies
 - **Swift-owned storage**: All CRUD operations and schema migrations are in Swift/GRDB
 - **Permissive licensing**: Prefer MIT/Apache-2.0 dependencies; avoid copyleft in core
+
+## Testing Standards
+
+- **New logic/services** must have unit tests
+- **Bug fixes** should include a regression test
+- **View-layer wiring** covered by manual QA checklist (until UI test infra exists)
+
+### Coverage
+- Local: `make coverage` (lcov in `coverage/`) or `make coverage-report` (HTML)
+- CI: Codecov on every PR with diff comments (blocking)
+- Thresholds: 95% project (both Rust and Swift), 90% patch (new code)
+- Install locally: `cargo install cargo-llvm-cov`
 
 ## Project Phase
 

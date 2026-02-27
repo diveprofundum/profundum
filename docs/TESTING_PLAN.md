@@ -55,4 +55,56 @@ Coverage targets:
 - GitHub Actions with path filtering.
 - Rust tests on Ubuntu runner (`rust-test`, `rust-lint`).
 - Swift tests on macOS-14 runner (`swift-test`).
+- Coverage collection + Codecov upload (`coverage`).
 - Version consistency check (`version-check`).
+
+## Coverage tooling
+
+### Local setup
+
+```bash
+# One-time: install cargo-llvm-cov
+cargo install cargo-llvm-cov
+
+# Generate lcov reports for both Rust and Swift
+make coverage
+# Output: coverage/rust-lcov.info, coverage/swift-lcov.info
+
+# Generate HTML report (Rust only — open in browser)
+make coverage-report
+open coverage/rust-html/index.html
+
+# Run just one language
+make rust-coverage
+make swift-coverage
+```
+
+### CI integration
+
+The `coverage` job in `.github/workflows/ci.yml` runs after `rust-test` and `swift-test` pass:
+
+1. Installs `cargo-llvm-cov` via `taiki-e/install-action` (cached)
+2. Builds xcframework, then runs `make rust-coverage` and `make swift-coverage`
+3. Uploads both lcov files to Codecov with separate `rust` and `swift` flags
+4. `fail_ci_if_error: true` — coverage upload failures block the PR
+
+### Codecov configuration
+
+`codecov.yml` at the repo root defines:
+
+- **Project thresholds**: 95% for both Rust and Swift (with 1% tolerance)
+- **Patch threshold**: 90% — new code in a PR must be at least 90% covered
+- **Flags**: `rust` (covers `core/src/`) and `swift` (covers `apple/DivelogCore/Sources/`)
+- **Ignored paths**: auto-generated code (`RustBridge/Generated/`), untestable code (`DiveComputer/` — requires hardware), tests, UI app, scripts, docs
+
+### Reading coverage reports
+
+- **Codecov PR comments**: every PR gets an inline comment showing overall coverage and diff coverage
+- **Codecov dashboard**: `codecov.io/gh/diveprofundum/profundum` — file-level drill-down, historical trends
+- **Local HTML**: `make coverage-report` generates `coverage/rust-html/index.html` with per-file line highlighting
+
+### Post-merge setup (one-time)
+
+1. Sign up at [codecov.io](https://codecov.io) with the GitHub repo
+2. Copy the upload token to repo Settings → Secrets → `CODECOV_TOKEN`
+3. Optionally add a coverage badge to the README

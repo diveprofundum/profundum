@@ -1,0 +1,30 @@
+coverage:
+  status:
+    project:
+      rust:
+        target: 95%
+        threshold: 1%
+        flags: [rust]
+      swift:
+        target: 95%
+        threshold: 1%
+        flags: [swift]
+    patch:
+      default:
+        target: 90%
+
+flags:
+  rust:
+    paths: [core/src/]
+    carryforward: true
+  swift:
+    paths: [apple/DivelogCore/Sources/]
+    carryforward: true
+
+ignore:
+  - "apple/DivelogCore/Sources/RustBridge/Generated/"
+  - "apple/DivelogCore/Sources/DiveComputer/"
+  - "apple/DivelogCore/Tests/"
+  - "Profundum/"
+  - "scripts/"
+  - "docs/"
