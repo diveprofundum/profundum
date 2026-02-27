@@ -367,8 +367,11 @@ class ImportSession: ObservableObject {
     ) -> Device {
         let bleUuid = peripheral.identifier.uuidString
         let vendorName = discovered.knownComputer?.vendorName
-        let model = vendorName
-            ?? discovered.name
+        // Use BLE advertised name as model (e.g., "Perdix 2", "Petrel 3")
+        // rather than just the vendor name, since libdivecomputer's
+        // descriptor match may return a wrong product name for newer models.
+        let model = discovered.name
+            ?? vendorName
             ?? "Unknown Dive Computer"
 
         // Try to find existing device by BLE UUID
@@ -379,6 +382,11 @@ class ImportSession: ObservableObject {
                 // Backfill manufacturer if not set
                 if (existing.manufacturer ?? "").isEmpty, let vendorName {
                     existing.manufacturer = vendorName
+                }
+                // Backfill model from BLE name if currently generic
+                if Device.genericModelNames.contains(existing.model),
+                   let bleName = discovered.name, !bleName.isEmpty {
+                    existing.model = bleName
                 }
                 do {
                     try diveService?.saveDevice(existing)
@@ -422,7 +430,8 @@ class ImportSession: ObservableObject {
         if let vendor = result.vendorName, !vendor.isEmpty {
             updated.manufacturer = vendor
         }
-        if let product = result.productName, !product.isEmpty {
+        if let product = result.productName, !product.isEmpty,
+           Device.genericModelNames.contains(updated.model) {
             updated.model = product
         }
         updated.lastSyncUnix = Int64(Date().timeIntervalSince1970)
