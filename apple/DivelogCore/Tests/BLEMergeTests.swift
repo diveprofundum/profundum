@@ -109,6 +109,58 @@ final class BLEMergeTests: XCTestCase {
         XCTAssertEqual(samples.count, 2, "Samples should not be duplicated on re-import")
     }
 
+    func testMergeSkipsViaTimeMatchWhenSamplesAlreadyExist() throws {
+        // After a merge, re-importing with a NEW fingerprint (not in
+        // dive_source_fingerprints) should still be skipped because the
+        // time-based match finds the dive and hasSamplesFromDevice is true.
+        let deviceA = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93")
+        let deviceB = Device(model: "Petrel", serialNumber: "B-5678", firmwareVersion: "93")
+        try diveService.saveDevice(deviceA)
+        try diveService.saveDevice(deviceB)
+
+        let parsedA = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            fingerprint: Data([0x01, 0x02]),
+            samples: [ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0)]
+        )
+        try importService.saveImportedDive(parsedA, deviceId: deviceA.id)
+
+        let parsedB = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            fingerprint: Data([0x03, 0x04]),
+            samples: [ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.5)]
+        )
+        let mergeOutcome = try importService.saveImportedDive(parsedB, deviceId: deviceB.id)
+        XCTAssertEqual(mergeOutcome, .merged)
+
+        // Re-import device B with a DIFFERENT fingerprint — bypasses fast-path
+        // fingerprint dedup, hits time-based match → hasSamplesFromDevice → .skipped
+        let parsedB2 = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            fingerprint: Data([0x05, 0x06]),  // New fingerprint
+            samples: [ParsedSample(tSec: 0, depthM: 0.0, tempC: 23.0)]
+        )
+        let skipOutcome = try importService.saveImportedDive(parsedB2, deviceId: deviceB.id)
+        XCTAssertEqual(skipOutcome, .skipped)
+
+        // Sample count unchanged (still 2: one from A, one from B)
+        let dives = try diveService.listDives()
+        let samples = try diveService.getSamples(diveId: dives[0].id)
+        XCTAssertEqual(samples.count, 2)
+    }
+
     func testMergeDeduplicatesGasMixes() throws {
         let deviceA = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93")
         let deviceB = Device(model: "Petrel", serialNumber: "B-5678", firmwareVersion: "93")
@@ -274,5 +326,65 @@ final class BLEMergeTests: XCTestCase {
         let fpB = fps.first(where: { $0.deviceId == deviceB.id })
         XCTAssertNotNil(fpB)
         XCTAssertEqual(fpB?.fingerprint, Data([0x03, 0x04]))
+    }
+
+    // MARK: - Public Helper Coverage
+
+    func testFindExistingDiveByTimePublicWrapper() throws {
+        let deviceA = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93")
+        let deviceB = Device(model: "Petrel", serialNumber: "B-5678", firmwareVersion: "93")
+        try diveService.saveDevice(deviceA)
+        try diveService.saveDevice(deviceB)
+
+        let dive = Dive(
+            deviceId: deviceA.id,
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000
+        )
+        try diveService.saveDive(dive)
+
+        // Different device, within ±300s
+        let found = try importService.findExistingDiveByTime(
+            startTimeUnix: 1700000100, deviceId: deviceB.id
+        )
+        XCTAssertEqual(found, dive.id)
+
+        // Same device — should NOT match
+        let notFound = try importService.findExistingDiveByTime(
+            startTimeUnix: 1700000100, deviceId: deviceA.id
+        )
+        XCTAssertNil(notFound)
+    }
+
+    func testHasSamplesFromDevicePublicWrapper() throws {
+        let deviceA = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93")
+        let deviceB = Device(model: "Petrel", serialNumber: "B-5678", firmwareVersion: "93")
+        try diveService.saveDevice(deviceA)
+        try diveService.saveDevice(deviceB)
+
+        let parsed = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            fingerprint: Data([0x01, 0x02]),
+            samples: [ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0)]
+        )
+        try importService.saveImportedDive(parsed, deviceId: deviceA.id)
+
+        let dives = try diveService.listDives()
+        let diveId = dives[0].id
+
+        // Device A has samples
+        let hasA = try importService.hasSamplesFromDevice(diveId: diveId, deviceId: deviceA.id)
+        XCTAssertTrue(hasA)
+
+        // Device B does not
+        let hasB = try importService.hasSamplesFromDevice(diveId: diveId, deviceId: deviceB.id)
+        XCTAssertFalse(hasB)
     }
 }

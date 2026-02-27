@@ -109,36 +109,25 @@ public final class DiveComputerImportService: Sendable {
     /// - Returns: The import outcome (.saved, .merged, or .skipped).
     @discardableResult
     public func saveImportedDive(_ parsed: ParsedDive, deviceId: String) throws -> ImportOutcome {
-        // Pre-check: fingerprint-based dedup (legacy + source_fingerprints)
-        if let fp = parsed.fingerprint {
-            if let existingDiveId = try findExistingDiveByFingerprint(fingerprint: fp) {
-                try linkFingerprint(fp, deviceId: deviceId, toDiveId: existingDiveId)
-                return .skipped
-            }
-        }
-
-        // Pre-check: time-based cross-source match
+        // Fast path: fingerprint-exact-match → skip without write lock
         if let fp = parsed.fingerprint,
-           let existingDiveId = try findExistingDiveByTime(
-               startTimeUnix: parsed.startTimeUnix, deviceId: deviceId
-           ) {
-            // Check if this device's samples are already merged
-            if try hasSamplesFromDevice(diveId: existingDiveId, deviceId: deviceId) {
-                try linkFingerprint(fp, deviceId: deviceId, toDiveId: existingDiveId)
-                return .skipped
-            }
-            // Merge samples + gas mixes from second computer
-            try mergeSamples(parsed, deviceId: deviceId, intoDiveId: existingDiveId)
-            return .merged
+           let existingDiveId = try findExistingDiveByFingerprint(fingerprint: fp) {
+            try linkFingerprint(fp, deviceId: deviceId, toDiveId: existingDiveId)
+            return .skipped
         }
 
+        // Prepare domain objects outside the write lock (pure mapping)
         let (dive, samples, gasMixes) = DiveDataMapper.toDive(parsed, deviceId: deviceId)
 
         // Deduplicate gas mixes by (o2, he, usage)
         var seenMixes = Set<GasMixKey>()
         var uniqueMixes: [GasMix] = []
         for mix in gasMixes {
-            let key = GasMixKey(o2: Int(mix.o2Fraction * 1000), he: Int(mix.heFraction * 1000), usage: mix.usage)
+            let key = GasMixKey(
+                o2: Int(mix.o2Fraction * 1000),
+                he: Int(mix.heFraction * 1000),
+                usage: mix.usage
+            )
             if seenMixes.insert(key).inserted {
                 uniqueMixes.append(mix)
             }
@@ -148,8 +137,12 @@ public final class DiveComputerImportService: Sendable {
             uniqueMixes[i].mixIndex = i
         }
 
-        try database.dbQueue.write { db in
-            // TOCTOU double-check inside the write transaction
+        // Single write transaction handles merge, skip, and new-dive paths.
+        // Fingerprint dedup is re-checked here (TOCTOU guard against the
+        // read-only fast path above). Time-based merge/skip is checked only
+        // here — no duplicate pre-check outside the transaction.
+        return try database.dbQueue.write { db in
+            // Re-check fingerprint (concurrent insert between fast path and write lock)
             if let fp = dive.fingerprint {
                 if let existingDiveId = try Self.findExistingDiveByFingerprint(
                     fingerprint: fp, db: db
@@ -157,26 +150,30 @@ public final class DiveComputerImportService: Sendable {
                     try Self.insertSourceFingerprint(
                         fp, deviceId: deviceId, diveId: existingDiveId, db: db
                     )
-                    return
-                }
-                if let existingDiveId = try Self.findExistingDiveByTime(
-                    startTimeUnix: dive.startTimeUnix, deviceId: deviceId, db: db
-                ) {
-                    // Inside write txn — re-check for samples before merging
-                    if try Self.hasSamplesFromDevice(diveId: existingDiveId, deviceId: deviceId, db: db) {
-                        try Self.insertSourceFingerprint(
-                            fp, deviceId: deviceId, diveId: existingDiveId, db: db
-                        )
-                        return
-                    }
-                    // Merge path hit inside TOCTOU — merge within this transaction
-                    try Self.mergeSamplesInTransaction(
-                        parsed, deviceId: deviceId, intoDiveId: existingDiveId, db: db
-                    )
-                    return
+                    return .skipped
                 }
             }
 
+            // Time-based cross-source match → merge or skip
+            if let fp = parsed.fingerprint,
+               let existingDiveId = try Self.findExistingDiveByTime(
+                   startTimeUnix: parsed.startTimeUnix, deviceId: deviceId, db: db
+               ) {
+                if try Self.hasSamplesFromDevice(
+                    diveId: existingDiveId, deviceId: deviceId, db: db
+                ) {
+                    try Self.insertSourceFingerprint(
+                        fp, deviceId: deviceId, diveId: existingDiveId, db: db
+                    )
+                    return .skipped
+                }
+                try Self.mergeSamplesInTransaction(
+                    parsed, deviceId: deviceId, intoDiveId: existingDiveId, db: db
+                )
+                return .merged
+            }
+
+            // New dive
             try dive.insert(db)
             let typeTag = PredefinedDiveTag.diveTypeTag(isCcr: dive.isCcr)
             try DiveTag(diveId: dive.id, tag: typeTag.rawValue).insert(db)
@@ -199,9 +196,8 @@ public final class DiveComputerImportService: Sendable {
                     fp, deviceId: deviceId, diveId: dive.id, db: db
                 )
             }
+            return .saved
         }
-
-        return .saved
     }
 
     /// Saves multiple imported dives, skipping duplicates.
@@ -231,24 +227,6 @@ public final class DiveComputerImportService: Sendable {
             .filter(Column("dive_id") == diveId)
             .filter(Column("device_id") == deviceId)
             .fetchCount(db) > 0
-    }
-
-    /// Merges samples and gas mixes from a second computer into an existing dive.
-    private func mergeSamples(_ parsed: ParsedDive, deviceId: String, intoDiveId existingDiveId: String) throws {
-        try database.dbQueue.write { db in
-            // TOCTOU: re-verify time match + re-check hasSamplesFromDevice
-            guard try Self.findExistingDiveByTime(
-                startTimeUnix: parsed.startTimeUnix, deviceId: deviceId, db: db
-            ) != nil else { return }
-            if try Self.hasSamplesFromDevice(diveId: existingDiveId, deviceId: deviceId, db: db) {
-                // Another thread already merged — just link fingerprint
-                if let fp = parsed.fingerprint {
-                    try Self.insertSourceFingerprint(fp, deviceId: deviceId, diveId: existingDiveId, db: db)
-                }
-                return
-            }
-            try Self.mergeSamplesInTransaction(parsed, deviceId: deviceId, intoDiveId: existingDiveId, db: db)
-        }
     }
 
     /// Core merge logic — must be called within a write transaction.
