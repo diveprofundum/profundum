@@ -1097,6 +1097,7 @@ struct DepthProfileChart: View {
             scrubContent
         }
         .chartYScale(domain: data.domainMin ... data.domainMax)
+        .chartXScale(domain: 0 ... data.totalMinutes)
         .chartLegend(.hidden)
         .chartXAxis {
             AxisMarks(values: .automatic) { value in
