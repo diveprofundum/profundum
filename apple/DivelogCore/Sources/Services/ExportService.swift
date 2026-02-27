@@ -49,16 +49,26 @@ public final class ExportService: Sendable {
             let deviceIds = Set(dives.map(\.deviceId))
             let siteIds = Set(dives.compactMap(\.siteId))
 
+            let exportDives = try fetchRelations(for: dives, in: db)
+
+            // Collect referenced buddy and equipment IDs from the exported dives
+            let buddyIds = Set(exportDives.flatMap(\.buddyIds))
+            let equipmentIds = Set(exportDives.flatMap(\.equipmentIds))
+
             return ExportData(
                 version: 1,
                 exportedAt: Date(),
                 description: description,
                 devices: try Device.filter(deviceIds.contains(Column("id"))).fetchAll(db),
                 sites: try Site.filter(siteIds.contains(Column("id"))).fetchAll(db),
-                buddies: [],
-                equipment: [],
+                buddies: buddyIds.isEmpty
+                    ? []
+                    : try Teammate.filter(buddyIds.contains(Column("id"))).fetchAll(db),
+                equipment: equipmentIds.isEmpty
+                    ? []
+                    : try Equipment.filter(equipmentIds.contains(Column("id"))).fetchAll(db),
                 formulas: [],
-                dives: try fetchRelations(for: dives, in: db)
+                dives: exportDives
             )
         }
 
