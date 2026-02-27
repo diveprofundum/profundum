@@ -84,6 +84,11 @@ public struct DiveQuery: Sendable {
             request = request.joining(required: Dive.tags.filter(tagAny.contains(Column("tag"))))
         }
 
+        // Deduplicate rows when join filters produce multiple matches per dive
+        if !tagAny.isEmpty || teammateId != nil {
+            request = request.distinct()
+        }
+
         // Sort by date descending (most recent first)
         request = request.order(Column("start_time_unix").desc)
 
@@ -137,6 +142,11 @@ public struct DiveQuery: Sendable {
         // Tag filter (any of the tags)
         if !tagAny.isEmpty {
             request = request.joining(required: Dive.tags.filter(tagAny.contains(Column("tag"))))
+        }
+
+        // Deduplicate rows when join filters produce multiple matches per dive
+        if !tagAny.isEmpty || teammateId != nil {
+            request = request.distinct()
         }
 
         // Sort by date descending (most recent first)
