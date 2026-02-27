@@ -12,7 +12,6 @@ struct DiveDetailView: View {
     @State private var showEditSheet = false
     @State private var loadedTeammateIds: [String] = []
     @State private var loadedEquipmentIds: [String] = []
-    @State private var sourceCount: Int = 0
     @State private var sourceDeviceMap: [String: String] = [:]
     @State private var selectedDeviceId: String?
     @State private var surfaceIntervalSec: Int64?
@@ -63,6 +62,13 @@ struct DiveDetailView: View {
 
     private var hasTankPressureData: Bool {
         samples.contains { $0.tankPressure1Bar != nil || $0.tankPressure2Bar != nil }
+    }
+
+    /// Devices that actually have sample data for this dive.
+    /// Filters out devices linked only via fingerprint (skipped dives).
+    private var devicesWithSamples: [String: String] {
+        let sampleDeviceIds = Set(samples.compactMap(\.deviceId))
+        return sourceDeviceMap.filter { sampleDeviceIds.contains($0.key) }
     }
 
     /// Samples filtered to the selected device for chart display.
@@ -238,10 +244,20 @@ struct DiveDetailView: View {
             // Tags row
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    if sourceCount > 1 {
+                    if devicesWithSamples.count > 1 {
                         Menu {
+                            Button {
+                                selectedDeviceId = nil
+                            } label: {
+                                if selectedDeviceId == nil {
+                                    Label("All Computers", systemImage: "checkmark")
+                                } else {
+                                    Text("All Computers")
+                                }
+                            }
+                            Divider()
                             ForEach(
-                                sourceDeviceMap.sorted(by: { $0.value < $1.value }),
+                                devicesWithSamples.sorted(by: { $0.value < $1.value }),
                                 id: \.key
                             ) { deviceId, name in
                                 Button {
@@ -255,7 +271,10 @@ struct DiveDetailView: View {
                                 }
                             }
                         } label: {
-                            Badge(text: "\(sourceCount) computers", color: .purple)
+                            Badge(
+                                text: "\(devicesWithSamples.count) computers",
+                                color: .purple
+                            )
                         }
                         .accessibilityLabel("Select source computer for chart")
                     }
@@ -729,7 +748,6 @@ struct DiveDetailView: View {
             loadedTeammateIds = detail.teammateIds
             loadedEquipmentIds = detail.equipmentIds
             sourceDeviceMap = detail.sourceDeviceMap
-            sourceCount = detail.sourceDeviceMap.count
             if selectedDeviceId == nil {
                 selectedDeviceId = dive.deviceId
             }
@@ -945,7 +963,7 @@ struct PPO2Chart: View {
         .onAppear {
             chartData = PPO2ChartData(samples: samples)
         }
-        .onChange(of: samples.count) { _, _ in
+        .onChange(of: samples.cacheKey) { _, _ in
             chartData = PPO2ChartData(samples: samples)
         }
     }
