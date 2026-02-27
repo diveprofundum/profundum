@@ -162,4 +162,66 @@ mod tests {
             }
         ));
     }
+
+    #[test]
+    fn test_binary_op_symbols() {
+        assert_eq!(BinaryOp::Add.symbol(), "+");
+        assert_eq!(BinaryOp::Sub.symbol(), "-");
+        assert_eq!(BinaryOp::Mul.symbol(), "*");
+        assert_eq!(BinaryOp::Div.symbol(), "/");
+        assert_eq!(BinaryOp::Gt.symbol(), ">");
+        assert_eq!(BinaryOp::Lt.symbol(), "<");
+        assert_eq!(BinaryOp::Gte.symbol(), ">=");
+        assert_eq!(BinaryOp::Lte.symbol(), "<=");
+        assert_eq!(BinaryOp::Eq.symbol(), "==");
+        assert_eq!(BinaryOp::Neq.symbol(), "!=");
+        assert_eq!(BinaryOp::And.symbol(), "and");
+        assert_eq!(BinaryOp::Or.symbol(), "or");
+    }
+
+    #[test]
+    fn test_unary_op_symbols() {
+        assert_eq!(UnaryOp::Neg.symbol(), "-");
+        assert_eq!(UnaryOp::Not.symbol(), "not");
+    }
+
+    #[test]
+    fn test_expr_boolean_constructor() {
+        assert!(matches!(Expr::boolean(true), Expr::Boolean(true)));
+        assert!(matches!(Expr::boolean(false), Expr::Boolean(false)));
+    }
+
+    #[test]
+    fn test_expr_unary_constructor() {
+        let expr = Expr::unary(UnaryOp::Neg, Expr::number(5.0));
+        assert!(matches!(
+            expr,
+            Expr::Unary {
+                op: UnaryOp::Neg,
+                ..
+            }
+        ));
+        let expr = Expr::unary(UnaryOp::Not, Expr::boolean(true));
+        assert!(matches!(
+            expr,
+            Expr::Unary {
+                op: UnaryOp::Not,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_expr_function_call_constructor() {
+        let expr = Expr::function_call("min", vec![Expr::number(1.0), Expr::number(2.0)]);
+        assert!(
+            matches!(expr, Expr::FunctionCall { ref name, ref args } if name == "min" && args.len() == 2)
+        );
+    }
+
+    #[test]
+    fn test_expr_ternary_constructor() {
+        let expr = Expr::ternary(Expr::boolean(true), Expr::number(1.0), Expr::number(0.0));
+        assert!(matches!(expr, Expr::Ternary { .. }));
+    }
 }

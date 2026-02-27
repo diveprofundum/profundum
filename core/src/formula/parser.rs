@@ -5,8 +5,8 @@ use nom::{
     combinator::{map, opt, recognize, value},
     multi::separated_list0,
     number::complete::recognize_float,
-    sequence::{delimited, pair, tuple},
-    IResult,
+    sequence::{delimited, pair},
+    IResult, Parser,
 };
 
 use crate::error::FormulaError;
@@ -38,9 +38,9 @@ pub fn parse(input: &str) -> Result<Expr, FormulaError> {
     }
 }
 
-fn ws<'a, F, O>(inner: F) -> impl FnMut(&'a str) -> IResult<&'a str, O>
+fn ws<'a, P, O>(inner: P) -> impl Parser<&'a str, Output = O, Error = nom::error::Error<&'a str>>
 where
-    F: FnMut(&'a str) -> IResult<&'a str, O>,
+    P: Parser<&'a str, Output = O, Error = nom::error::Error<&'a str>>,
 {
     delimited(multispace0, inner, multispace0)
 }
@@ -53,11 +53,11 @@ fn parse_ternary(input: &str) -> IResult<&str, Expr> {
     let (input, condition) = parse_or(input)?;
     let (input, _) = multispace0(input)?;
 
-    if let Ok((input, _)) = char::<&str, nom::error::Error<&str>>('?')(input) {
+    if let Ok((input, _)) = char::<&str, nom::error::Error<&str>>('?').parse(input) {
         let (input, _) = multispace0(input)?;
         let (input, then_expr) = parse_expr(input)?;
         let (input, _) = multispace0(input)?;
-        let (input, _) = char(':')(input)?;
+        let (input, _) = char(':').parse(input)?;
         let (input, _) = multispace0(input)?;
         let (input, else_expr) = parse_expr(input)?;
         Ok((input, Expr::ternary(condition, then_expr, else_expr)))
@@ -72,7 +72,7 @@ fn parse_or(input: &str) -> IResult<&str, Expr> {
 }
 
 fn parse_or_op(input: &str) -> IResult<&str, BinaryOp> {
-    ws(value(BinaryOp::Or, tag_no_case("or")))(input)
+    ws(value(BinaryOp::Or, tag_no_case("or"))).parse(input)
 }
 
 fn parse_and(input: &str) -> IResult<&str, Expr> {
@@ -81,7 +81,7 @@ fn parse_and(input: &str) -> IResult<&str, Expr> {
 }
 
 fn parse_and_op(input: &str) -> IResult<&str, BinaryOp> {
-    ws(value(BinaryOp::And, tag_no_case("and")))(input)
+    ws(value(BinaryOp::And, tag_no_case("and"))).parse(input)
 }
 
 fn parse_comparison(input: &str) -> IResult<&str, Expr> {
@@ -97,7 +97,8 @@ fn parse_comparison_op(input: &str) -> IResult<&str, BinaryOp> {
         value(BinaryOp::Neq, tag("!=")),
         value(BinaryOp::Gt, tag(">")),
         value(BinaryOp::Lt, tag("<")),
-    )))(input)
+    )))
+    .parse(input)
 }
 
 fn parse_additive(input: &str) -> IResult<&str, Expr> {
@@ -109,7 +110,8 @@ fn parse_additive_op(input: &str) -> IResult<&str, BinaryOp> {
     ws(alt((
         value(BinaryOp::Add, char('+')),
         value(BinaryOp::Sub, char('-')),
-    )))(input)
+    )))
+    .parse(input)
 }
 
 fn parse_multiplicative(input: &str) -> IResult<&str, Expr> {
@@ -121,7 +123,8 @@ fn parse_multiplicative_op(input: &str) -> IResult<&str, BinaryOp> {
     ws(alt((
         value(BinaryOp::Mul, char('*')),
         value(BinaryOp::Div, char('/')),
-    )))(input)
+    )))
+    .parse(input)
 }
 
 fn parse_binary_chain<'a, F, G>(
@@ -150,14 +153,14 @@ fn parse_unary(input: &str) -> IResult<&str, Expr> {
     let (input, _) = multispace0(input)?;
 
     // Try negation
-    if let Ok((input, _)) = char::<&str, nom::error::Error<&str>>('-')(input) {
+    if let Ok((input, _)) = char::<&str, nom::error::Error<&str>>('-').parse(input) {
         let (input, _) = multispace0(input)?;
         let (input, expr) = parse_unary(input)?;
         return Ok((input, Expr::unary(UnaryOp::Neg, expr)));
     }
 
     // Try 'not'
-    if let Ok((input, _)) = tag_no_case::<&str, &str, nom::error::Error<&str>>("not")(input) {
+    if let Ok((input, _)) = tag_no_case::<&str, &str, nom::error::Error<&str>>("not").parse(input) {
         let (input, _) = multispace0(input)?;
         let (input, expr) = parse_unary(input)?;
         return Ok((input, Expr::unary(UnaryOp::Not, expr)));
@@ -175,7 +178,8 @@ fn parse_primary(input: &str) -> IResult<&str, Expr> {
         parse_function_call,
         parse_number,
         parse_variable,
-    ))(input)
+    ))
+    .parse(input)
 }
 
 fn parse_parenthesized(input: &str) -> IResult<&str, Expr> {
@@ -183,20 +187,23 @@ fn parse_parenthesized(input: &str) -> IResult<&str, Expr> {
         pair(char('('), multispace0),
         parse_expr,
         pair(multispace0, char(')')),
-    )(input)
+    )
+    .parse(input)
 }
 
 fn parse_boolean(input: &str) -> IResult<&str, Expr> {
     alt((
         value(Expr::Boolean(true), tag_no_case("true")),
         value(Expr::Boolean(false), tag_no_case("false")),
-    ))(input)
+    ))
+    .parse(input)
 }
 
 fn parse_number(input: &str) -> IResult<&str, Expr> {
     map(recognize_float, |s: &str| {
         Expr::Number(s.parse().unwrap_or(0.0))
-    })(input)
+    })
+    .parse(input)
 }
 
 fn parse_variable(input: &str) -> IResult<&str, Expr> {
@@ -206,25 +213,27 @@ fn parse_variable(input: &str) -> IResult<&str, Expr> {
             opt(take_while1(|c: char| c.is_alphanumeric() || c == '_')),
         )),
         |s: &str| Expr::Variable(s.to_string()),
-    )(input)
+    )
+    .parse(input)
 }
 
 fn parse_function_call(input: &str) -> IResult<&str, Expr> {
     let (input, name) = recognize(pair(
         take_while1(|c: char| c.is_alphabetic() || c == '_'),
         opt(take_while1(|c: char| c.is_alphanumeric() || c == '_')),
-    ))(input)?;
+    ))
+    .parse(input)?;
 
     // Must have opening parenthesis immediately after name (with optional whitespace)
     let (input, _) = multispace0(input)?;
-    let (input, _) = char('(')(input)?;
+    let (input, _) = char('(').parse(input)?;
     let (input, _) = multispace0(input)?;
 
     let (input, args) =
-        separated_list0(tuple((multispace0, char(','), multispace0)), parse_expr)(input)?;
+        separated_list0((multispace0, char(','), multispace0), parse_expr).parse(input)?;
 
     let (input, _) = multispace0(input)?;
-    let (input, _) = char(')')(input)?;
+    let (input, _) = char(')').parse(input)?;
 
     Ok((input, Expr::function_call(name, args)))
 }
