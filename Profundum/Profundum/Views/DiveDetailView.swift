@@ -14,6 +14,7 @@ struct DiveDetailView: View {
     @State private var loadedEquipmentIds: [String] = []
     @State private var sourceDeviceMap: [String: String] = [:]
     @State private var selectedDeviceId: String?
+    @State private var hasPickedDevice = false
     @State private var surfaceIntervalSec: Int64?
     @State private var formulaResults: [(name: String, value: Double)] = []
     @State private var errorMessage: String?
@@ -748,8 +749,9 @@ struct DiveDetailView: View {
             loadedTeammateIds = detail.teammateIds
             loadedEquipmentIds = detail.equipmentIds
             sourceDeviceMap = detail.sourceDeviceMap
-            if selectedDeviceId == nil {
+            if !hasPickedDevice {
                 selectedDeviceId = dive.deviceId
+                hasPickedDevice = true
             }
 
             let diveInput = DiveInput(
