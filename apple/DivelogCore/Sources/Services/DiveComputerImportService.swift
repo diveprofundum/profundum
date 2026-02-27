@@ -238,21 +238,25 @@ public final class DiveComputerImportService: Sendable {
         let existingMixes = try GasMix
             .filter(Column("dive_id") == existingDiveId)
             .fetchAll(db)
-        let existingByKey: [GasMixKey: Int] = Dictionary(
-            uniqueKeysWithValues: existingMixes.map {
+        // Use uniquingKeysWith to handle potential duplicate compositions in existing data
+        // (no DB uniqueness constraint). Keep the lowest mixIndex for stability.
+        var mixByKey: [GasMixKey: Int] = Dictionary(
+            existingMixes.map {
                 (GasMixKey(o2: Int($0.o2Fraction * 1000), he: Int($0.heFraction * 1000), usage: $0.usage),
                  $0.mixIndex)
-            }
+            },
+            uniquingKeysWith: { first, _ in first }
         )
         var nextMixIndex = (existingMixes.map(\.mixIndex).max() ?? -1) + 1
 
         var indexRemap: [Int: Int] = [:]
         for m in parsed.gasMixes {
             let key = GasMixKey(o2: Int(m.o2Fraction * 1000), he: Int(m.heFraction * 1000), usage: m.usage)
-            if let existingIdx = existingByKey[key] {
+            if let existingIdx = mixByKey[key] {
                 indexRemap[m.index] = existingIdx
             } else {
                 indexRemap[m.index] = nextMixIndex
+                mixByKey[key] = nextMixIndex
                 try GasMix(
                     diveId: existingDiveId,
                     mixIndex: nextMixIndex,
