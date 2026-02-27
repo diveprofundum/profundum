@@ -233,7 +233,38 @@ public final class DiveComputerImportService: Sendable {
     private static func mergeSamplesInTransaction(
         _ parsed: ParsedDive, deviceId: String, intoDiveId existingDiveId: String, db: Database
     ) throws {
-        // Insert samples with the new device's ID
+        // Build index remap from incoming gas mix indices → persisted indices.
+        // This must happen BEFORE inserting samples so gasmixIndex values are correct.
+        let existingMixes = try GasMix
+            .filter(Column("dive_id") == existingDiveId)
+            .fetchAll(db)
+        let existingByKey: [GasMixKey: Int] = Dictionary(
+            uniqueKeysWithValues: existingMixes.map {
+                (GasMixKey(o2: Int($0.o2Fraction * 1000), he: Int($0.heFraction * 1000), usage: $0.usage),
+                 $0.mixIndex)
+            }
+        )
+        var nextMixIndex = (existingMixes.map(\.mixIndex).max() ?? -1) + 1
+
+        var indexRemap: [Int: Int] = [:]
+        for m in parsed.gasMixes {
+            let key = GasMixKey(o2: Int(m.o2Fraction * 1000), he: Int(m.heFraction * 1000), usage: m.usage)
+            if let existingIdx = existingByKey[key] {
+                indexRemap[m.index] = existingIdx
+            } else {
+                indexRemap[m.index] = nextMixIndex
+                try GasMix(
+                    diveId: existingDiveId,
+                    mixIndex: nextMixIndex,
+                    o2Fraction: m.o2Fraction,
+                    heFraction: m.heFraction,
+                    usage: m.usage
+                ).insert(db)
+                nextMixIndex += 1
+            }
+        }
+
+        // Insert samples with remapped gas mix indices
         for s in parsed.samples {
             try DiveSample(
                 diveId: existingDiveId,
@@ -254,32 +285,9 @@ public final class DiveComputerImportService: Sendable {
                 ndlSec: s.ndlSec,
                 decoStopDepthM: s.decoStopDepthM,
                 rbtSec: s.rbtSec,
-                gasmixIndex: s.gasmixIndex,
+                gasmixIndex: s.gasmixIndex.flatMap { indexRemap[$0] },
                 atPlusFiveTtsMin: s.atPlusFiveTtsMin
             ).insert(db)
-        }
-
-        // Dedup gas mixes against existing ones
-        let existingMixes = try GasMix
-            .filter(Column("dive_id") == existingDiveId)
-            .fetchAll(db)
-        var seenMixes = Set<GasMixKey>(existingMixes.map {
-            GasMixKey(o2: Int($0.o2Fraction * 1000), he: Int($0.heFraction * 1000), usage: $0.usage)
-        })
-        var nextMixIndex = (existingMixes.map(\.mixIndex).max() ?? -1) + 1
-
-        for m in parsed.gasMixes {
-            let key = GasMixKey(o2: Int(m.o2Fraction * 1000), he: Int(m.heFraction * 1000), usage: m.usage)
-            if seenMixes.insert(key).inserted {
-                try GasMix(
-                    diveId: existingDiveId,
-                    mixIndex: nextMixIndex,
-                    o2Fraction: m.o2Fraction,
-                    heFraction: m.heFraction,
-                    usage: m.usage
-                ).insert(db)
-                nextMixIndex += 1
-            }
         }
 
         // Link fingerprint

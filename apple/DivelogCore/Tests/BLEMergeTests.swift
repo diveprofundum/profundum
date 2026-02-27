@@ -328,6 +328,185 @@ final class BLEMergeTests: XCTestCase {
         XCTAssertEqual(fpB?.fingerprint, Data([0x03, 0x04]))
     }
 
+    // MARK: - Gas Mix Index Remap Tests
+
+    func testMergeRemapsGasMixIndicesWhenOrderDiffers() throws {
+        // Computer A: [0: air, 1: nx32], Computer B: [0: nx32, 1: air]
+        // After merge, B's samples referencing index 0 (nx32) should map to persisted index 1,
+        // and B's samples referencing index 1 (air) should map to persisted index 0.
+        let deviceA = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93")
+        let deviceB = Device(model: "Petrel", serialNumber: "B-5678", firmwareVersion: "93")
+        try diveService.saveDevice(deviceA)
+        try diveService.saveDevice(deviceB)
+
+        let parsedA = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            fingerprint: Data([0x01, 0x02]),
+            samples: [
+                ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0, gasmixIndex: 0),
+                ParsedSample(tSec: 60, depthM: 15.0, tempC: 20.0, gasmixIndex: 1),
+            ],
+            gasMixes: [
+                ParsedGasMix(index: 0, o2Fraction: 0.21, heFraction: 0.0),   // air
+                ParsedGasMix(index: 1, o2Fraction: 0.32, heFraction: 0.0),   // nx32
+            ]
+        )
+        try importService.saveImportedDive(parsedA, deviceId: deviceA.id)
+
+        let parsedB = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            fingerprint: Data([0x03, 0x04]),
+            samples: [
+                ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.5, gasmixIndex: 0),   // B's 0 = nx32
+                ParsedSample(tSec: 60, depthM: 15.0, tempC: 20.5, gasmixIndex: 1),  // B's 1 = air
+            ],
+            gasMixes: [
+                ParsedGasMix(index: 0, o2Fraction: 0.32, heFraction: 0.0),   // nx32 (reversed)
+                ParsedGasMix(index: 1, o2Fraction: 0.21, heFraction: 0.0),   // air (reversed)
+            ]
+        )
+        let outcome = try importService.saveImportedDive(parsedB, deviceId: deviceB.id)
+        XCTAssertEqual(outcome, .merged)
+
+        let dives = try diveService.listDives()
+        let mixes = try diveService.getGasMixes(diveId: dives[0].id)
+            .sorted(by: { $0.mixIndex < $1.mixIndex })
+        // Should still be exactly 2 mixes (no duplicates)
+        XCTAssertEqual(mixes.count, 2)
+        XCTAssertEqual(mixes[0].o2Fraction, 0.21, accuracy: 0.001)  // air at index 0
+        XCTAssertEqual(mixes[1].o2Fraction, 0.32, accuracy: 0.001)  // nx32 at index 1
+
+        // B's samples should have remapped indices
+        let samplesB = try diveService.getSamples(diveId: dives[0].id)
+            .filter { $0.deviceId == deviceB.id }
+            .sorted(by: { $0.tSec < $1.tSec })
+        XCTAssertEqual(samplesB[0].gasmixIndex, 1, "B's index 0 (nx32) should remap to persisted index 1")
+        XCTAssertEqual(samplesB[1].gasmixIndex, 0, "B's index 1 (air) should remap to persisted index 0")
+    }
+
+    func testMergeRemapsGasMixIndicesWithNewMix() throws {
+        // Computer A: [0: air], Computer B: [0: air, 1: trimix 21/35]
+        // B's air samples should map to 0, trimix samples should map to 1 (new).
+        let deviceA = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93")
+        let deviceB = Device(model: "Petrel", serialNumber: "B-5678", firmwareVersion: "93")
+        try diveService.saveDevice(deviceA)
+        try diveService.saveDevice(deviceB)
+
+        let parsedA = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            fingerprint: Data([0x01, 0x02]),
+            samples: [
+                ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0, gasmixIndex: 0),
+            ],
+            gasMixes: [
+                ParsedGasMix(index: 0, o2Fraction: 0.21, heFraction: 0.0),
+            ]
+        )
+        try importService.saveImportedDive(parsedA, deviceId: deviceA.id)
+
+        let parsedB = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            fingerprint: Data([0x03, 0x04]),
+            samples: [
+                ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.5, gasmixIndex: 0),   // air
+                ParsedSample(tSec: 60, depthM: 20.0, tempC: 20.0, gasmixIndex: 1),  // trimix
+            ],
+            gasMixes: [
+                ParsedGasMix(index: 0, o2Fraction: 0.21, heFraction: 0.0),    // air (existing)
+                ParsedGasMix(index: 1, o2Fraction: 0.21, heFraction: 0.35),   // trimix 21/35 (new)
+            ]
+        )
+        let outcome = try importService.saveImportedDive(parsedB, deviceId: deviceB.id)
+        XCTAssertEqual(outcome, .merged)
+
+        let dives = try diveService.listDives()
+        let mixes = try diveService.getGasMixes(diveId: dives[0].id)
+            .sorted(by: { $0.mixIndex < $1.mixIndex })
+        XCTAssertEqual(mixes.count, 2)
+        XCTAssertEqual(mixes[0].o2Fraction, 0.21, accuracy: 0.001)
+        XCTAssertEqual(mixes[0].heFraction, 0.0, accuracy: 0.001)
+        XCTAssertEqual(mixes[1].o2Fraction, 0.21, accuracy: 0.001)
+        XCTAssertEqual(mixes[1].heFraction, 0.35, accuracy: 0.001)
+
+        let samplesB = try diveService.getSamples(diveId: dives[0].id)
+            .filter { $0.deviceId == deviceB.id }
+            .sorted(by: { $0.tSec < $1.tSec })
+        XCTAssertEqual(samplesB[0].gasmixIndex, 0, "Air should map to existing index 0")
+        XCTAssertEqual(samplesB[1].gasmixIndex, 1, "Trimix should map to new index 1")
+    }
+
+    func testMergeRemapsGasMixIndicesIdenticalGases() throws {
+        // Both computers have identical gas sets in same order.
+        // Regression: existing behavior should still work.
+        let deviceA = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93")
+        let deviceB = Device(model: "Petrel", serialNumber: "B-5678", firmwareVersion: "93")
+        try diveService.saveDevice(deviceA)
+        try diveService.saveDevice(deviceB)
+
+        let parsedA = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            fingerprint: Data([0x01, 0x02]),
+            samples: [
+                ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0, gasmixIndex: 0),
+                ParsedSample(tSec: 60, depthM: 15.0, tempC: 20.0, gasmixIndex: 1),
+            ],
+            gasMixes: [
+                ParsedGasMix(index: 0, o2Fraction: 0.21, heFraction: 0.0),
+                ParsedGasMix(index: 1, o2Fraction: 0.50, heFraction: 0.0, usage: "oxygen"),
+            ]
+        )
+        try importService.saveImportedDive(parsedA, deviceId: deviceA.id)
+
+        let parsedB = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            fingerprint: Data([0x03, 0x04]),
+            samples: [
+                ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.5, gasmixIndex: 0),
+                ParsedSample(tSec: 60, depthM: 15.0, tempC: 20.5, gasmixIndex: 1),
+            ],
+            gasMixes: [
+                ParsedGasMix(index: 0, o2Fraction: 0.21, heFraction: 0.0),
+                ParsedGasMix(index: 1, o2Fraction: 0.50, heFraction: 0.0, usage: "oxygen"),
+            ]
+        )
+        let outcome = try importService.saveImportedDive(parsedB, deviceId: deviceB.id)
+        XCTAssertEqual(outcome, .merged)
+
+        let dives = try diveService.listDives()
+        let mixes = try diveService.getGasMixes(diveId: dives[0].id)
+        XCTAssertEqual(mixes.count, 2, "No duplicate mixes when gases are identical")
+
+        let samplesB = try diveService.getSamples(diveId: dives[0].id)
+            .filter { $0.deviceId == deviceB.id }
+            .sorted(by: { $0.tSec < $1.tSec })
+        XCTAssertEqual(samplesB[0].gasmixIndex, 0, "Identical order should preserve index 0")
+        XCTAssertEqual(samplesB[1].gasmixIndex, 1, "Identical order should preserve index 1")
+    }
+
     // MARK: - Public Helper Coverage
 
     func testFindExistingDiveByTimePublicWrapper() throws {
