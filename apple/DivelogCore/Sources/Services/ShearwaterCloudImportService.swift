@@ -1090,7 +1090,7 @@ private func _tryParseShearwaterBlob(_ blob: Data) -> ParsedDive? {
         }
 
         // Commit the final in-progress sample
-        if sampleContext.currentTime > 0 || !sampleContext.samples.isEmpty {
+        if sampleContext.currentTime >= 0 || !sampleContext.samples.isEmpty {
             sampleContext.commitCurrentSample()
         }
 
@@ -1098,10 +1098,13 @@ private func _tryParseShearwaterBlob(_ blob: Data) -> ParsedDive? {
         // libdivecomputer doesn't emit these, but Petrel computers store them
         // in each 32-byte PNF dive sample record.
         let pnf = DiveDataMapper.extractPnfSampleFields(blob)
-        if pnf.gf99.count == sampleContext.samples.count {
+        // PNF records don't include a t=0 entry; offset by 1 when t=0 sample is present.
+        let pnfOffset = (sampleContext.samples.first?.tSec == 0
+            && pnf.gf99.count == sampleContext.samples.count - 1) ? 1 : 0
+        if pnf.gf99.count == sampleContext.samples.count - pnfOffset {
             for i in 0 ..< pnf.gf99.count {
-                sampleContext.samples[i].gf99 = pnf.gf99[i]
-                sampleContext.samples[i].atPlusFiveTtsMin = pnf.atPlusFiveTtsMin[i]
+                sampleContext.samples[i + pnfOffset].gf99 = pnf.gf99[i]
+                sampleContext.samples[i + pnfOffset].atPlusFiveTtsMin = pnf.atPlusFiveTtsMin[i]
             }
         }
 
@@ -1162,7 +1165,7 @@ private func findShearwaterDescriptor(context: OpaquePointer) -> OpaquePointer? 
 
 private struct ShearwaterSampleContext {
     var samples: [ParsedSample] = []
-    var currentTime: Int32 = 0
+    var currentTime: Int32 = -1
     var currentDepth: Float = 0
     var currentTemp: Float = 0
     var currentSetpoint: Float?
@@ -1233,7 +1236,7 @@ private func shearwaterSampleCallback(
 
     switch type {
     case DC_SAMPLE_TIME:
-        if ctx.pointee.currentTime > 0 || !ctx.pointee.samples.isEmpty {
+        if ctx.pointee.currentTime >= 0 || !ctx.pointee.samples.isEmpty {
             ctx.pointee.commitCurrentSample()
         }
         // libdivecomputer reports time in milliseconds; convert to seconds
