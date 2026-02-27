@@ -188,10 +188,13 @@ final class CoverageGapTests: XCTestCase {
     }
 
     func testMakeDiveDownloaderFactory() {
-        // Exercise the factory function — returns non-nil when LibDivecomputerFFI is linked
+        // Exercise the factory function — result depends on whether LibDivecomputerFFI is linked
         let downloader = makeDiveDownloader()
-        // In test environment with libdivecomputer available, the factory returns an instance
+        #if canImport(LibDivecomputerFFI)
         XCTAssertNotNil(downloader)
+        #else
+        XCTAssertNil(downloader)
+        #endif
     }
 
     // MARK: - DivelogCompute wrapper (75% → ~100%)
