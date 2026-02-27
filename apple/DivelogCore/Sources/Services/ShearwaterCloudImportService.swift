@@ -1,13 +1,6 @@
 import Foundation
 import GRDB
 
-/// Key for deduplicating gas mixes by composition and usage.
-private struct GasMixKey: Hashable {
-    let o2: Int   // o2Fraction * 1000 as integer for reliable hashing
-    let he: Int   // heFraction * 1000 as integer for reliable hashing
-    let usage: String?
-}
-
 /// Result of a Shearwater Cloud `.db` file import.
 public struct ShearwaterCloudImportResult: Equatable, Sendable {
     public var totalDivesInFile: Int

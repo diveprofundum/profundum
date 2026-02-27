@@ -59,9 +59,9 @@ final class CrossSourceDedupTests: XCTestCase {
             ]
         )
 
-        // BLE import should be skipped as duplicate
-        let saved = try importService.saveImportedDive(bleParsed, deviceId: bleDevice.id)
-        XCTAssertFalse(saved)
+        // BLE import should merge samples into the existing dive
+        let outcome = try importService.saveImportedDive(bleParsed, deviceId: bleDevice.id)
+        XCTAssertEqual(outcome, .merged)
 
         // Only 1 dive should exist
         let dives = try diveService.listDives()
@@ -106,8 +106,8 @@ final class CrossSourceDedupTests: XCTestCase {
             samples: [ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0)]
         )
 
-        let saved = try importService.saveImportedDive(bleParsed, deviceId: bleDevice.id)
-        XCTAssertFalse(saved)
+        let outcome = try importService.saveImportedDive(bleParsed, deviceId: bleDevice.id)
+        XCTAssertEqual(outcome, .merged)
         XCTAssertEqual(try diveService.listDives().count, 1)
     }
 
@@ -128,12 +128,12 @@ final class CrossSourceDedupTests: XCTestCase {
         )
 
         // First import saves the dive
-        let firstSave = try importService.saveImportedDive(parsed, deviceId: device.id)
-        XCTAssertTrue(firstSave)
+        let firstOutcome = try importService.saveImportedDive(parsed, deviceId: device.id)
+        XCTAssertEqual(firstOutcome, .saved)
 
         // Second import with same fingerprint should be caught by fingerprint dedup
-        let secondSave = try importService.saveImportedDive(parsed, deviceId: device.id)
-        XCTAssertFalse(secondSave)
+        let secondOutcome = try importService.saveImportedDive(parsed, deviceId: device.id)
+        XCTAssertEqual(secondOutcome, .skipped)
 
         XCTAssertEqual(try diveService.listDives().count, 1)
     }
@@ -203,8 +203,8 @@ final class CrossSourceDedupTests: XCTestCase {
             samples: [ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0)]
         )
 
-        let saved = try importService.saveImportedDive(bleParsed, deviceId: device2.id)
-        XCTAssertTrue(saved)
+        let outcome = try importService.saveImportedDive(bleParsed, deviceId: device2.id)
+        XCTAssertEqual(outcome, .saved)
         XCTAssertEqual(try diveService.listDives().count, 2)
     }
 
@@ -235,8 +235,8 @@ final class CrossSourceDedupTests: XCTestCase {
         )
 
         try importService.saveImportedDive(parsed1, deviceId: device.id)
-        let saved = try importService.saveImportedDive(parsed2, deviceId: device.id)
-        XCTAssertTrue(saved)
+        let outcome = try importService.saveImportedDive(parsed2, deviceId: device.id)
+        XCTAssertEqual(outcome, .saved)
         XCTAssertEqual(try diveService.listDives().count, 2)
     }
 
@@ -320,8 +320,8 @@ final class CrossSourceDedupTests: XCTestCase {
             fingerprint: Data([0xEE, 0xFF]),
             samples: [ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0)]
         )
-        let savedBoundary = try importService.saveImportedDive(bleParsedAtBoundary, deviceId: bleDevice.id)
-        XCTAssertFalse(savedBoundary, "Dive at exactly 300s offset should be deduped")
+        let boundaryOutcome = try importService.saveImportedDive(bleParsedAtBoundary, deviceId: bleDevice.id)
+        XCTAssertEqual(boundaryOutcome, .merged, "Dive at exactly 300s offset should be merged")
 
         // 301s offset — should NOT match
         let bleParsedBeyond = ParsedDive(
@@ -333,8 +333,8 @@ final class CrossSourceDedupTests: XCTestCase {
             fingerprint: Data([0x11, 0x22]),
             samples: [ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0)]
         )
-        let savedBeyond = try importService.saveImportedDive(bleParsedBeyond, deviceId: bleDevice.id)
-        XCTAssertTrue(savedBeyond, "Dive at 301s offset should be saved as new")
+        let beyondOutcome = try importService.saveImportedDive(bleParsedBeyond, deviceId: bleDevice.id)
+        XCTAssertEqual(beyondOutcome, .saved, "Dive at 301s offset should be saved as new")
     }
 
     // MARK: - Duplicate Fingerprint Linking Is Idempotent
