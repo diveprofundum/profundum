@@ -383,9 +383,10 @@ class ImportSession: ObservableObject {
                 if (existing.manufacturer ?? "").isEmpty, let vendorName {
                     existing.manufacturer = vendorName
                 }
-                // Backfill model from BLE name if currently generic
-                if Device.genericModelNames.contains(existing.model),
-                   let bleName = discovered.name, !bleName.isEmpty {
+                // Always update model from BLE advertised name — it comes
+                // from the device hardware and is more accurate than
+                // libdivecomputer's descriptor match.
+                if let bleName = discovered.name, !bleName.isEmpty {
                     existing.model = bleName
                 }
                 do {
