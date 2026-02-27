@@ -437,11 +437,11 @@ final class DiveComputerTests: XCTestCase {
 
         // First save should succeed
         let firstSave = try importService.saveImportedDive(parsed, deviceId: device.id)
-        XCTAssertTrue(firstSave)
+        XCTAssertEqual(firstSave, .saved)
 
         // Second save with same fingerprint should be skipped
         let secondSave = try importService.saveImportedDive(parsed, deviceId: device.id)
-        XCTAssertFalse(secondSave)
+        XCTAssertEqual(secondSave, .skipped)
 
         // Only one dive should exist
         let dives = try diveService.listDives()
@@ -463,11 +463,11 @@ final class DiveComputerTests: XCTestCase {
 
         // Should save successfully (no dedup without fingerprint)
         let saved = try importService.saveImportedDive(parsed, deviceId: device.id)
-        XCTAssertTrue(saved)
+        XCTAssertEqual(saved, .saved)
 
         // Can save again (no fingerprint = no dedup)
         let savedAgain = try importService.saveImportedDive(parsed, deviceId: device.id)
-        XCTAssertTrue(savedAgain)
+        XCTAssertEqual(savedAgain, .saved)
 
         let dives = try diveService.listDives()
         XCTAssertEqual(dives.count, 2)

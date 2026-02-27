@@ -36,8 +36,10 @@ enum ImportPhase: Equatable {
 
 struct ImportResult: Equatable {
     let newDives: Int
+    let mergedDives: Int
     let skippedDives: Int
     let deviceName: String
+    let autoStopped: Bool
 }
 
 enum ImportError: Equatable {
@@ -82,6 +84,7 @@ class ImportSession: ObservableObject {
     @Published var phase: ImportPhase = .idle
     @Published var statusMessage: String = ""
     @Published var downloadProgress: (current: Int, total: Int?)?
+    @Published var isFirstSync = false
 
     let scanner: BLEScanner
     private var diveService: DiveService?
@@ -144,7 +147,7 @@ class ImportSession: ObservableObject {
         }
     }
 
-    func startImport(forceFullSync: Bool = false) {
+    func startImport(forceFullSync: Bool = false, cutoffTime: Date? = nil) {
         guard case .paired(let device) = phase else { return }
         phase = .importing(device)
         statusMessage = "Preparing to download dives..."
@@ -181,9 +184,7 @@ class ImportSession: ObservableObject {
         // Enable BLE-level logging for real-device debugging
         BLEPeripheralTransport.enableLogging = true
 
-        // Counts mutated on the serial download queue, read after download completes.
-        // Wrapped in a class so closures capture a reference, not a mutable value.
-        let counts = ImportCounts()
+        let tracker = ImportProgressTracker()
 
         downloadTask = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
@@ -194,17 +195,32 @@ class ImportSession: ObservableObject {
                     deviceName: bleName,
                     lastFingerprint: lastFP,
                     onDive: { parsed in
-                        // Save each dive immediately as it arrives
-                        let wasSaved = (try? importService.saveImportedDive(parsed, deviceId: device.id)) ?? false
-                        if wasSaved {
-                            counts.saved += 1
-                        } else {
-                            counts.skipped += 1
+                        // Cutoff check (libdivecomputer enumerates newest-first)
+                        if let cutoff = cutoffTime,
+                           parsed.startTimeUnix < Int64(cutoff.timeIntervalSince1970) {
+                            self.isCancelled = true
+                            return
                         }
-                        let s = counts.saved
-                        let k = counts.skipped
+
+                        // Save each dive immediately as it arrives
+                        let outcome = (try? importService.saveImportedDive(parsed, deviceId: device.id)) ?? .skipped
+                        tracker.record(outcome)
+
+                        // Auto-stop: 10 consecutive skips (only when no explicit cutoff)
+                        if tracker.shouldAutoStop && cutoffTime == nil {
+                            self.isCancelled = true
+                        }
+
+                        let s = tracker.saved
+                        let m = tracker.merged
+                        let k = tracker.skipped
                         Task { @MainActor [weak self] in
-                            self?.statusMessage = "Saved \(s) dive\(s == 1 ? "" : "s") (\(k) skipped)..."
+                            var parts: [String] = []
+                            if s > 0 { parts.append("\(s) saved") }
+                            if m > 0 { parts.append("\(m) merged") }
+                            if k > 0 { parts.append("\(k) skipped") }
+                            let msg = parts.isEmpty ? "Processing..." : parts.joined(separator: ", ") + "..."
+                            self?.statusMessage = msg
                         }
                     },
                     onProgress: { progress in
@@ -221,13 +237,17 @@ class ImportSession: ObservableObject {
                 await self.updateDeviceInfo(device: device, result: result)
 
                 BLEPeripheralTransport.enableLogging = false
-                let saved = counts.saved
-                let skipped = counts.skipped
+                let saved = tracker.saved
+                let merged = tracker.merged
+                let skipped = tracker.skipped
+                let autoStopped = tracker.shouldAutoStop
                 await MainActor.run {
                     self.phase = .completed(ImportResult(
                         newDives: saved,
+                        mergedDives: merged,
                         skippedDives: skipped,
-                        deviceName: device.displayName
+                        deviceName: device.displayName,
+                        autoStopped: autoStopped
                     ))
                     self.statusMessage = saved > 0
                         ? "\(saved) new dive\(saved == 1 ? "" : "s") imported from \(device.displayName)."
@@ -236,17 +256,22 @@ class ImportSession: ObservableObject {
             } catch DiveComputerError.cancelled {
                 importLog.info("Import cancelled — dumping I/O trace")
                 tracingTransport.dumpTrace()
-                let saved = counts.saved
-                let skipped = counts.skipped
+                let saved = tracker.saved
+                let merged = tracker.merged
+                let skipped = tracker.skipped
+                let autoStopped = tracker.shouldAutoStop
                 await MainActor.run {
-                    if saved > 0 {
+                    if saved > 0 || merged > 0 {
                         self.phase = .completed(ImportResult(
                             newDives: saved,
+                            mergedDives: merged,
                             skippedDives: skipped,
-                            deviceName: device.displayName
+                            deviceName: device.displayName,
+                            autoStopped: autoStopped
                         ))
-                        let plural = saved == 1 ? "" : "s"
-                        self.statusMessage = "Cancelled. \(saved) dive\(plural) saved before cancellation."
+                        let total = saved + merged
+                        let plural = total == 1 ? "" : "s"
+                        self.statusMessage = "Cancelled. \(total) dive\(plural) saved before cancellation."
                     } else {
                         self.phase = .paired(device)
                         self.statusMessage = "Download cancelled."
@@ -256,17 +281,22 @@ class ImportSession: ObservableObject {
             } catch {
                 importLog.error("Import failed: \(error.localizedDescription) — dumping I/O trace")
                 tracingTransport.dumpTrace()
-                let saved = counts.saved
-                let skipped = counts.skipped
+                let saved = tracker.saved
+                let merged = tracker.merged
+                let skipped = tracker.skipped
+                let autoStopped = tracker.shouldAutoStop
                 await MainActor.run {
-                    if saved > 0 {
+                    if saved > 0 || merged > 0 {
                         self.phase = .completed(ImportResult(
                             newDives: saved,
+                            mergedDives: merged,
                             skippedDives: skipped,
-                            deviceName: device.displayName
+                            deviceName: device.displayName,
+                            autoStopped: autoStopped
                         ))
-                        let plural = saved == 1 ? "" : "s"
-                        self.statusMessage = "Connection lost. \(saved) dive\(plural) saved before the error."
+                        let total = saved + merged
+                        let plural = total == 1 ? "" : "s"
+                        self.statusMessage = "Connection lost. \(total) dive\(plural) saved before the error."
                     } else {
                         self.phase = .error(.downloadFailed(error.localizedDescription))
                     }
@@ -312,6 +342,8 @@ class ImportSession: ObservableObject {
                 if transport != nil, let peripheral = self.scanner.connectedPeripheral {
                     self.connectionTimeoutTask?.cancel()
                     let device = self.createOrUpdateDevice(for: discovered, peripheral: peripheral)
+                    // Detect first sync (no prior fingerprint for this device)
+                    self.isFirstSync = (try? self.importService?.lastFingerprint(deviceId: device.id)) == nil
                     self.phase = .paired(device)
                     self.statusMessage = "Connected to \(device.displayName)"
                 }
@@ -415,18 +447,4 @@ class ImportSession: ObservableObject {
             importLog.error("Failed to merge devices: \(error.localizedDescription)")
         }
     }
-}
-
-/// Mutable counters shared between the download callbacks and completion handler.
-///
-/// ## Thread Safety
-///
-/// Marked `@unchecked Sendable` because all access happens on
-/// `DiveDownloadService`'s serial `DispatchQueue`. The `onDive` and `onProgress`
-/// callbacks are invoked synchronously within `dc_device_foreach`, which runs
-/// entirely on that serial queue. The completion handler reads the final values
-/// after `download()` returns (still on the same queue), so no data race occurs.
-private final class ImportCounts: @unchecked Sendable {
-    nonisolated(unsafe) var saved = 0
-    nonisolated(unsafe) var skipped = 0
 }

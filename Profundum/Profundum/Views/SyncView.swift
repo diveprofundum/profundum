@@ -12,6 +12,8 @@ struct SyncView: View {
     @State private var isImportingFile = false
     @State private var fileImportProgress: (current: Int, total: Int)?
     @State private var forceFullSync = false
+    @State private var limitDownloadRange = true
+    @State private var cutoffDate = Calendar.current.date(byAdding: .month, value: -6, to: Date()) ?? Date()
 
     var body: some View {
         NavigationStack {
@@ -193,14 +195,36 @@ struct SyncView: View {
                 }
             }
 
-            Toggle("Full Sync", isOn: $forceFullSync)
-                .font(.subheadline)
-                .frame(maxWidth: 250)
-                .accessibilityHint("Downloads all dives instead of only new ones")
+            if session.isFirstSync {
+                VStack(spacing: 8) {
+                    Toggle("Limit download range", isOn: $limitDownloadRange)
+                        .font(.subheadline)
+                        .frame(maxWidth: 250)
+                        .accessibilityHint("Only downloads dives after the selected date")
+
+                    if limitDownloadRange {
+                        DatePicker(
+                            "Download dives from",
+                            selection: $cutoffDate,
+                            in: ...Date(),
+                            displayedComponents: .date
+                        )
+                        .datePickerStyle(.compact)
+                        .font(.subheadline)
+                        .frame(maxWidth: 250)
+                    }
+                }
+            } else {
+                Toggle("Full Sync", isOn: $forceFullSync)
+                    .font(.subheadline)
+                    .frame(maxWidth: 250)
+                    .accessibilityHint("Downloads all dives instead of only new ones")
+            }
 
             HStack(spacing: 12) {
                 Button {
-                    session.startImport(forceFullSync: forceFullSync)
+                    let cutoff: Date? = session.isFirstSync && limitDownloadRange ? cutoffDate : nil
+                    session.startImport(forceFullSync: forceFullSync, cutoffTime: cutoff)
                 } label: {
                     Label("Import Dives", systemImage: "square.and.arrow.down")
                 }
@@ -271,7 +295,7 @@ struct SyncView: View {
                     .frame(maxWidth: 350)
             }
 
-            if result.newDives > 0 || result.skippedDives > 0 {
+            if result.newDives > 0 || result.mergedDives > 0 || result.skippedDives > 0 {
                 VStack(spacing: 8) {
                     if result.newDives > 0 {
                         let plural = result.newDives == 1 ? "" : "s"
@@ -279,6 +303,14 @@ struct SyncView: View {
                             "\(result.newDives) new dive\(plural) imported",
                             systemImage: "plus.circle"
                         )
+                    }
+                    if result.mergedDives > 0 {
+                        let plural = result.mergedDives == 1 ? "" : "s"
+                        Label(
+                            "\(result.mergedDives) dive\(plural) merged (multi-computer)",
+                            systemImage: "arrow.triangle.merge"
+                        )
+                        .foregroundStyle(.secondary)
                     }
                     if result.skippedDives > 0 {
                         let plural = result.skippedDives == 1 ? "" : "s"
@@ -288,6 +320,13 @@ struct SyncView: View {
                         )
                         .foregroundStyle(.secondary)
                     }
+                    if result.autoStopped {
+                        Label(
+                            "Auto-stopped after consecutive duplicates",
+                            systemImage: "stop.circle"
+                        )
+                        .foregroundStyle(.tertiary)
+                    }
                 }
                 .font(.subheadline)
             }
@@ -295,6 +334,7 @@ struct SyncView: View {
             HStack(spacing: 12) {
                 Button("Done") {
                     forceFullSync = false
+                    limitDownloadRange = true
                     session.reset()
                 }
                 .buttonStyle(.borderedProminent)
@@ -302,6 +342,7 @@ struct SyncView: View {
 
                 Button("Scan Again") {
                     forceFullSync = false
+                    limitDownloadRange = true
                     session.reset()
                     session.startScan()
                 }
