@@ -428,10 +428,13 @@ private func parseDiveData(
     // Extract per-sample PNF fields (GF99, @+5 TTS) from raw binary.
     let rawData = Data(bytes: data, count: Int(size))
     let pnf = DiveDataMapper.extractPnfSampleFields(rawData)
-    if pnf.gf99.count == sampleContext.samples.count {
+    // PNF records don't include a t=0 entry; offset by 1 when t=0 sample is present.
+    let pnfOffset = (sampleContext.samples.first?.tSec == 0
+        && pnf.gf99.count == sampleContext.samples.count - 1) ? 1 : 0
+    if pnf.gf99.count == sampleContext.samples.count - pnfOffset {
         for i in 0 ..< pnf.gf99.count {
-            sampleContext.samples[i].gf99 = pnf.gf99[i]
-            sampleContext.samples[i].atPlusFiveTtsMin = pnf.atPlusFiveTtsMin[i]
+            sampleContext.samples[i + pnfOffset].gf99 = pnf.gf99[i]
+            sampleContext.samples[i + pnfOffset].atPlusFiveTtsMin = pnf.atPlusFiveTtsMin[i]
         }
     }
 

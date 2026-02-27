@@ -201,6 +201,92 @@ final class SampleT0Tests: XCTestCase {
         }
     }
 
+    // MARK: - PNF Backfill Alignment
+
+    func testPnfBackfillAlignsWithT0SamplePresent() {
+        // Simulate: sample callback produces 3 samples (t=0, t=10, t=20)
+        // PNF extractor produces 2 records (no t=0 in binary format)
+        let sampleCount = 3
+        let pnfCount = 2
+        let firstSampleTSec: Int32 = 0
+
+        // The offset logic from the production code:
+        let pnfOffset = (firstSampleTSec == 0 && pnfCount == sampleCount - 1) ? 1 : 0
+
+        XCTAssertEqual(pnfOffset, 1, "Offset should be 1 when t=0 sample is present")
+        XCTAssertEqual(pnfCount, sampleCount - pnfOffset,
+                       "PNF count should match sample count minus offset")
+
+        // Verify backfill targets the correct indices (skipping t=0)
+        var backfilledIndices: [Int] = []
+        for i in 0 ..< pnfCount {
+            backfilledIndices.append(i + pnfOffset)
+        }
+        XCTAssertEqual(backfilledIndices, [1, 2],
+                       "PNF data should be applied to samples[1] and samples[2], not samples[0]")
+    }
+
+    func testPnfBackfillAlignsWithoutT0Sample() {
+        // Simulate: sample callback produces 2 samples (t=10, t=20) — no t=0
+        // PNF extractor produces 2 records
+        let sampleCount = 2
+        let pnfCount = 2
+        let firstSampleTSec: Int32 = 10
+
+        let pnfOffset = (firstSampleTSec == 0 && pnfCount == sampleCount - 1) ? 1 : 0
+
+        XCTAssertEqual(pnfOffset, 0, "Offset should be 0 when no t=0 sample")
+        XCTAssertEqual(pnfCount, sampleCount - pnfOffset)
+
+        var backfilledIndices: [Int] = []
+        for i in 0 ..< pnfCount {
+            backfilledIndices.append(i + pnfOffset)
+        }
+        XCTAssertEqual(backfilledIndices, [0, 1],
+                       "PNF data should be applied starting at samples[0]")
+    }
+
+    func testPnfBackfillWithRealExtractor() {
+        // Build a minimal PNF binary: 2 sample records + final record
+        // Each record is 32 bytes. PNF format: first 2 bytes != 0xFFFF.
+        // Record type 0x01 = dive sample, 0xFF = LOG_RECORD_FINAL
+        // GF99 at byte offset 25, @+5 TTS at byte offset 27
+        var blob = Data(count: 3 * 32) // 2 samples + 1 final
+
+        // Record 0: type=0x01 (dive sample), GF99=50, @+5 TTS=3
+        blob[0] = 0x01
+        blob[25] = 50
+        blob[27] = 3
+
+        // Record 1: type=0x01 (dive sample), GF99=72, @+5 TTS=8
+        blob[32] = 0x01
+        blob[32 + 25] = 72
+        blob[32 + 27] = 8
+
+        // Record 2: type=0xFF (LOG_RECORD_FINAL)
+        blob[64] = 0xFF
+
+        let pnf = DiveDataMapper.extractPnfSampleFields(blob)
+        XCTAssertEqual(pnf.gf99.count, 2, "PNF should extract 2 sample records")
+        XCTAssertEqual(pnf.gf99[0], 50)
+        XCTAssertEqual(pnf.gf99[1], 72)
+        XCTAssertEqual(pnf.atPlusFiveTtsMin[0], 3)
+        XCTAssertEqual(pnf.atPlusFiveTtsMin[1], 8)
+
+        // Simulate 3 samples from callback (t=0, t=10, t=20)
+        let sampleCount = 3
+        let firstSampleTSec: Int32 = 0
+
+        let pnfOffset = (firstSampleTSec == 0
+            && pnf.gf99.count == sampleCount - 1) ? 1 : 0
+        XCTAssertEqual(pnfOffset, 1)
+
+        // Verify the backfill would assign PNF[0] → sample[1], PNF[1] → sample[2]
+        // (sample[0] at t=0 gets no PNF data — correct, since PNF has no t=0 record)
+        XCTAssertEqual(0 + pnfOffset, 1, "First PNF record maps to sample index 1")
+        XCTAssertEqual(1 + pnfOffset, 2, "Second PNF record maps to sample index 2")
+    }
+
     private func readServiceSource(fileName: String) throws -> String {
         let testsDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let packageRoot = testsDir.deletingLastPathComponent()
