@@ -527,4 +527,205 @@ mod tests {
         let result = evaluate(&expr, &vars).unwrap();
         assert!(matches!(result, Value::Number(n) if (n - 5.0).abs() < f64::EPSILON));
     }
+
+    // ── Coverage gap tests ──────────────────────────────────
+
+    #[test]
+    fn test_value_boolean_as_number() {
+        assert_eq!(Value::Boolean(true).as_number().unwrap(), 1.0);
+        assert_eq!(Value::Boolean(false).as_number().unwrap(), 0.0);
+    }
+
+    #[test]
+    fn test_value_number_as_bool() {
+        assert!(Value::Number(1.0).as_bool().unwrap());
+        assert!(!Value::Number(0.0).as_bool().unwrap());
+        assert!(Value::Number(-5.0).as_bool().unwrap());
+        assert!(Value::Number(0.001).as_bool().unwrap());
+    }
+
+    #[test]
+    fn test_value_is_truthy() {
+        assert!(Value::Boolean(true).is_truthy());
+        assert!(!Value::Boolean(false).is_truthy());
+        assert!(Value::Number(1.0).is_truthy());
+        assert!(!Value::Number(0.0).is_truthy());
+    }
+
+    #[test]
+    fn test_evaluate_floor() {
+        let vars = make_vars(vec![]);
+        let result = evaluate(&parse("floor(2.7)").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Number(n) if (n - 2.0).abs() < f64::EPSILON));
+
+        let result = evaluate(&parse("floor(-2.3)").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Number(n) if (n - (-3.0)).abs() < f64::EPSILON));
+    }
+
+    #[test]
+    fn test_evaluate_ceil() {
+        let vars = make_vars(vec![]);
+        let result = evaluate(&parse("ceil(2.3)").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Number(n) if (n - 3.0).abs() < f64::EPSILON));
+
+        let result = evaluate(&parse("ceil(-2.7)").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Number(n) if (n - (-2.0)).abs() < f64::EPSILON));
+    }
+
+    #[test]
+    fn test_evaluate_floor_ceil_wrong_arg_count() {
+        let vars = make_vars(vec![]);
+        // Construct directly to avoid parser ambiguity
+        let floor_2args = Expr::function_call("floor", vec![Expr::number(1.0), Expr::number(2.0)]);
+        assert!(matches!(
+            evaluate(&floor_2args, &vars),
+            Err(FormulaError::InvalidArgCount { .. })
+        ));
+
+        let ceil_0args = Expr::function_call("ceil", vec![]);
+        assert!(matches!(
+            evaluate(&ceil_0args, &vars),
+            Err(FormulaError::InvalidArgCount { .. })
+        ));
+    }
+
+    #[test]
+    fn test_evaluate_if_function() {
+        let vars = make_vars(vec![("x", 5.0)]);
+        let result = evaluate(&parse("if(x > 3, 1, 0)").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Number(n) if (n - 1.0).abs() < f64::EPSILON));
+
+        let result = evaluate(&parse("if(x > 10, 1, 0)").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Number(n) if n.abs() < f64::EPSILON));
+    }
+
+    #[test]
+    fn test_evaluate_if_wrong_arg_count() {
+        let vars = make_vars(vec![]);
+        let if_2args = Expr::function_call("if", vec![Expr::boolean(true), Expr::number(1.0)]);
+        assert!(matches!(
+            evaluate(&if_2args, &vars),
+            Err(FormulaError::InvalidArgCount { .. })
+        ));
+    }
+
+    #[test]
+    fn test_evaluate_comparison_lte() {
+        let vars = make_vars(vec![("a", 5.0), ("b", 10.0)]);
+        let result = evaluate(&parse("a <= b").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Boolean(true)));
+
+        let result = evaluate(&parse("a <= 5").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Boolean(true)));
+
+        let result = evaluate(&parse("b <= a").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Boolean(false)));
+    }
+
+    #[test]
+    fn test_evaluate_comparison_neq() {
+        let vars = make_vars(vec![("a", 5.0), ("b", 10.0)]);
+        let result = evaluate(&parse("a != b").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Boolean(true)));
+
+        let result = evaluate(&parse("a != 5").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Boolean(false)));
+    }
+
+    #[test]
+    fn test_evaluate_comparison_lt() {
+        let vars = make_vars(vec![("a", 3.0), ("b", 7.0)]);
+        let result = evaluate(&parse("a < b").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Boolean(true)));
+
+        let result = evaluate(&parse("b < a").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Boolean(false)));
+    }
+
+    #[test]
+    fn test_evaluate_boolean_literals() {
+        let vars = make_vars(vec![]);
+        let result = evaluate(&parse("true").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Boolean(true)));
+
+        let result = evaluate(&parse("false").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Boolean(false)));
+    }
+
+    #[test]
+    fn test_supported_functions_list() {
+        let funcs = supported_functions();
+        let names: Vec<&str> = funcs.iter().map(|f| f.name.as_str()).collect();
+        assert!(names.contains(&"min"));
+        assert!(names.contains(&"max"));
+        assert!(names.contains(&"round"));
+        assert!(names.contains(&"abs"));
+        assert!(names.contains(&"sqrt"));
+        assert!(names.contains(&"floor"));
+        assert!(names.contains(&"ceil"));
+        assert!(names.contains(&"if"));
+        assert_eq!(funcs.len(), 8);
+    }
+
+    #[test]
+    fn test_nearly_equal_edge_cases() {
+        // Small numbers near zero
+        let vars = make_vars(vec![]);
+        let result = evaluate(&parse("0.0000001 == 0.0000001").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Boolean(true)));
+
+        // Large numbers
+        let result = evaluate(&parse("1000000 == 1000000").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Boolean(true)));
+    }
+
+    #[test]
+    fn test_evaluate_unary_not_on_boolean() {
+        let vars = make_vars(vec![]);
+        let result = evaluate(&parse("not true").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Boolean(false)));
+
+        let result = evaluate(&parse("not false").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Boolean(true)));
+    }
+
+    #[test]
+    fn test_evaluate_round_wrong_arg_count() {
+        let vars = make_vars(vec![]);
+        let round_1arg = Expr::function_call("round", vec![Expr::number(2.5)]);
+        assert!(matches!(
+            evaluate(&round_1arg, &vars),
+            Err(FormulaError::InvalidArgCount { .. })
+        ));
+    }
+
+    #[test]
+    fn test_evaluate_abs_wrong_arg_count() {
+        let vars = make_vars(vec![]);
+        let abs_2args = Expr::function_call("abs", vec![Expr::number(1.0), Expr::number(2.0)]);
+        assert!(matches!(
+            evaluate(&abs_2args, &vars),
+            Err(FormulaError::InvalidArgCount { .. })
+        ));
+    }
+
+    #[test]
+    fn test_evaluate_sqrt_wrong_arg_count() {
+        let vars = make_vars(vec![]);
+        let sqrt_0args = Expr::function_call("sqrt", vec![]);
+        assert!(matches!(
+            evaluate(&sqrt_0args, &vars),
+            Err(FormulaError::InvalidArgCount { .. })
+        ));
+    }
+
+    #[test]
+    fn test_evaluate_max_wrong_arg_count() {
+        let vars = make_vars(vec![]);
+        let max_1arg = Expr::function_call("max", vec![Expr::number(1.0)]);
+        assert!(matches!(
+            evaluate(&max_1arg, &vars),
+            Err(FormulaError::InvalidArgCount { .. })
+        ));
+    }
 }

@@ -156,4 +156,62 @@ mod tests {
         let result = compute("max_depth_m > 40 ? 1 : 0", &vars).unwrap();
         assert!((result - 0.0).abs() < f64::EPSILON);
     }
+
+    // ── Coverage gap tests ──────────────────────────────────
+
+    #[test]
+    fn test_validate_with_variables_boolean_literal() {
+        // Boolean literals should pass validation regardless of available vars
+        let available: Vec<&str> = vec![];
+        assert!(validate_with_variables("true", &available).is_ok());
+        assert!(validate_with_variables("false", &available).is_ok());
+    }
+
+    #[test]
+    fn test_validate_with_variables_unary_unknown() {
+        let available = vec!["x"];
+        assert!(validate_with_variables("not x", &available).is_ok());
+        assert!(validate_with_variables("not unknown", &available).is_err());
+        assert!(validate_with_variables("-unknown", &available).is_err());
+    }
+
+    #[test]
+    fn test_validate_with_variables_function_with_unknown_arg() {
+        let available = vec!["x"];
+        assert!(validate_with_variables("min(x, x)", &available).is_ok());
+        assert!(validate_with_variables("max(x, unknown)", &available).is_err());
+    }
+
+    #[test]
+    fn test_validate_with_variables_ternary() {
+        let available = vec!["x", "y"];
+        assert!(validate_with_variables("x > 0 ? y : 0", &available).is_ok());
+        // Unknown in condition
+        assert!(validate_with_variables("unknown > 0 ? y : 0", &available).is_err());
+        // Unknown in then branch
+        assert!(validate_with_variables("x > 0 ? unknown : 0", &available).is_err());
+        // Unknown in else branch
+        assert!(validate_with_variables("x > 0 ? y : unknown", &available).is_err());
+    }
+
+    #[test]
+    fn test_validate_with_variables_number_literal() {
+        let available: Vec<&str> = vec![];
+        assert!(validate_with_variables("42", &available).is_ok());
+        assert!(validate_with_variables("3.14", &available).is_ok());
+    }
+
+    #[test]
+    fn test_compute_boolean_expression_converts_to_number() {
+        // compute() should convert boolean results to 0.0/1.0
+        let vars = |name: &str| match name {
+            "x" => Some(5.0),
+            _ => None,
+        };
+        let result = compute("x > 3", &vars).unwrap();
+        assert!((result - 1.0).abs() < f64::EPSILON);
+
+        let result = compute("x > 10", &vars).unwrap();
+        assert!(result.abs() < f64::EPSILON);
+    }
 }
