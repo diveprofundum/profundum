@@ -178,6 +178,70 @@ jobs:
           manifest-path: core/Cargo.toml
 
   # ─────────────────────────────────────────────────────────
+  # Coverage: collect and upload to Codecov
+  # ─────────────────────────────────────────────────────────
+  coverage:
+    needs: [changes, rust-test, swift-test]
+    if: |
+      always() &&
+      (needs.rust-test.result == 'success' || needs.rust-test.result == 'skipped') &&
+      (needs.swift-test.result == 'success' || needs.swift-test.result == 'skipped') &&
+      (
+        needs.changes.outputs.rust == 'true' ||
+        needs.changes.outputs.swift == 'true' ||
+        needs.changes.outputs.app == 'true' ||
+        needs.changes.outputs.ci == 'true'
+      )
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+          targets: aarch64-apple-darwin,x86_64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core -> target
+
+      - name: Cache Swift SPM
+        uses: actions/cache@v4
+        with:
+          path: apple/DivelogCore/.build
+          key: spm-${{ runner.os }}-${{ hashFiles('apple/DivelogCore/Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Build XCFramework
+        run: make xcframework
+
+      - name: Rust coverage
+        run: make rust-coverage
+
+      - name: Swift coverage
+        run: make swift-coverage
+
+      - name: Upload Rust coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage/rust-lcov.info
+          flags: rust
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload Swift coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage/swift-lcov.info
+          flags: swift
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  # ─────────────────────────────────────────────────────────
   # Version check: ensure VERSION file, Cargo.toml, and
   # Xcode project are in sync.
   # ─────────────────────────────────────────────────────────

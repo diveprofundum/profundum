@@ -1,5 +1,8 @@
 # Profundum
 
+[![CI](https://github.com/diveprofundum/profundum/actions/workflows/ci.yml/badge.svg)](https://github.com/diveprofundum/profundum/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/diveprofundum/profundum/graph/badge.svg)](https://codecov.io/gh/diveprofundum/profundum)
+
 An open-source dive log for iOS and macOS. Local-first, privacy-first.
 
 Profundum records and analyzes scuba dives — open-circuit and closed-circuit rebreather (CCR). It imports dives from Shearwater Cloud databases and BLE dive computers via [libdivecomputer](https://www.libdivecomputer.org/), stores everything locally with GRDB, and uses a Rust compute core for formula parsing and dive metrics.

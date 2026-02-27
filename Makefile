@@ -1,6 +1,7 @@
 .PHONY: all test clean rust-test swift-test lint rust-lint swift-lint swift-build \
        xcframework swift-bindings libdivecomputer-xcframework verify help \
-       version-check version-sync security audit deny mutants
+       version-check version-sync security audit deny mutants \
+       coverage rust-coverage swift-coverage coverage-report
 
 # ──────────────────────────────────────────────────────────────
 # Default target
@@ -90,6 +91,33 @@ mutants:
 	cd core && cargo mutants --timeout 60
 
 # ──────────────────────────────────────────────────────────────
+# Coverage
+# ──────────────────────────────────────────────────────────────
+
+# Rust coverage via cargo-llvm-cov (install: cargo install cargo-llvm-cov)
+rust-coverage:
+	mkdir -p coverage
+	cd core && cargo llvm-cov --lcov --output-path ../coverage/rust-lcov.info
+
+# Swift coverage via swift test + xcrun llvm-cov
+swift-coverage: swift-bindings
+	mkdir -p coverage
+	cd apple/DivelogCore && swift test --enable-code-coverage
+	@PROF=$$(find apple/DivelogCore/.build -name 'DivelogCorePackageTests.xctest' -type d)/Contents/MacOS/DivelogCorePackageTests; \
+	PROFDATA=$$(find apple/DivelogCore/.build -name 'default.profdata' -type f | head -1); \
+	xcrun llvm-cov export -format=lcov -instr-profile "$$PROFDATA" "$$PROF" \
+		-ignore-filename-regex='(Tests/|Generated/|\.build/)' > coverage/swift-lcov.info
+
+# Generate both coverage reports (lcov)
+coverage: rust-coverage swift-coverage
+	@echo "Coverage reports in coverage/"
+
+# Generate HTML reports for local viewing
+coverage-report: coverage
+	cd core && cargo llvm-cov --html --output-dir ../coverage/rust-html
+	@echo "Rust HTML: coverage/rust-html/index.html"
+
+# ──────────────────────────────────────────────────────────────
 # Versioning (single version for the whole monorepo)
 # ──────────────────────────────────────────────────────────────
 
@@ -130,6 +158,12 @@ help:
 	@echo "  make audit                      Check deps for known vulnerabilities"
 	@echo "  make deny                       Check license compliance + advisories"
 	@echo "  make mutants                    Run mutation testing on Rust core"
+	@echo ""
+	@echo "Coverage:"
+	@echo "  make coverage                   Generate lcov reports (Rust + Swift)"
+	@echo "  make rust-coverage              Rust coverage only (cargo-llvm-cov)"
+	@echo "  make swift-coverage             Swift coverage only (llvm-cov export)"
+	@echo "  make coverage-report            Generate HTML coverage reports"
 	@echo ""
 	@echo "Versioning:"
 	@echo "  make version-check              Verify all manifests match VERSION"
