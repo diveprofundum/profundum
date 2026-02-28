@@ -217,4 +217,46 @@ mod tests {
         assert!(names.contains(&"round"));
         assert!(names.contains(&"abs"));
     }
+
+    #[test]
+    fn test_compute_surface_gf_ffi() {
+        // Call the FFI wrapper with a dive profile, assert non-empty result (catches → vec![])
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 60,
+                depth_m: 30.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 600,
+                depth_m: 30.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+        ];
+        let gas_mixes = vec![];
+        let result = compute_surface_gf(samples, gas_mixes, None);
+        assert_eq!(result.len(), 3);
+        // Verify SurfGF increases at depth
+        assert!(result[2].surface_gf > result[0].surface_gf);
+    }
 }

@@ -139,6 +139,7 @@ impl DiveStats {
         for (i, sample) in samples.iter().enumerate() {
             // Depth stats
             if sample.depth_m > max_depth_m {
+                // Note: >= is equivalent (idempotent assignment, excluded in mutants.toml)
                 max_depth_m = sample.depth_m;
             }
             depth_sum += sample.depth_m as f64;
@@ -156,9 +157,11 @@ impl DiveStats {
 
             // Temperature stats
             if sample.temp_c < min_temp_c {
+                // Note: <= is equivalent (idempotent assignment, excluded in mutants.toml)
                 min_temp_c = sample.temp_c;
             }
             if sample.temp_c > max_temp_c {
+                // Note: >= is equivalent (idempotent assignment, excluded in mutants.toml)
                 max_temp_c = sample.temp_c;
             }
             temp_sum += sample.temp_c as f64;
@@ -176,6 +179,7 @@ impl DiveStats {
                     deco_time_sec += deco_dt;
                 }
                 if ceiling > max_ceiling_m {
+                    // Note: >= is equivalent (idempotent assignment, excluded in mutants.toml)
                     max_ceiling_m = ceiling;
                 }
             }
@@ -183,6 +187,7 @@ impl DiveStats {
             // Max GF99
             if let Some(gf99) = sample.gf99 {
                 if gf99 > max_gf99 {
+                    // Note: >= is equivalent (idempotent assignment, excluded in mutants.toml)
                     max_gf99 = gf99;
                 }
             }
@@ -217,6 +222,7 @@ impl DiveStats {
         };
 
         let weighted_avg_depth_m = if weight_sum > 0.0 {
+            // Note: >= is equivalent (weight_sum always positive, excluded in mutants.toml)
             (weighted_depth_sum / weight_sum) as f32
         } else {
             avg_depth_m
@@ -307,6 +313,7 @@ impl DiveStats {
                 .unwrap_or(0);
 
         // Descent: surface → first arrival at max depth
+        // Note: boundary guards produce identical results (excluded in mutants.toml)
         let descent_rate = if first_max_idx > 0 {
             let dt_min = (samples[first_max_idx].t_sec - samples[0].t_sec) as f32 / 60.0;
             if dt_min > 0.0 {
@@ -319,6 +326,7 @@ impl DiveStats {
         };
 
         // Ascent: last departure from max depth → surface
+        // Note: boundary guards and len-1 arithmetic are equivalent (excluded in mutants.toml)
         let ascent_rate = if last_max_idx < samples.len() - 1 {
             let last = samples.last().unwrap();
             let dt_min = (last.t_sec - samples[last_max_idx].t_sec) as f32 / 60.0;
@@ -382,14 +390,17 @@ impl SegmentStats {
 
         for (i, sample) in samples.iter().enumerate() {
             if sample.depth_m > max_depth_m {
+                // Note: >= is equivalent (idempotent assignment, excluded in mutants.toml)
                 max_depth_m = sample.depth_m;
             }
             depth_sum += sample.depth_m as f64;
 
             if sample.temp_c < min_temp_c {
+                // Note: <= is equivalent (idempotent assignment, excluded in mutants.toml)
                 min_temp_c = sample.temp_c;
             }
             if sample.temp_c > max_temp_c {
+                // Note: >= is equivalent (idempotent assignment, excluded in mutants.toml)
                 max_temp_c = sample.temp_c;
             }
 
@@ -840,6 +851,227 @@ mod tests {
     }
 
     #[test]
+    fn test_dive_stats_exact_values() {
+        let dive = create_test_dive();
+        let samples = create_test_samples();
+        let stats = DiveStats::compute(&dive, &samples);
+
+        // total_time = end - start = 3600
+        assert_eq!(stats.total_time_sec, 3600);
+        // max_depth = 30.0 (samples 3,4)
+        assert_eq!(stats.max_depth_m, 30.0);
+        // avg_depth = (0+10+20+30+30+20+5+0)/8 = 14.375
+        assert_eq!(stats.avg_depth_m, 14.375);
+        // avg_temp = (22+20+18+16+16+17+19+21)/8 = 18.625
+        assert_eq!(stats.avg_temp_c, 18.625);
+        assert_eq!(stats.min_temp_c, 16.0);
+        assert_eq!(stats.max_temp_c, 22.0);
+
+        // weighted_avg_depth: dt=[60,60,180,300,300,300,300,300], weight_sum=1800
+        // weighted_sum = 0*60+10*60+20*180+30*300+30*300+20*300+5*300+0*300 = 29700
+        // 29700/1800 = 16.5
+        assert_eq!(stats.weighted_avg_depth_m, 16.5);
+
+        // bottom_time (depth > 3.0): samples 1-6, dt=[60,180,300,300,300,300] = 1440
+        assert_eq!(stats.bottom_time_sec, 1440);
+
+        // deco_time (ceiling > 0): samples 3,4,5 with dt=[300,300,300] = 900
+        assert_eq!(stats.deco_time_sec, 900);
+
+        assert_eq!(stats.max_ceiling_m, 6.0);
+        assert_eq!(stats.max_gf99, 80.0);
+        assert_eq!(stats.gas_switch_count, 0);
+        assert_eq!(stats.depth_class, DepthClass::Deep);
+
+        // descent: 30m / (300s/60) = 6.0 m/min
+        assert_eq!(stats.descent_rate_m_min, 6.0);
+        // ascent: 30m / (900s/60) = 2.0 m/min
+        assert_eq!(stats.ascent_rate_m_min, 2.0);
+    }
+
+    #[test]
+    fn test_segment_stats_exact_values() {
+        let samples = create_test_samples();
+        // Segment from t=300 to t=900 captures samples 3,4,5
+        let stats = SegmentStats::compute(300, 900, &samples);
+
+        assert_eq!(stats.duration_sec, 600);
+        assert_eq!(stats.max_depth_m, 30.0);
+        // avg_depth = (30+30+20)/3
+        let expected_avg = (30.0 + 30.0 + 20.0) / 3.0;
+        assert!((stats.avg_depth_m - expected_avg as f32).abs() < 1e-6);
+        assert_eq!(stats.min_temp_c, 16.0);
+        assert_eq!(stats.max_temp_c, 17.0);
+        assert_eq!(stats.sample_count, 3);
+        // deco: all 3 samples have ceiling > 0. dt=[300,300,300] = 900
+        assert_eq!(stats.deco_time_sec, 900);
+    }
+
+    #[test]
+    fn test_segment_stats_deco_boundary() {
+        // ceiling = 0.0 exactly must NOT count as deco (catches > → >=)
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 10.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(0.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 60,
+                depth_m: 10.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(0.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+        ];
+        let stats = SegmentStats::compute(0, 60, &samples);
+        assert_eq!(stats.deco_time_sec, 0);
+    }
+
+    #[test]
+    fn test_segment_stats_single_sample() {
+        // Single sample exercises dt=1 fallback
+        let samples = vec![SampleInput {
+            t_sec: 100,
+            depth_m: 15.0,
+            temp_c: 18.0,
+            setpoint_ppo2: None,
+            ceiling_m: Some(2.0),
+            gf99: None,
+            gasmix_index: None,
+            ppo2: None,
+        }];
+        let stats = SegmentStats::compute(100, 200, &samples);
+        assert_eq!(stats.duration_sec, 100);
+        assert_eq!(stats.max_depth_m, 15.0);
+        assert_eq!(stats.avg_depth_m, 15.0);
+        assert_eq!(stats.min_temp_c, 18.0);
+        assert_eq!(stats.max_temp_c, 18.0);
+        assert_eq!(stats.sample_count, 1);
+        // single sample with ceiling > 0: dt fallback = 1
+        assert_eq!(stats.deco_time_sec, 1);
+    }
+
+    #[test]
+    fn test_depth_class_label() {
+        assert_eq!(DepthClass::Recreational.label(), "Recreational");
+        assert_eq!(DepthClass::Deep.label(), "Deep");
+        assert_eq!(DepthClass::Extended.label(), "Extended Range");
+        assert_eq!(DepthClass::Extreme.label(), "Extreme");
+    }
+
+    #[test]
+    fn test_rates_exact() {
+        let samples = create_test_samples();
+        let (descent, ascent) = DiveStats::compute_rates(&samples);
+        // descent: 30m / 5min = exactly 6.0
+        assert_eq!(descent, 6.0);
+        // ascent: 30m / 15min = exactly 2.0
+        assert_eq!(ascent, 2.0);
+    }
+
+    #[test]
+    fn test_total_time_exact() {
+        // total_time = end - start (catches - → +)
+        let dive = DiveInput {
+            start_time_unix: 1000,
+            end_time_unix: 2500,
+            bottom_time_sec: 0,
+        };
+        let stats = DiveStats::compute(&dive, &[]);
+        assert_eq!(stats.total_time_sec, 1500);
+    }
+
+    #[test]
+    fn test_temperature_equal_values() {
+        // All samples same temp → min = max = avg (catches min/max comparison mutations)
+        let dive = create_test_dive();
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 10.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 60,
+                depth_m: 10.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+        ];
+        let stats = DiveStats::compute(&dive, &samples);
+        assert_eq!(stats.min_temp_c, 20.0);
+        assert_eq!(stats.max_temp_c, 20.0);
+        assert_eq!(stats.avg_temp_c, 20.0);
+    }
+
+    #[test]
+    fn test_segment_duration_exact() {
+        // duration = end - start (catches - → +)
+        let stats = SegmentStats::compute(100, 500, &[]);
+        assert_eq!(stats.duration_sec, 400);
+    }
+
+    #[test]
+    fn test_dive_stats_single_sample_fallbacks() {
+        // Single sample exercises dt=1 fallback for weighted avg and bottom time
+        let dive = DiveInput {
+            start_time_unix: 0,
+            end_time_unix: 60,
+            bottom_time_sec: 0,
+        };
+        let samples = vec![SampleInput {
+            t_sec: 0,
+            depth_m: 10.0,
+            temp_c: 18.0,
+            setpoint_ppo2: None,
+            ceiling_m: Some(2.0),
+            gf99: Some(50.0),
+            gasmix_index: Some(0),
+            ppo2: None,
+        }];
+        let stats = DiveStats::compute(&dive, &samples);
+        // Single sample: weighted_avg = depth (weight=1, sum=10*1=10, 10/1=10)
+        assert_eq!(stats.weighted_avg_depth_m, 10.0);
+        assert_eq!(stats.avg_depth_m, 10.0);
+        // depth > 3m, dt=1 fallback
+        assert_eq!(stats.bottom_time_sec, 1);
+        // ceiling > 0, dt=1 fallback
+        assert_eq!(stats.deco_time_sec, 1);
+        assert_eq!(stats.max_gf99, 50.0);
+        assert_eq!(stats.max_ceiling_m, 2.0);
+    }
+
+    #[test]
+    fn test_depth_class_boundaries() {
+        // Exact boundaries: 18.0 → Recreational, 18.01 → Deep
+        assert_eq!(DepthClass::from_depth_m(18.0), DepthClass::Recreational);
+        assert_eq!(DepthClass::from_depth_m(18.01), DepthClass::Deep);
+        assert_eq!(DepthClass::from_depth_m(40.0), DepthClass::Deep);
+        assert_eq!(DepthClass::from_depth_m(40.01), DepthClass::Extended);
+        assert_eq!(DepthClass::from_depth_m(60.0), DepthClass::Extended);
+        assert_eq!(DepthClass::from_depth_m(60.01), DepthClass::Extreme);
+        assert_eq!(DepthClass::from_depth_m(0.0), DepthClass::Recreational);
+    }
+
+    #[test]
     fn test_gas_switch_count_setpoint_noise_ignored() {
         // CCR dive with fluctuating setpoint but constant gasmix_index — no gas switches
         let dive = create_test_dive();
@@ -907,5 +1139,277 @@ mod tests {
         ];
         let stats = DiveStats::compute(&dive, &samples);
         assert_eq!(stats.gas_switch_count, 0);
+    }
+
+    // ── Round 2: kill remaining mutants ──────────────────────
+
+    #[test]
+    fn test_deco_time_last_sample_has_ceiling() {
+        // Last sample has ceiling > 0, exercises the `else if i > 0` fallback
+        // for deco_dt (line 171-172). With `i > 0` → `i < 0`, dt would be 1 instead.
+        let dive = create_test_dive();
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 10.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(0.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 100,
+                depth_m: 20.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(3.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 400,
+                depth_m: 15.0,
+                temp_c: 19.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(2.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+        ];
+        let stats = DiveStats::compute(&dive, &samples);
+        // sample 1 (i=1): ceiling=3>0, i+1<3 → dt = 400-100 = 300
+        // sample 2 (i=2, last): ceiling=2>0, i+1=3 NOT < 3, i>0 → dt = 400-100 = 300
+        // total deco = 300 + 300 = 600
+        assert_eq!(stats.deco_time_sec, 600);
+    }
+
+    #[test]
+    fn test_bottom_time_last_sample_at_depth() {
+        // Last sample has depth > 3m, exercises the `else if i > 0` fallback
+        // for bottom_time dt (line 204-205).
+        let dive = create_test_dive();
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 100,
+                depth_m: 10.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 400,
+                depth_m: 15.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+        ];
+        let stats = DiveStats::compute(&dive, &samples);
+        // sample 0: depth=0, not >3
+        // sample 1 (i=1): depth=10>3, i+1<3 → dt=400-100=300
+        // sample 2 (i=2, last): depth=15>3, i+1=3 NOT <3, i>0 → dt=400-100=300
+        // total bottom = 300+300 = 600
+        assert_eq!(stats.bottom_time_sec, 600);
+    }
+
+    #[test]
+    fn test_bottom_time_boundary_exactly_3m() {
+        // depth = 3.0 exactly should NOT count as bottom time (catches > → >=)
+        let dive = create_test_dive();
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 3.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 60,
+                depth_m: 3.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+        ];
+        let stats = DiveStats::compute(&dive, &samples);
+        assert_eq!(stats.bottom_time_sec, 0);
+    }
+
+    #[test]
+    fn test_rates_nonzero_start_time() {
+        // Samples starting at t=60 (not t=0) to differentiate - from + in rate calcs
+        // Line 311: samples[first_max_idx].t_sec - samples[0].t_sec
+        // If mutated to +: 360 + 60 = 420 vs correct 360 - 60 = 300
+        let samples = vec![
+            SampleInput {
+                t_sec: 60,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 360,
+                depth_m: 30.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 960,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+        ];
+        let (descent, ascent) = DiveStats::compute_rates(&samples);
+        // descent: 30m / ((360-60)/60 min) = 30/5 = 6.0
+        assert_eq!(descent, 6.0);
+        // ascent: (30-0)m / ((960-360)/60 min) = 30/10 = 3.0
+        assert_eq!(ascent, 3.0);
+    }
+
+    #[test]
+    fn test_rates_nonzero_end_depth() {
+        // Last sample has non-zero depth to differentiate - from + in ascent
+        // Line 326: samples[last_max_idx].depth_m - last.depth_m
+        // If mutated to +: 30+5 = 35, correct: 30-5 = 25
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 300,
+                depth_m: 30.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 900,
+                depth_m: 5.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+        ];
+        let (descent, ascent) = DiveStats::compute_rates(&samples);
+        // descent: 30m / 5min = 6.0
+        assert_eq!(descent, 6.0);
+        // ascent: (30-5)m / 10min = 2.5
+        assert_eq!(ascent, 2.5);
+    }
+
+    #[test]
+    fn test_segment_stats_last_sample_with_ceiling() {
+        // SegmentStats: last sample has ceiling > 0 (exercises else-if fallback)
+        let samples = vec![
+            SampleInput {
+                t_sec: 100,
+                depth_m: 20.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(3.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 400,
+                depth_m: 15.0,
+                temp_c: 19.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(2.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+        ];
+        let stats = SegmentStats::compute(100, 400, &samples);
+        // sample 0 (i=0): ceiling=3>0, i+1<2 → dt=400-100=300
+        // sample 1 (i=1, last): ceiling=2>0, i+1=2 NOT <2, i>0 → dt=400-100=300
+        assert_eq!(stats.deco_time_sec, 600);
+        assert_eq!(stats.sample_count, 2);
+    }
+
+    #[test]
+    fn test_segment_stats_max_depth_equal_values() {
+        // Two samples with same depth: max should still be correct (catches > → >=)
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 25.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 60,
+                depth_m: 25.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+        ];
+        let stats = SegmentStats::compute(0, 60, &samples);
+        assert_eq!(stats.max_depth_m, 25.0);
+        assert_eq!(stats.min_temp_c, 18.0);
+        assert_eq!(stats.max_temp_c, 18.0);
     }
 }

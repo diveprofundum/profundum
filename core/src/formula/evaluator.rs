@@ -728,4 +728,35 @@ mod tests {
             Err(FormulaError::InvalidArgCount { .. })
         ));
     }
+
+    // ── Mutation coverage tests ──────────────────────────────
+
+    #[test]
+    fn test_gt_boundary_equal() {
+        // 5 > 5 → false (catches > → >=)
+        let vars = make_vars(vec![]);
+        let result = evaluate(&parse("5 > 5").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Boolean(false)));
+    }
+
+    #[test]
+    fn test_lt_boundary_equal() {
+        // 5 < 5 → false (catches < → <=)
+        let vars = make_vars(vec![]);
+        let result = evaluate(&parse("5 < 5").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Boolean(false)));
+    }
+
+    #[test]
+    fn test_nearly_equal_relative_tolerance() {
+        // 1000000.0 == 1000000.5 → true (relative tolerance: diff=0.5, largest=1e6, tol=1e-6*1e6=1.0)
+        // If * → / in line 14, tolerance = 1e-6 / 1e6 = 1e-12, and this would be false
+        let vars = make_vars(vec![]);
+        let result = evaluate(&parse("1000000.0 == 1000000.5").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Boolean(true)));
+
+        // Also verify unequal values are detected
+        let result = evaluate(&parse("1000000.0 == 1000002.0").unwrap(), &vars).unwrap();
+        assert!(matches!(result, Value::Boolean(false)));
+    }
 }
