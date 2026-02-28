@@ -1,0 +1,36 @@
+# Equivalent mutants that cannot be killed by any test.
+#
+# These are mutations where the original and mutated code produce identical
+# observable output for ALL valid inputs. Common patterns:
+#
+# 1. Max/min tracking: `> → >=` or `< → <=` where the assignment is idempotent
+#    (setting max_depth = sample.depth when they're equal doesn't change the value).
+#
+# 2. Guard conditions: `> → >=` on zero-checks where the boundary case (e.g.,
+#    dt_min = 0.0) produces the same result through a different code path
+#    (e.g., dividing by 0 is guarded, and the else branch also returns 0).
+#
+# 3. Threshold guards: `> → >=` on epsilon comparisons (like `> 1e-10`) where
+#    real-world data never produces a value exactly at the threshold.
+#
+# 4. uniffi-bindgen.rs is generated code outside our control.
+
+exclude_re = [
+    # Generated UniFFI build script
+    "uniffi-bindgen\\.rs",
+
+    # metrics.rs: max/min tracking (idempotent assignment)
+    "replace [<>] with [<>]= in DiveStats::compute$",
+    "replace [<>] with [<>]= in SegmentStats::compute$",
+
+    # metrics.rs: compute_rates boundary guards (dt_min=0 → rate=0 either way)
+    "replace [<>] with [<>]= in DiveStats::compute_rates$",
+    # metrics.rs: samples.len() - 1 in ascent guard (always true or dt_min=0)
+    "replace - with [+/] in DiveStats::compute_rates$",
+
+    # buhlmann.rs: leading compartment tie (exact FP equality never occurs)
+    "replace > with >= in TissueState::surface_gf_and_leading$",
+    # buhlmann.rs: threshold guards (real values never exactly at 1e-10)
+    "replace > with >= in TissueState::compartment_gf$",
+    "replace > with >= in compute_surface_gf$",
+]

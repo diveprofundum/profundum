@@ -488,4 +488,81 @@ mod tests {
         let result = parse("1 + 2 @");
         assert!(result.is_err());
     }
+
+    // ── Mutation coverage tests ──────────────────────────────
+
+    #[test]
+    fn test_parse_error_exact_position() {
+        // Parse "1 + 2 @": parses "1 + 2", remaining = " @" (len 2)
+        // input.len()=7, position = 7 - 1 = 6 (remaining after trim "@" len 1)
+        // Catches - → + / on line 29
+        let result = parse("1 + 2 @");
+        match result {
+            Err(FormulaError::ParseError { position, .. }) => {
+                assert_eq!(position, 6, "Expected position 6, got {position}");
+            }
+            other => panic!("Expected ParseError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_underscore_variable() {
+        // Variables starting with _ or containing _ (catches || → && on lines 212-213)
+        let expr = parse("_x").unwrap();
+        assert!(matches!(expr, Expr::Variable(ref s) if s == "_x"));
+
+        let expr = parse("x_1").unwrap();
+        assert!(matches!(expr, Expr::Variable(ref s) if s == "x_1"));
+
+        let expr = parse("_").unwrap();
+        assert!(matches!(expr, Expr::Variable(ref s) if s == "_"));
+    }
+
+    #[test]
+    fn test_parse_underscore_function() {
+        // Function names with underscores (catches || → && on line 223)
+        let expr = parse("my_func(1)").unwrap();
+        if let Expr::FunctionCall { name, args } = expr {
+            assert_eq!(name, "my_func");
+            assert_eq!(args.len(), 1);
+        } else {
+            panic!("Expected function call, got {expr:?}");
+        }
+    }
+
+    #[test]
+    fn test_parse_function_with_digit_in_name() {
+        // Function name "f1" has a digit that only the second take_while1 matches.
+        // The first take_while1 matches alphabetic|_, so "f". The second matches
+        // alphanumeric|_, so "1". With || → &&, the second would require BOTH
+        // alphanumeric AND '_', so "1" wouldn't match, and parse_function_call
+        // would only see "f" as the name, failing to find "(" next.
+        let expr = parse("f1(42)").unwrap();
+        if let Expr::FunctionCall { name, args } = expr {
+            assert_eq!(name, "f1");
+            assert_eq!(args.len(), 1);
+        } else {
+            panic!("Expected function call 'f1', got {expr:?}");
+        }
+
+        // Also test with multiple digits
+        let expr = parse("gas2_o2(10)").unwrap();
+        if let Expr::FunctionCall { name, args } = expr {
+            assert_eq!(name, "gas2_o2");
+            assert_eq!(args.len(), 1);
+        } else {
+            panic!("Expected function call 'gas2_o2', got {expr:?}");
+        }
+    }
+
+    #[test]
+    fn test_parse_lt_comparison() {
+        // Verify < parses as Lt, not Lte
+        let expr = parse("a < b").unwrap();
+        if let Expr::Binary { op, .. } = expr {
+            assert_eq!(op, BinaryOp::Lt);
+        } else {
+            panic!("Expected binary expression");
+        }
+    }
 }
