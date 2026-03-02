@@ -1,36 +1,48 @@
 # Equivalent mutants that cannot be killed by any test.
 #
-# These are mutations where the original and mutated code produce identical
-# observable output for ALL valid inputs. Common patterns:
+# Each exclusion targets a SPECIFIC mutation (by file:line:col) that produces
+# identical observable output for ALL valid inputs. Only 19 mutations are
+# excluded — all others are caught by tests or unviable.
 #
-# 1. Max/min tracking: `> → >=` or `< → <=` where the assignment is idempotent
-#    (setting max_depth = sample.depth when they're equal doesn't change the value).
-#
-# 2. Guard conditions: `> → >=` on zero-checks where the boundary case (e.g.,
-#    dt_min = 0.0) produces the same result through a different code path
-#    (e.g., dividing by 0 is guarded, and the else branch also returns 0).
-#
-# 3. Threshold guards: `> → >=` on epsilon comparisons (like `> 1e-10`) where
-#    real-world data never produces a value exactly at the threshold.
-#
-# 4. uniffi-bindgen.rs is generated code outside our control.
+# If production code changes shift line numbers, stale patterns will stop
+# matching and the mutation will surface as MISSED, prompting an update.
 
 exclude_re = [
-    # Generated UniFFI build script
+    # ── Generated code ───────────────────────────────────────────────────
     "uniffi-bindgen\\.rs",
 
-    # metrics.rs: max/min tracking (idempotent assignment)
-    "replace [<>] with [<>]= in DiveStats::compute$",
-    "replace [<>] with [<>]= in SegmentStats::compute$",
+    # ── metrics.rs: DiveStats::compute — idempotent max/min tracking ─────
+    # Setting max/min = value when they're already equal is a no-op.
+    "src/metrics\\.rs:141:.*replace > with >= in DiveStats::compute",   # max_depth_m
+    "src/metrics\\.rs:159:.*replace < with <= in DiveStats::compute",   # min_temp_c
+    "src/metrics\\.rs:162:.*replace > with >= in DiveStats::compute",   # max_temp_c
+    "src/metrics\\.rs:179:.*replace > with >= in DiveStats::compute",   # max_ceiling_m
+    "src/metrics\\.rs:186:.*replace > with >= in DiveStats::compute",   # max_gf99
+    # weight_sum > 0.0: weight_sum is always strictly positive when samples exist
+    "src/metrics\\.rs:220:.*replace > with >= in DiveStats::compute",
 
-    # metrics.rs: compute_rates boundary guards (dt_min=0 → rate=0 either way)
-    "replace [<>] with [<>]= in DiveStats::compute_rates$",
-    # metrics.rs: samples.len() - 1 in ascent guard (always true or dt_min=0)
-    "replace - with [+/] in DiveStats::compute_rates$",
+    # ── metrics.rs: DiveStats::compute_rates — boundary guards ───────────
+    # dt_min > 0.0 guards: dt_min=0 only when timestamps are duplicated,
+    # which never occurs in real dive profiles. Either way, rate=0.
+    "src/metrics\\.rs:311:.*replace > with >= in DiveStats::compute_rates",  # descent dt_min
+    "src/metrics\\.rs:313:.*replace > with >= in DiveStats::compute_rates",  # descent dt_min inner
+    "src/metrics\\.rs:326:.*replace > with >= in DiveStats::compute_rates",  # ascent dt_min
+    # last_max_idx < samples.len()-1: boundary and len-1 arithmetic
+    "src/metrics\\.rs:323:43:.*replace < with <= in DiveStats::compute_rates",
+    "src/metrics\\.rs:323:59:.*replace - with \\+ in DiveStats::compute_rates",
+    "src/metrics\\.rs:323:59:.*replace - with / in DiveStats::compute_rates",
 
-    # buhlmann.rs: leading compartment tie (exact FP equality never occurs)
-    "replace > with >= in TissueState::surface_gf_and_leading$",
-    # buhlmann.rs: threshold guards (real values never exactly at 1e-10)
-    "replace > with >= in TissueState::compartment_gf$",
-    "replace > with >= in compute_surface_gf$",
+    # ── metrics.rs: SegmentStats::compute — idempotent max/min tracking ──
+    "src/metrics\\.rs:385:.*replace > with >= in SegmentStats::compute",   # max_depth_m
+    "src/metrics\\.rs:390:.*replace < with <= in SegmentStats::compute",   # min_temp_c
+    "src/metrics\\.rs:393:.*replace > with >= in SegmentStats::compute",   # max_temp_c
+
+    # ── buhlmann.rs — FP threshold guards ────────────────────────────────
+    # Leading compartment tie-break: exact FP equality across 16 compartments'
+    # weighted N2+He GF values never occurs in practice
+    "src/buhlmann\\.rs:153:.*replace > with >= in TissueState::surface_gf_and_leading",
+    # denom > 1e-10: Bühlmann constants always give denom >> 1e-10
+    "src/buhlmann\\.rs:180:.*replace > with >= in TissueState::compartment_gf",
+    # dil_inert > 1e-10: gas fractions from real mixes never produce exactly 1e-10
+    "src/buhlmann\\.rs:254:.*replace > with >= in compute_surface_gf",
 ]
