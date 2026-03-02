@@ -157,11 +157,9 @@ impl DiveStats {
 
             // Temperature stats
             if sample.temp_c < min_temp_c {
-                // Note: <= is equivalent (idempotent assignment, excluded in mutants.toml)
                 min_temp_c = sample.temp_c;
             }
             if sample.temp_c > max_temp_c {
-                // Note: >= is equivalent (idempotent assignment, excluded in mutants.toml)
                 max_temp_c = sample.temp_c;
             }
             temp_sum += sample.temp_c as f64;
@@ -179,7 +177,6 @@ impl DiveStats {
                     deco_time_sec += deco_dt;
                 }
                 if ceiling > max_ceiling_m {
-                    // Note: >= is equivalent (idempotent assignment, excluded in mutants.toml)
                     max_ceiling_m = ceiling;
                 }
             }
@@ -187,7 +184,6 @@ impl DiveStats {
             // Max GF99
             if let Some(gf99) = sample.gf99 {
                 if gf99 > max_gf99 {
-                    // Note: >= is equivalent (idempotent assignment, excluded in mutants.toml)
                     max_gf99 = gf99;
                 }
             }
@@ -222,7 +218,6 @@ impl DiveStats {
         };
 
         let weighted_avg_depth_m = if weight_sum > 0.0 {
-            // Note: >= is equivalent (weight_sum always positive, excluded in mutants.toml)
             (weighted_depth_sum / weight_sum) as f32
         } else {
             avg_depth_m
@@ -313,7 +308,6 @@ impl DiveStats {
                 .unwrap_or(0);
 
         // Descent: surface → first arrival at max depth
-        // Note: boundary guards produce identical results (excluded in mutants.toml)
         let descent_rate = if first_max_idx > 0 {
             let dt_min = (samples[first_max_idx].t_sec - samples[0].t_sec) as f32 / 60.0;
             if dt_min > 0.0 {
@@ -326,7 +320,6 @@ impl DiveStats {
         };
 
         // Ascent: last departure from max depth → surface
-        // Note: boundary guards and len-1 arithmetic are equivalent (excluded in mutants.toml)
         let ascent_rate = if last_max_idx < samples.len() - 1 {
             let last = samples.last().unwrap();
             let dt_min = (last.t_sec - samples[last_max_idx].t_sec) as f32 / 60.0;
@@ -390,17 +383,14 @@ impl SegmentStats {
 
         for (i, sample) in samples.iter().enumerate() {
             if sample.depth_m > max_depth_m {
-                // Note: >= is equivalent (idempotent assignment, excluded in mutants.toml)
                 max_depth_m = sample.depth_m;
             }
             depth_sum += sample.depth_m as f64;
 
             if sample.temp_c < min_temp_c {
-                // Note: <= is equivalent (idempotent assignment, excluded in mutants.toml)
                 min_temp_c = sample.temp_c;
             }
             if sample.temp_c > max_temp_c {
-                // Note: >= is equivalent (idempotent assignment, excluded in mutants.toml)
                 max_temp_c = sample.temp_c;
             }
 
