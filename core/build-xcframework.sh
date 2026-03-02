@@ -60,10 +60,12 @@ lipo -create \
 # Generate UniFFI bindings (Swift source + C header + modulemap)
 GENERATED_DIR="$PROJECT_ROOT/apple/DivelogCore/Sources/RustBridge/Generated"
 mkdir -p "$GENERATED_DIR"
-cargo run --manifest-path "$SCRIPT_DIR/Cargo.toml" --features=uniffi/cli \
-    --bin uniffi-bindgen generate "$SCRIPT_DIR/src/divelog_compute.udl" \
+pushd "$SCRIPT_DIR" > /dev/null
+cargo run --features=uniffi/cli \
+    --bin uniffi-bindgen generate src/divelog_compute.udl \
     --language swift \
     --out-dir "$GENERATED_DIR"
+popd > /dev/null
 
 # Create include directories with headers
 for DIR in "$MACOS_DIR" "$IOS_DIR" "$SIM_DIR"; do
