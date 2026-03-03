@@ -35,8 +35,15 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
     /// `.writeWithoutResponse` is required by most BLE dive computers (Shearwater, etc.).
     private let writeType: CBCharacteristicWriteType
 
-    /// Guards all mutable state: `readBuffer`, `lastError`, `isClosed`.
+    /// Guards all mutable state: `readBuffer`, `lastError`, `isClosed`, `indicationReady`.
     private let lock = NSLock()
+
+    /// Whether the Rx characteristic's notification/indication subscription is active.
+    /// Protected by `lock`.
+    private var indicationReady = false
+
+    /// Signalled when `didUpdateNotificationStateFor` fires (success or error).
+    private let indicationSemaphore = DispatchSemaphore(value: 0)
 
     /// Internal buffer for data received via BLE notifications. Protected by `lock`.
     private var readBuffer = Data()
@@ -147,6 +154,44 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         }
     }
 
+    /// Blocks until the Rx characteristic's notification/indication subscription
+    /// is confirmed by CoreBluetooth. No-op after the first successful call.
+    ///
+    /// This is critical for devices that use BLE **indications** (property 0x20)
+    /// instead of notifications — the GATT subscription handshake must complete
+    /// before the device will emit data in response to writes.
+    private func waitForIndicationSubscription(timeout: TimeInterval) throws {
+        lock.lock()
+        if indicationReady {
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+
+        let deadline: DispatchTime = timeout == .infinity
+            ? .distantFuture
+            : .now() + timeout
+        let result = indicationSemaphore.wait(timeout: deadline)
+
+        lock.lock()
+        let closed = isClosed
+        let error = lastError
+        if error != nil { lastError = nil }
+        let ready = indicationReady
+        lock.unlock()
+
+        if closed { throw DiveComputerError.disconnected }
+        if let error {
+            throw DiveComputerError.libdivecomputer(
+                status: -1,
+                message: "Indication subscription failed: \(error.localizedDescription)"
+            )
+        }
+        if result == .timedOut && !ready {
+            throw DiveComputerError.timeout
+        }
+    }
+
     func write(_ data: Data, timeout: TimeInterval) throws {
         lock.lock()
         if isClosed {
@@ -154,6 +199,10 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
             throw DiveComputerError.disconnected
         }
         lock.unlock()
+
+        // Ensure indication/notification subscription is active before first write.
+        // Blocks only on the first call; subsequent writes see indicationReady == true.
+        try waitForIndicationSubscription(timeout: timeout)
 
         // Chunk writes to the peripheral's MTU to avoid silent truncation.
         let mtu = peripheral.maximumWriteValueLength(for: writeType)
@@ -245,16 +294,45 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
             peripheral.setNotifyValue(false, for: characteristic)
         }
 
-        // Unblock any waiting reads/writes
+        // Unblock any waiting reads/writes/indication subscription
         readSemaphore.signal()
         writeSemaphore.signal()
         writeReadySemaphore.signal()
+        indicationSemaphore.signal()
     }
 }
 
 // MARK: - CBPeripheralDelegate
 
 extension BLEPeripheralTransport: CBPeripheralDelegate {
+    nonisolated func peripheral(
+        _ peripheral: CBPeripheral,
+        didUpdateNotificationStateFor characteristic: CBCharacteristic,
+        error: Error?
+    ) {
+        if let error {
+            if Self.enableLogging {
+                bleLog.error("SUBSCRIBE error: \(error.localizedDescription)")
+            }
+            lock.lock()
+            lastError = error
+            lock.unlock()
+            indicationSemaphore.signal()
+            return
+        }
+
+        if Self.enableLogging {
+            bleLog.info("SUBSCRIBE success: isNotifying=\(characteristic.isNotifying)")
+        }
+
+        if characteristic.isNotifying {
+            lock.lock()
+            indicationReady = true
+            lock.unlock()
+            indicationSemaphore.signal()
+        }
+    }
+
     nonisolated func peripheral(
         _ peripheral: CBPeripheral,
         didUpdateValueFor characteristic: CBCharacteristic,

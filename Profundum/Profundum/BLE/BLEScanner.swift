@@ -262,9 +262,9 @@ extension BLEScanner: CBPeripheralDelegate {
                 txChar = nil
             }
         } else {
-            // Fallback: pick the first characteristic that supports notify + write
+            // Fallback: pick the first characteristic that supports notify/indicate + write
             rxChar = characteristics.first { char in
-                char.properties.contains(.notify) &&
+                (char.properties.contains(.notify) || char.properties.contains(.indicate)) &&
                     (char.properties.contains(.write) || char.properties.contains(.writeWithoutResponse))
             }
             txChar = nil

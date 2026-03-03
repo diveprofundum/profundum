@@ -583,6 +583,42 @@ final class DiveComputerTests: XCTestCase {
         )
     }
 
+    // MARK: - parseDeviceName Tests
+
+    func testHalcyonParseDeviceName() {
+        let result = KnownDiveComputer.halcyonSymbios.parseDeviceName("2408070161")
+        XCTAssertEqual(result?.model, "Symbios Handset")
+        XCTAssertEqual(result?.serial, "2408070161")
+    }
+
+    func testHalcyonParseDeviceNameUnknownModel() {
+        let result = KnownDiveComputer.halcyonSymbios.parseDeviceName("2408990161")
+        XCTAssertEqual(result?.model, "Symbios")
+        XCTAssertEqual(result?.serial, "2408990161")
+    }
+
+    func testHalcyonParseDeviceNameTooShort() {
+        let result = KnownDiveComputer.halcyonSymbios.parseDeviceName("12345")
+        XCTAssertNil(result)
+    }
+
+    func testHalcyonParseDeviceNameNonNumeric() {
+        let result = KnownDiveComputer.halcyonSymbios.parseDeviceName("Perdix 2")
+        XCTAssertNil(result)
+    }
+
+    func testExistingDevicesParseDeviceNameNil() {
+        let existingDevices: [KnownDiveComputer] = [
+            .shearwater, .hwOstc, .suuntoEon, .garminDescent, .maresGenius,
+        ]
+        for device in existingDevices {
+            XCTAssertNil(
+                device.parseDeviceName("2408070161"),
+                "\(device) should return nil from parseDeviceName"
+            )
+        }
+    }
+
     func testExistingDevicesReturnNilForNewProperties() {
         // All pre-existing devices should return nil for the new optional properties
         let existingDevices: [KnownDiveComputer] = [

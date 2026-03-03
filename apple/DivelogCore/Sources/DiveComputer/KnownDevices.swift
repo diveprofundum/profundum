@@ -75,6 +75,31 @@ public enum KnownDiveComputer: String, CaseIterable, Sendable {
         }
     }
 
+    /// Extract a structured model name and serial number from the BLE advertised name.
+    ///
+    /// Halcyon Symbios advertises its serial number as the BLE name (e.g. `"2408070161"`)
+    /// rather than a model name. This method decodes the serial to extract the model.
+    ///
+    /// Returns `nil` for devices that use a standard model name (all non-Halcyon devices).
+    public func parseDeviceName(_ name: String) -> (model: String, serial: String)? {
+        switch self {
+        case .halcyonSymbios:
+            // Halcyon serial format: YYMM<model_code><sequence>
+            // Must be all-numeric and at least 6 characters.
+            guard name.count >= 6, name.allSatisfy(\.isNumber) else { return nil }
+            let modelCode = String(name[name.index(name.startIndex, offsetBy: 4)
+                                        ..< name.index(name.startIndex, offsetBy: 6)])
+            let modelName: String
+            switch modelCode {
+            case "07": modelName = "Symbios Handset"
+            default:   modelName = "Symbios"
+            }
+            return (model: modelName, serial: name)
+        default:
+            return nil
+        }
+    }
+
     /// All service UUIDs to pass to `CBCentralManager.scanForPeripherals`.
     public static var allServiceUUIDs: [String] {
         allCases.map(\.serviceUUID)
