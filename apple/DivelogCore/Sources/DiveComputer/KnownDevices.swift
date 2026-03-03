@@ -21,11 +21,11 @@ public enum KnownDiveComputer: String, CaseIterable, Sendable {
         }
     }
 
-    /// The BLE characteristic UUID used for reading data (Rx).
+    /// The BLE characteristic UUID used for receiving data (notifications/indications).
     ///
     /// For most devices this is also used for writes. For devices with separate
-    /// Rx/Tx characteristics (e.g. Halcyon Symbios), use `writeCharacteristicUUID`
-    /// for writes.
+    /// read/write characteristics (e.g. Halcyon Symbios), use `writeCharacteristicUUID`
+    /// for writes. On Halcyon this is the device's Tx characteristic (0x0201).
     public var characteristicUUID: String {
         switch self {
         case .shearwater:      return "27B7570B-359E-45A3-91BB-CF7E70049BD2"
@@ -33,7 +33,7 @@ public enum KnownDiveComputer: String, CaseIterable, Sendable {
         case .suuntoEon:       return "98AE7121-E62E-11E3-BADD-0002A5D5C51B"
         case .garminDescent:   return "6A4E2403-667B-11E3-949A-0800200C9A66"
         case .maresGenius:     return "CB3C4002-B2E0-4F77-8576-40470BCCE600"
-        case .halcyonSymbios:  return "00000101-8C3B-4F2C-A59E-8C08224F3253"
+        case .halcyonSymbios:  return "00000201-8C3B-4F2C-A59E-8C08224F3253"
         }
     }
 
@@ -62,15 +62,16 @@ public enum KnownDiveComputer: String, CaseIterable, Sendable {
         }
     }
 
-    /// A separate BLE characteristic UUID used for writing (Tx), when the device
-    /// uses distinct Rx and Tx characteristics.
+    /// A separate BLE characteristic UUID used for writing commands, when the device
+    /// uses distinct read and write characteristics.
     ///
     /// Most devices use a single bidirectional characteristic. Halcyon Symbios
-    /// uses separate Rx (`characteristicUUID`) and Tx characteristics.
+    /// uses separate characteristics: 0x0201 for receiving data (device Tx) and
+    /// 0x0101 for sending commands (device Rx).
     /// Returns `nil` for devices that use `characteristicUUID` for both.
     public var writeCharacteristicUUID: String? {
         switch self {
-        case .halcyonSymbios:  return "00000201-8C3B-4F2C-A59E-8C08224F3253"
+        case .halcyonSymbios:  return "00000101-8C3B-4F2C-A59E-8C08224F3253"
         default:               return nil
         }
     }
