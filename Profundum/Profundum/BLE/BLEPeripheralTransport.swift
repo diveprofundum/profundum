@@ -25,9 +25,13 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
     /// Set to `true` to enable detailed BLE-level logging via os_log.
     static var enableLogging = false
     private let peripheral: CBPeripheral
+    /// The Rx characteristic used for reading data (notifications/indications).
     private let characteristic: CBCharacteristic
+    /// The characteristic used for writing data. Falls back to `characteristic`
+    /// when the device uses a single bidirectional characteristic.
+    private let writeCharacteristic: CBCharacteristic
 
-    /// The CBCharacteristicWriteType determined from the characteristic's properties.
+    /// The CBCharacteristicWriteType determined from the write characteristic's properties.
     /// `.writeWithoutResponse` is required by most BLE dive computers (Shearwater, etc.).
     private let writeType: CBCharacteristicWriteType
 
@@ -56,13 +60,22 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         peripheral.name
     }
 
+    /// - Parameters:
+    ///   - peripheral: The connected `CBPeripheral`.
+    ///   - characteristic: The Rx characteristic for reading (notifications/indications).
+    ///   - writeCharacteristic: An optional separate Tx characteristic for writing.
+    ///     When `nil`, `characteristic` is used for both reads and writes.
     @MainActor
-    init(peripheral: CBPeripheral, characteristic: CBCharacteristic) {
+    init(peripheral: CBPeripheral, characteristic: CBCharacteristic,
+         writeCharacteristic: CBCharacteristic? = nil) {
         self.peripheral = peripheral
         self.characteristic = characteristic
+        self.writeCharacteristic = writeCharacteristic ?? characteristic
+        // Determine write type from the write characteristic's properties.
         // Prefer writeWithoutResponse — most BLE dive computers require it.
         // Fall back to withResponse only if the characteristic doesn't support it.
-        if characteristic.properties.contains(.writeWithoutResponse) {
+        let txChar = writeCharacteristic ?? characteristic
+        if txChar.properties.contains(.writeWithoutResponse) {
             self.writeType = .withoutResponse
         } else {
             self.writeType = .withResponse
@@ -182,9 +195,9 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
                     lock.unlock()
                     if closed { throw DiveComputerError.disconnected }
                 }
-                peripheral.writeValue(chunk, for: characteristic, type: .withoutResponse)
+                peripheral.writeValue(chunk, for: writeCharacteristic, type: .withoutResponse)
             } else {
-                peripheral.writeValue(chunk, for: characteristic, type: .withResponse)
+                peripheral.writeValue(chunk, for: writeCharacteristic, type: .withResponse)
 
                 let deadline: DispatchTime = timeout == .infinity
                     ? .distantFuture
