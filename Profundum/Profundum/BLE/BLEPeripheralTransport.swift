@@ -93,15 +93,17 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         peripheral.delegate = self
         peripheral.setNotifyValue(true, for: characteristic)
 
-        if Self.enableLogging {
-            let mtu = peripheral.maximumWriteValueLength(for: self.writeType)
-            let writeTypeName = self.writeType == .withoutResponse
-                ? "withoutResponse" : "withResponse"
-            let props = String(describing: characteristic.properties.rawValue)
-            bleLog.info(
-                "BLETransport init: writeType=\(writeTypeName), MTU=\(mtu), properties=\(props)"
-            )
-        }
+        // Always log characteristic setup — critical for diagnosing BLE protocol issues.
+        let mtu = peripheral.maximumWriteValueLength(for: self.writeType)
+        let writeTypeName = self.writeType == .withoutResponse
+            ? "withoutResponse" : "withResponse"
+        let rxUUID = characteristic.uuid.uuidString
+        let rxProps = String(characteristic.properties.rawValue, radix: 16)
+        let txUUID = (writeCharacteristic ?? characteristic).uuid.uuidString
+        let txProps = String((writeCharacteristic ?? characteristic).properties.rawValue, radix: 16)
+        bleLog.info(
+            "BLETransport init: Rx=\(rxUUID) props=0x\(rxProps) Tx=\(txUUID) props=0x\(txProps) writeType=\(writeTypeName) MTU=\(mtu)"
+        )
     }
 
     func read(count: Int, timeout: TimeInterval) throws -> Data {

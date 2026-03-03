@@ -1,6 +1,9 @@
 import Combine
 import CoreBluetooth
 import DivelogCore
+import os
+
+private let scanLog = Logger(subsystem: "com.divelog.profundum", category: "BLEScanner")
 
 struct DiscoveredDevice: Identifiable {
     let id: UUID
@@ -243,6 +246,12 @@ extension BLEScanner: CBPeripheralDelegate {
         error: Error?
     ) {
         guard error == nil, let characteristics = service.characteristics else { return }
+
+        // Dump all discovered characteristics — critical for diagnosing BLE protocol issues.
+        for char in characteristics {
+            let props = String(char.properties.rawValue, radix: 16)
+            scanLog.info("  Characteristic \(char.uuid) properties=0x\(props)")
+        }
 
         // Capture before use — pendingKnownComputer is nonisolated(unsafe)
         let knownComputer = pendingKnownComputer
