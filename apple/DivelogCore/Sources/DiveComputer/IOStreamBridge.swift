@@ -70,7 +70,12 @@ public final class IOStreamBridge {
 
 private func ioBridgeSetTimeout(_ userdata: UnsafeMutableRawPointer?, _ timeout: Int32) -> dc_status_t {
     let bridge = Unmanaged<IOStreamBridge>.fromOpaque(userdata!).takeUnretainedValue()
-    bridge.currentTimeout = timeout < 0 ? .infinity : TimeInterval(timeout) / 1000.0
+    let requested = timeout < 0 ? TimeInterval.infinity : TimeInterval(timeout) / 1000.0
+    // BLE has higher latency and jitter than serial/USB due to indication
+    // round-trips, connection interval scheduling, and parameter renegotiation.
+    // Enforce a 10-second floor to prevent false timeouts during sustained
+    // block transfers (libdivecomputer defaults to 3s, designed for serial).
+    bridge.currentTimeout = max(requested, 10.0)
     bridge.tracingTransport?.recordSetTimeout(ms: Int(timeout))
     return DC_STATUS_SUCCESS
 }

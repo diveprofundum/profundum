@@ -177,7 +177,6 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         lock.lock()
         if indicationReady {
             lock.unlock()
-            bleLog.info("waitForIndication: already ready")
             return
         }
         lock.unlock()
