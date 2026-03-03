@@ -16,9 +16,11 @@ private let bleLog = Logger(subsystem: "com.divelog.profundum", category: "BLETr
 /// Marked `@unchecked Sendable` because mutable state is protected manually:
 ///
 /// - **`lock`** (`NSLock`) guards all mutable state: `readBuffer`, `lastError`,
-///   and `isClosed`. Every read or write of these properties acquires the lock.
-/// - **Semaphores** (`readSemaphore`, `writeSemaphore`, `writeReadySemaphore`)
-///   are signalled *after* releasing the lock to unblock waiting threads safely.
+///   `isClosed`, and `indicationReady`. Every read or write of these properties
+///   acquires the lock.
+/// - **Semaphores** (`readSemaphore`, `writeSemaphore`, `writeReadySemaphore`,
+///   `indicationSemaphore`) are signalled *after* releasing the lock to unblock
+///   waiting threads safely.
 /// - **Callers** must not call `read`/`write` from the main actor or the Swift
 ///   cooperative thread pool — use a dedicated `DispatchQueue`.
 final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable {

@@ -597,6 +597,11 @@ final class DiveComputerTests: XCTestCase {
         XCTAssertEqual(result?.serial, "2408990161")
     }
 
+    func testHalcyonParseDeviceNameEmpty() {
+        let result = KnownDiveComputer.halcyonSymbios.parseDeviceName("")
+        XCTAssertNil(result)
+    }
+
     func testHalcyonParseDeviceNameTooShort() {
         let result = KnownDiveComputer.halcyonSymbios.parseDeviceName("12345")
         XCTAssertNil(result)
