@@ -177,14 +177,17 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         lock.lock()
         if indicationReady {
             lock.unlock()
+            bleLog.info("waitForIndication: already ready")
             return
         }
         lock.unlock()
 
+        bleLog.info("waitForIndication: waiting (timeout=\(timeout)s)")
         let deadline: DispatchTime = timeout == .infinity
             ? .distantFuture
             : .now() + timeout
         let result = indicationSemaphore.wait(timeout: deadline)
+        bleLog.info("waitForIndication: done (timedOut=\(result == .timedOut))")
 
         lock.lock()
         let closed = isClosed
@@ -234,13 +237,12 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
             let chunkSize = min(mtu, data.count - offset)
             let chunk = data.subdata(in: offset..<(offset + chunkSize))
 
-            if Self.enableLogging {
-                let n = chunkIndex + 1
-                let tot = data.count
-                bleLog.info(
-                    "WRITE chunk \(n)/\(totalChunks): \(chunkSize)B (total \(tot), offset \(offset))"
-                )
-            }
+            let n = chunkIndex + 1
+            let txUUID = writeCharacteristic.uuid.uuidString
+            let wtName = writeType == .withoutResponse ? "noRsp" : "rsp"
+            bleLog.info(
+                "WRITE \(n)/\(totalChunks) \(chunkSize)B to \(txUUID) (\(wtName))"
+            )
 
             if writeType == .withoutResponse {
                 // Wait until the peripheral can accept another packet.
@@ -330,10 +332,11 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
         guard characteristic.uuid == self.characteristic.uuid
             || characteristic.uuid == self.writeCharacteristic.uuid else { return }
 
+        let charUUID = characteristic.uuid.uuidString
         if let error {
-            if Self.enableLogging {
-                bleLog.error("SUBSCRIBE error: \(error.localizedDescription)")
-            }
+            bleLog.error(
+                "SUBSCRIBE error: \(charUUID) — \(error.localizedDescription)"
+            )
             lock.lock()
             lastError = error
             lock.unlock()
@@ -341,9 +344,9 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
             return
         }
 
-        if Self.enableLogging {
-            bleLog.info("SUBSCRIBE success: isNotifying=\(characteristic.isNotifying)")
-        }
+        bleLog.info(
+            "SUBSCRIBE success: \(charUUID) isNotifying=\(characteristic.isNotifying)"
+        )
 
         if characteristic.isNotifying {
             lock.lock()
@@ -371,9 +374,8 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
 
         guard let value = characteristic.value, !value.isEmpty else { return }
 
-        if Self.enableLogging {
-            bleLog.info("NOTIFY received: \(value.count) bytes")
-        }
+        let fromUUID = characteristic.uuid.uuidString
+        bleLog.info("NOTIFY received: \(value.count) bytes from \(fromUUID)")
 
         lock.lock()
         readBuffer.append(value)
