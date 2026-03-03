@@ -92,6 +92,14 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         super.init()
         peripheral.delegate = self
         peripheral.setNotifyValue(true, for: characteristic)
+        // When Rx and Tx are separate characteristics that both support indications
+        // (e.g. Halcyon Symbios: both have .indicate), subscribe to the Tx characteristic
+        // too. The device may respond on the same characteristic it received the write on.
+        if let txChar = writeCharacteristic,
+           txChar.uuid != characteristic.uuid,
+           txChar.properties.contains(.indicate) || txChar.properties.contains(.notify) {
+            peripheral.setNotifyValue(true, for: txChar)
+        }
 
         // Always log characteristic setup — critical for diagnosing BLE protocol issues.
         let mtu = peripheral.maximumWriteValueLength(for: self.writeType)
@@ -102,8 +110,9 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         let txUUID = (writeCharacteristic ?? characteristic).uuid.uuidString
         let txProps = String((writeCharacteristic ?? characteristic).properties.rawValue, radix: 16)
         bleLog.info(
-            "BLETransport init: Rx=\(rxUUID) props=0x\(rxProps) Tx=\(txUUID) props=0x\(txProps) writeType=\(writeTypeName) MTU=\(mtu)"
+            "BLE init: Rx=\(rxUUID) props=0x\(rxProps) Tx=\(txUUID) props=0x\(txProps)"
         )
+        bleLog.info("BLE init: writeType=\(writeTypeName) MTU=\(mtu)")
     }
 
     func read(count: Int, timeout: TimeInterval) throws -> Data {
@@ -297,6 +306,9 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         if characteristic.isNotifying {
             peripheral.setNotifyValue(false, for: characteristic)
         }
+        if writeCharacteristic.uuid != characteristic.uuid, writeCharacteristic.isNotifying {
+            peripheral.setNotifyValue(false, for: writeCharacteristic)
+        }
 
         // Unblock any waiting reads/writes/indication subscription
         readSemaphore.signal()
@@ -314,8 +326,9 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
         didUpdateNotificationStateFor characteristic: CBCharacteristic,
         error: Error?
     ) {
-        // Only handle our Rx characteristic — ignore state changes on other characteristics.
-        guard characteristic.uuid == self.characteristic.uuid else { return }
+        // Only handle our Rx or Tx characteristics — ignore unrelated state changes.
+        guard characteristic.uuid == self.characteristic.uuid
+            || characteristic.uuid == self.writeCharacteristic.uuid else { return }
 
         if let error {
             if Self.enableLogging {
