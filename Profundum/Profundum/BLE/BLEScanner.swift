@@ -258,6 +258,10 @@ extension BLEScanner: CBPeripheralDelegate {
             if let writeUUID = known.writeCharacteristicUUID {
                 let txUUID = CBUUID(string: writeUUID)
                 txChar = characteristics.first { $0.uuid == txUUID }
+                // Fail early if the expected Tx characteristic wasn't discovered.
+                // Without it, writes would silently go to the Rx characteristic
+                // and cause protocol-level timeouts.
+                if txChar == nil { return }
             } else {
                 txChar = nil
             }

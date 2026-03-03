@@ -312,6 +312,9 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
         didUpdateNotificationStateFor characteristic: CBCharacteristic,
         error: Error?
     ) {
+        // Only handle our Rx characteristic — ignore state changes on other characteristics.
+        guard characteristic.uuid == self.characteristic.uuid else { return }
+
         if let error {
             if Self.enableLogging {
                 bleLog.error("SUBSCRIBE error: \(error.localizedDescription)")
