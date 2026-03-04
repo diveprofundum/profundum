@@ -32,6 +32,14 @@ public final class ImportProgressTracker: @unchecked Sendable {
     }
 
     public var shouldAutoStop: Bool { consecutiveSkips >= consecutiveSkipThreshold }
+
+    /// Resets the consecutive skip counter without losing accumulated totals.
+    ///
+    /// Called before a retry attempt so that re-enumerated (already-saved) dives
+    /// don't trigger auto-stop prematurely.
+    public func resetConsecutiveSkips() {
+        consecutiveSkips = 0
+    }
 }
 
 /// Key for deduplicating gas mixes by composition and usage.
