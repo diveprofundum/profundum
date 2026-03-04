@@ -69,6 +69,12 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         peripheral.name
     }
 
+    /// Indication-based transports (writeType == .withResponse) need a larger
+    /// timeout floor due to GATT confirmation round-trips on every packet.
+    var minimumTimeoutSeconds: TimeInterval {
+        writeType == .withResponse ? 10.0 : 5.0
+    }
+
     /// - Parameters:
     ///   - peripheral: The connected `CBPeripheral`.
     ///   - characteristic: The Rx characteristic for reading (notifications/indications).
@@ -236,12 +242,14 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
             let chunkSize = min(mtu, data.count - offset)
             let chunk = data.subdata(in: offset..<(offset + chunkSize))
 
-            let n = chunkIndex + 1
-            let txUUID = writeCharacteristic.uuid.uuidString
-            let wtName = writeType == .withoutResponse ? "noRsp" : "rsp"
-            bleLog.info(
-                "WRITE \(n)/\(totalChunks) \(chunkSize)B to \(txUUID) (\(wtName))"
-            )
+            if Self.enableLogging {
+                let n = chunkIndex + 1
+                let txUUID = writeCharacteristic.uuid.uuidString
+                let wtName = writeType == .withoutResponse ? "noRsp" : "rsp"
+                bleLog.info(
+                    "WRITE \(n)/\(totalChunks) \(chunkSize)B to \(txUUID) (\(wtName))"
+                )
+            }
 
             if writeType == .withoutResponse {
                 // Wait until the peripheral can accept another packet.
@@ -347,7 +355,10 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
             "SUBSCRIBE success: \(charUUID) isNotifying=\(characteristic.isNotifying)"
         )
 
-        if characteristic.isNotifying {
+        // Only gate on the Rx characteristic — the Tx subscription is informational.
+        // If we set indicationReady on Tx first, the write gate opens before the
+        // device is ready to emit responses on Rx.
+        if characteristic.isNotifying, characteristic.uuid == self.characteristic.uuid {
             lock.lock()
             indicationReady = true
             lock.unlock()
@@ -373,8 +384,10 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
 
         guard let value = characteristic.value, !value.isEmpty else { return }
 
-        let fromUUID = characteristic.uuid.uuidString
-        bleLog.info("NOTIFY received: \(value.count) bytes from \(fromUUID)")
+        if Self.enableLogging {
+            let fromUUID = characteristic.uuid.uuidString
+            bleLog.info("NOTIFY received: \(value.count) bytes from \(fromUUID)")
+        }
 
         lock.lock()
         readBuffer.append(value)

@@ -19,4 +19,16 @@ public protocol BLETransport: AnyObject, Sendable {
 
     /// The advertised device name, if available.
     var deviceName: String? { get }
+
+    /// Minimum timeout in seconds that libdivecomputer should use for this transport.
+    ///
+    /// BLE has higher latency than serial/USB. Devices using indications (which require
+    /// a GATT confirmation round-trip per packet) need a larger floor than those using
+    /// notifications. Returns 0 to use the timeout as-is (no floor).
+    var minimumTimeoutSeconds: TimeInterval { get }
+}
+
+extension BLETransport {
+    /// Default: no timeout floor.
+    public var minimumTimeoutSeconds: TimeInterval { 0 }
 }

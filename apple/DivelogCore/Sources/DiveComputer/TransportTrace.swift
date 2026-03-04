@@ -44,6 +44,7 @@ public final class TracingBLETransport: BLETransport, @unchecked Sendable {
     private var _entries: [TransportTraceEntry] = []
 
     public var deviceName: String? { inner.deviceName }
+    public var minimumTimeoutSeconds: TimeInterval { inner.minimumTimeoutSeconds }
 
     /// All recorded trace entries.
     public var entries: [TransportTraceEntry] {
