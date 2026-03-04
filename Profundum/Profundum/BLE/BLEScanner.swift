@@ -54,6 +54,14 @@ class BLEScanner: NSObject, ObservableObject {
     /// See class-level doc comment for the full thread safety rationale.
     nonisolated(unsafe) private var pendingKnownComputer: KnownDiveComputer?
 
+    /// Accumulated Rx/Tx characteristics across service discovery callbacks.
+    /// For split Rx/Tx devices (e.g. Halcyon), Rx and Tx may be in different
+    /// GATT services. We accumulate them across `didDiscoverCharacteristicsFor`
+    /// callbacks and only create the transport when both are found.
+    /// Same safety model as `pendingKnownComputer` — see class-level doc.
+    nonisolated(unsafe) private var pendingRxChar: CBCharacteristic?
+    nonisolated(unsafe) private var pendingTxChar: CBCharacteristic?
+
     override init() {
         super.init()
         centralManager = CBCentralManager(delegate: self, queue: nil)
@@ -82,6 +90,8 @@ class BLEScanner: NSObject, ObservableObject {
         if let device = discoveredDevices.first(where: { $0.peripheral.identifier == peripheral.identifier }) {
             pendingKnownComputer = device.knownComputer
         }
+        pendingRxChar = nil
+        pendingTxChar = nil
         centralManager.connect(peripheral, options: nil)
     }
 
@@ -93,6 +103,8 @@ class BLEScanner: NSObject, ObservableObject {
         transport = nil
         connectedKnownComputer = nil
         pendingKnownComputer = nil
+        pendingRxChar = nil
+        pendingTxChar = nil
         if let peripheral = connectedPeripheral {
             centralManager.cancelPeripheralConnection(peripheral)
         }
@@ -188,6 +200,8 @@ extension BLEScanner: CBCentralManagerDelegate {
             self?.isConnecting = false
             self?.connectedPeripheral = nil
             self?.pendingKnownComputer = nil
+            self?.pendingRxChar = nil
+            self?.pendingTxChar = nil
         }
     }
 
@@ -206,6 +220,8 @@ extension BLEScanner: CBCentralManagerDelegate {
                 }
                 self.transport = nil
                 self.connectedKnownComputer = nil
+                self.pendingRxChar = nil
+                self.pendingTxChar = nil
                 self.connectedPeripheral = nil
             }
         }
@@ -219,7 +235,28 @@ extension BLEScanner: CBPeripheralDelegate {
         _ peripheral: CBPeripheral,
         didDiscoverServices error: Error?
     ) {
-        guard error == nil, let services = peripheral.services else { return }
+        if let error {
+            scanLog.error("Service discovery failed: \(error.localizedDescription, privacy: .public)")
+            Task { @MainActor [weak self] in self?.isConnecting = false }
+            return
+        }
+        guard let services = peripheral.services, !services.isEmpty else {
+            // Capture before use — pendingKnownComputer is nonisolated(unsafe)
+            let knownComputer = pendingKnownComputer
+            if knownComputer != nil {
+                // Targeted discovery found nothing — retry with full discovery.
+                // Clear pendingKnownComputer so the second callback (if also empty)
+                // takes the "no known computer" path and resets isConnecting instead
+                // of looping.
+                scanLog.info("Targeted service discovery found nothing — falling back to full discovery")
+                pendingKnownComputer = nil
+                peripheral.discoverServices(nil)
+                return
+            }
+            scanLog.error("Service discovery returned no services")
+            Task { @MainActor [weak self] in self?.isConnecting = false }
+            return
+        }
 
         // Capture before iterating — pendingKnownComputer is nonisolated(unsafe)
         let knownComputer = pendingKnownComputer
@@ -245,60 +282,108 @@ extension BLEScanner: CBPeripheralDelegate {
         didDiscoverCharacteristicsFor service: CBService,
         error: Error?
     ) {
-        guard error == nil, let characteristics = service.characteristics else { return }
+        if let error {
+            let svcUUID = service.uuid.uuidString
+            let errMsg = error.localizedDescription
+            scanLog.error(
+                "Char discovery failed \(svcUUID, privacy: .public): \(errMsg, privacy: .public)"
+            )
+            Task { @MainActor [weak self] in self?.isConnecting = false }
+            return
+        }
+        guard let characteristics = service.characteristics, !characteristics.isEmpty else {
+            scanLog.error("Characteristic discovery returned no characteristics for \(service.uuid, privacy: .public)")
+            // Don't reset isConnecting — other services may still report characteristics.
+            return
+        }
 
         // Dump all discovered characteristics — critical for diagnosing BLE protocol issues.
         for char in characteristics {
             let props = String(char.properties.rawValue, radix: 16)
-            scanLog.info("  Characteristic \(char.uuid) properties=0x\(props)")
+            scanLog.notice("  Characteristic \(char.uuid, privacy: .public) properties=0x\(props, privacy: .public)")
         }
 
         // Capture before use — pendingKnownComputer is nonisolated(unsafe)
         let knownComputer = pendingKnownComputer
 
-        // Find the Rx (read/notify) characteristic and optional Tx (write) characteristic.
-        let rxChar: CBCharacteristic?
-        let txChar: CBCharacteristic?
-
         if let known = knownComputer {
             let rxUUID = CBUUID(string: known.characteristicUUID)
-            rxChar = characteristics.first { $0.uuid == rxUUID }
+            let foundRx = characteristics.first { $0.uuid == rxUUID }
 
             if let writeUUID = known.writeCharacteristicUUID {
+                // Split Rx/Tx device (e.g. Halcyon Symbios).
+                // Accumulate discovered chars across service callbacks — Rx and Tx
+                // may be in different GATT services.
                 let txUUID = CBUUID(string: writeUUID)
-                txChar = characteristics.first { $0.uuid == txUUID }
-                // Fail early if the expected Tx characteristic wasn't discovered.
-                // Without it, writes would silently go to the Rx characteristic
-                // and cause protocol-level timeouts.
-                if txChar == nil {
-                    scanLog.error("Expected Tx characteristic \(writeUUID) not found — aborting")
-                    Task { @MainActor [weak self] in self?.isConnecting = false }
+                let foundTx = characteristics.first { $0.uuid == txUUID }
+
+                if let rx = foundRx { pendingRxChar = rx }
+                if let tx = foundTx { pendingTxChar = tx }
+
+                // Only create the transport when both Rx and Tx are found.
+                guard let rxChar = pendingRxChar, let txChar = pendingTxChar else {
+                    let haveRx = pendingRxChar != nil
+                    let haveTx = pendingTxChar != nil
+                    let svcUUID = service.uuid.uuidString
+                    scanLog.info("Service \(svcUUID, privacy: .public): Rx=\(haveRx) Tx=\(haveTx) — waiting")
                     return
                 }
+
+                Task { @MainActor [weak self] in
+                    guard let self, self.transport == nil else { return }
+                    self.isConnecting = false
+                    self.pendingRxChar = nil
+                    self.pendingTxChar = nil
+                    let bleTransport = BLEPeripheralTransport(
+                        peripheral: peripheral,
+                        characteristic: rxChar,
+                        writeCharacteristic: txChar
+                    )
+                    self.transport = bleTransport
+                    self.connectedKnownComputer = knownComputer
+                }
             } else {
-                txChar = nil
+                // Single-characteristic device (e.g. Shearwater) — create transport immediately.
+                guard let rxChar = foundRx else {
+                    scanLog.error("No Rx characteristic found in service \(service.uuid, privacy: .public)")
+                    // Don't reset isConnecting — other services may still have it.
+                    return
+                }
+
+                Task { @MainActor [weak self] in
+                    guard let self, self.transport == nil else { return }
+                    self.isConnecting = false
+                    let bleTransport = BLEPeripheralTransport(
+                        peripheral: peripheral,
+                        characteristic: rxChar
+                    )
+                    self.transport = bleTransport
+                    self.connectedKnownComputer = knownComputer
+                }
             }
         } else {
             // Fallback: pick the first characteristic that supports notify/indicate + write
-            rxChar = characteristics.first { char in
+            let rxChar = characteristics.first { char in
                 (char.properties.contains(.notify) || char.properties.contains(.indicate)) &&
                     (char.properties.contains(.write) || char.properties.contains(.writeWithoutResponse))
             }
-            txChar = nil
-        }
 
-        guard let characteristic = rxChar else { return }
+            guard let characteristic = rxChar else {
+                scanLog.error("No suitable Rx characteristic found in service \(service.uuid, privacy: .public)")
+                // Don't reset isConnecting — other services may still have it.
+                return
+            }
 
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            self.isConnecting = false
-            let bleTransport = BLEPeripheralTransport(
-                peripheral: peripheral,
-                characteristic: characteristic,
-                writeCharacteristic: txChar
-            )
-            self.transport = bleTransport
-            self.connectedKnownComputer = knownComputer
+            Task { @MainActor [weak self] in
+                guard let self, self.transport == nil else { return }
+                self.isConnecting = false
+                let bleTransport = BLEPeripheralTransport(
+                    peripheral: peripheral,
+                    characteristic: characteristic
+                )
+                self.transport = bleTransport
+                self.connectedKnownComputer = knownComputer
+            }
         }
     }
 }

@@ -37,6 +37,11 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
     /// `.writeWithoutResponse` is required by most BLE dive computers (Shearwater, etc.).
     private let writeType: CBCharacteristicWriteType
 
+    /// Whether the Tx characteristic was validated to have write capability at init time.
+    /// When `false`, `write()` fails immediately with a clear error instead of a confusing
+    /// protocol-level failure.
+    private let writeCapabilityValidated: Bool
+
     /// Guards all mutable state: `readBuffer`, `lastError`, `isClosed`, `indicationReady`.
     private let lock = NSLock()
 
@@ -95,6 +100,15 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         } else {
             self.writeType = .withResponse
         }
+        self.writeCapabilityValidated =
+            txChar.properties.contains(.write) || txChar.properties.contains(.writeWithoutResponse)
+        if !self.writeCapabilityValidated {
+            let charUUID = txChar.uuid.uuidString
+            let props = String(txChar.properties.rawValue, radix: 16)
+            bleLog.error(
+                "Tx char \(charUUID, privacy: .public) no write — props=0x\(props, privacy: .public)"
+            )
+        }
         super.init()
         peripheral.delegate = self
         peripheral.setNotifyValue(true, for: characteristic)
@@ -115,10 +129,13 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         let rxProps = String(characteristic.properties.rawValue, radix: 16)
         let txUUID = (writeCharacteristic ?? characteristic).uuid.uuidString
         let txProps = String((writeCharacteristic ?? characteristic).properties.rawValue, radix: 16)
-        bleLog.info(
-            "BLE init: Rx=\(rxUUID) props=0x\(rxProps) Tx=\(txUUID) props=0x\(txProps)"
+        bleLog.notice(
+            "BLE init: Rx=\(rxUUID, privacy: .public) props=0x\(rxProps, privacy: .public)"
         )
-        bleLog.info("BLE init: writeType=\(writeTypeName) MTU=\(mtu)")
+        bleLog.notice(
+            "BLE init: Tx=\(txUUID, privacy: .public) props=0x\(txProps, privacy: .public)"
+        )
+        bleLog.notice("BLE init: writeType=\(writeTypeName, privacy: .public) MTU=\(mtu)")
     }
 
     func read(count: Int, timeout: TimeInterval) throws -> Data {
@@ -187,12 +204,12 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         }
         lock.unlock()
 
-        bleLog.info("waitForIndication: waiting (timeout=\(timeout)s)")
+        bleLog.notice("waitForIndication: waiting (timeout=\(timeout, privacy: .public)s)")
         let deadline: DispatchTime = timeout == .infinity
             ? .distantFuture
             : .now() + timeout
         let result = indicationSemaphore.wait(timeout: deadline)
-        bleLog.info("waitForIndication: done (timedOut=\(result == .timedOut))")
+        bleLog.notice("waitForIndication: done (timedOut=\(result == .timedOut))")
 
         lock.lock()
         let closed = isClosed
@@ -214,6 +231,13 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
     }
 
     func write(_ data: Data, timeout: TimeInterval) throws {
+        guard writeCapabilityValidated else {
+            throw DiveComputerError.libdivecomputer(
+                status: -1,
+                message: "Write characteristic lacks write capability"
+            )
+        }
+
         lock.lock()
         if isClosed {
             lock.unlock()
@@ -227,6 +251,12 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
 
         // Chunk writes to the peripheral's MTU to avoid silent truncation.
         let mtu = peripheral.maximumWriteValueLength(for: writeType)
+        guard mtu > 0 else {
+            throw DiveComputerError.libdivecomputer(
+                status: -1,
+                message: "BLE MTU is 0 — cannot write"
+            )
+        }
         let totalChunks = (data.count + mtu - 1) / mtu
         var offset = 0
         var chunkIndex = 0
@@ -247,7 +277,7 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
                 let txUUID = writeCharacteristic.uuid.uuidString
                 let wtName = writeType == .withoutResponse ? "noRsp" : "rsp"
                 bleLog.info(
-                    "WRITE \(n)/\(totalChunks) \(chunkSize)B to \(txUUID) (\(wtName))"
+                    "WRITE \(n)/\(totalChunks) \(chunkSize)B \(txUUID, privacy: .public) \(wtName, privacy: .public)"
                 )
             }
 
@@ -342,7 +372,7 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
         let charUUID = characteristic.uuid.uuidString
         if let error {
             bleLog.error(
-                "SUBSCRIBE error: \(charUUID) — \(error.localizedDescription)"
+                "SUBSCRIBE error: \(charUUID, privacy: .public) — \(error.localizedDescription, privacy: .public)"
             )
             lock.lock()
             lastError = error
@@ -351,8 +381,8 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
             return
         }
 
-        bleLog.info(
-            "SUBSCRIBE success: \(charUUID) isNotifying=\(characteristic.isNotifying)"
+        bleLog.notice(
+            "SUBSCRIBE success: \(charUUID, privacy: .public) isNotifying=\(characteristic.isNotifying)"
         )
 
         // Only gate on the Rx characteristic — the Tx subscription is informational.
@@ -373,7 +403,7 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
     ) {
         if let error {
             if Self.enableLogging {
-                bleLog.error("NOTIFY error: \(error.localizedDescription)")
+                bleLog.error("NOTIFY error: \(error.localizedDescription, privacy: .public)")
             }
             lock.lock()
             lastError = error
@@ -386,7 +416,7 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
 
         if Self.enableLogging {
             let fromUUID = characteristic.uuid.uuidString
-            bleLog.info("NOTIFY received: \(value.count) bytes from \(fromUUID)")
+            bleLog.info("NOTIFY received: \(value.count) bytes from \(fromUUID, privacy: .public)")
         }
 
         lock.lock()

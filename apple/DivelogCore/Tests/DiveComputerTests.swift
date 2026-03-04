@@ -649,6 +649,20 @@ final class DiveComputerTests: XCTestCase {
         )
     }
 
+    func testRetryableErrors() {
+        // Communication failures are retryable
+        XCTAssertTrue(DiveComputerError.timeout.isRetryable)
+        XCTAssertTrue(DiveComputerError.disconnected.isRetryable)
+        XCTAssertTrue(
+            DiveComputerError.libdivecomputer(status: -8, message: "protocol").isRetryable
+        )
+
+        // Deterministic failures are not retryable
+        XCTAssertFalse(DiveComputerError.cancelled.isRetryable)
+        XCTAssertFalse(DiveComputerError.unsupportedDevice.isRetryable)
+        XCTAssertFalse(DiveComputerError.duplicateDive.isRetryable)
+    }
+
     func testErrorDescriptions() {
         XCTAssertNotNil(DiveComputerError.timeout.errorDescription)
         XCTAssertNotNil(DiveComputerError.disconnected.errorDescription)

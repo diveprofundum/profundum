@@ -61,6 +61,26 @@ final class ImportProgressTrackerTests: XCTestCase {
         XCTAssertEqual(tracker.skipped, 14)
     }
 
+    func testResetConsecutiveSkipsPreservesTotals() {
+        let tracker = ImportProgressTracker()
+
+        tracker.record(.saved)
+        tracker.record(.saved)
+        for _ in 0..<5 {
+            tracker.record(.skipped)
+        }
+        XCTAssertEqual(tracker.consecutiveSkips, 5)
+        XCTAssertEqual(tracker.saved, 2)
+        XCTAssertEqual(tracker.skipped, 5)
+
+        tracker.resetConsecutiveSkips()
+        XCTAssertEqual(tracker.consecutiveSkips, 0)
+        XCTAssertFalse(tracker.shouldAutoStop)
+        // Totals preserved
+        XCTAssertEqual(tracker.saved, 2)
+        XCTAssertEqual(tracker.skipped, 5)
+    }
+
     func testCustomThreshold() {
         let tracker = ImportProgressTracker(consecutiveSkipThreshold: 5)
 

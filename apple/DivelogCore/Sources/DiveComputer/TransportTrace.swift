@@ -97,29 +97,47 @@ public final class TracingBLETransport: BLETransport, @unchecked Sendable {
     // MARK: - Trace Output
 
     /// Prints a human-readable hex dump of all recorded I/O to os_log.
+    ///
+    /// All entries are logged at `.error` level so they persist in Console.app —
+    /// this method is only called on import failure/cancellation, so the elevated
+    /// level is appropriate and necessary for post-hoc diagnostics.
     public func dumpTrace() {
         let snapshot = entries
-        traceLog.info("=== BLE Transport Trace (\(snapshot.count) entries) ===")
+        traceLog.error("=== BLE Transport Trace (\(snapshot.count) entries) ===")
         for entry in snapshot {
             let ts = String(format: "%+.3f", entry.elapsed)
             switch entry.operation {
             case .read(let requested, let returned):
-                traceLog.info("[\(ts)] READ  req=\(requested) got=\(returned.count) | \(returned.hexDump)")
+                let hex = returned.hexDump
+                traceLog.error(
+                    "[\(ts, privacy: .public)] READ req=\(requested) got=\(returned.count) | \(hex, privacy: .public)"
+                )
             case .readError(let requested, let error):
-                traceLog.error("[\(ts)] READ  req=\(requested) ERROR: \(error)")
+                traceLog.error(
+                    "[\(ts, privacy: .public)] READ req=\(requested) ERROR: \(error, privacy: .public)"
+                )
             case .write(let data):
-                traceLog.info("[\(ts)] WRITE \(data.count) bytes | \(data.hexDump)")
+                let hex = data.hexDump
+                traceLog.error(
+                    "[\(ts, privacy: .public)] WRITE \(data.count)B | \(hex, privacy: .public)"
+                )
             case .writeError(let data, let error):
-                traceLog.error("[\(ts)] WRITE \(data.count) bytes ERROR: \(error) | \(data.hexDump)")
+                let hex = data.hexDump
+                traceLog.error(
+                    "[\(ts, privacy: .public)] WRITE \(data.count)B ERR \(error, privacy: .public)"
+                )
+                traceLog.error(
+                    "[\(ts, privacy: .public)] WRITE data: \(hex, privacy: .public)"
+                )
             case .setTimeout(let ms):
-                traceLog.info("[\(ts)] SET_TIMEOUT \(ms) ms")
+                traceLog.error("[\(ts, privacy: .public)] SET_TIMEOUT \(ms) ms")
             case .purge:
-                traceLog.info("[\(ts)] PURGE")
+                traceLog.error("[\(ts, privacy: .public)] PURGE")
             case .close:
-                traceLog.info("[\(ts)] CLOSE")
+                traceLog.error("[\(ts, privacy: .public)] CLOSE")
             }
         }
-        traceLog.info("=== End Trace ===")
+        traceLog.error("=== End Trace ===")
     }
 
     // MARK: - Private

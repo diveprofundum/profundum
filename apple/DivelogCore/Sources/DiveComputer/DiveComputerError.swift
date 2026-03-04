@@ -16,6 +16,22 @@ public enum DiveComputerError: Error, Equatable, Sendable {
     case cancelled
 }
 
+extension DiveComputerError {
+    /// Whether this error might succeed on a fresh BLE connection.
+    ///
+    /// Communication failures (timeout, disconnect, protocol errors) are
+    /// retryable. Deterministic failures (cancelled, unsupported device,
+    /// duplicate dive) are not.
+    public var isRetryable: Bool {
+        switch self {
+        case .timeout, .disconnected, .libdivecomputer:
+            return true
+        case .cancelled, .unsupportedDevice, .duplicateDive:
+            return false
+        }
+    }
+}
+
 extension DiveComputerError: LocalizedError {
     public var errorDescription: String? {
         switch self {
