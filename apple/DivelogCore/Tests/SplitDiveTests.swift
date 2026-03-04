@@ -244,6 +244,36 @@ final class SplitDiveTests: XCTestCase {
         }
     }
 
+    func testSplitWithNilGasMixIndex() throws {
+        let deviceA = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93")
+        let deviceB = Device(model: "Petrel", serialNumber: "B-5678", firmwareVersion: "93")
+
+        // No gas mixes, no gasmixIndex on samples (common for non-CCR dives)
+        let samplesA = [
+            ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0),
+            ParsedSample(tSec: 60, depthM: 20.0, tempC: 19.0),
+        ]
+        let samplesB = [
+            ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.5),
+            ParsedSample(tSec: 60, depthM: 19.0, tempC: 19.5),
+        ]
+
+        let diveId = try createMergedDive(
+            deviceA: deviceA, deviceB: deviceB,
+            samplesA: samplesA, samplesB: samplesB
+        )
+
+        let result = try importService.splitDive(diveId: diveId, deviceId: deviceB.id)
+
+        // Should succeed without error; samples have nil gasmixIndex
+        let newSamples = try diveService.getSamples(diveId: result.newDiveId)
+        XCTAssertEqual(newSamples.count, 2)
+        XCTAssertTrue(newSamples.allSatisfy { $0.gasmixIndex == nil })
+
+        let newMixes = try diveService.getGasMixes(diveId: result.newDiveId)
+        XCTAssertTrue(newMixes.isEmpty, "No gas mixes should be duplicated")
+    }
+
     func testSplitNoSamplesForDevice() throws {
         let deviceA = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93")
         let deviceB = Device(model: "Petrel", serialNumber: "B-5678", firmwareVersion: "93")

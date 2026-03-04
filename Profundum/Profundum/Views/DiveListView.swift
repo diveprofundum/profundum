@@ -299,6 +299,11 @@ struct DiveListView: View {
                             .foregroundColor(selectedDevice != nil ? .teal : .primary)
                             .cornerRadius(16)
                         }
+                        .accessibilityLabel(
+                            selectedDevice != nil
+                                ? "Filter by device: \(selectedDevice!.displayName)"
+                                : "Filter by device"
+                        )
                     }
 
                     ForEach(DiveTypeFilter.allCases, id: \.self) { filter in

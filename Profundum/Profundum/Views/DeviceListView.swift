@@ -180,6 +180,7 @@ struct DeviceRowView: View {
                         .background(Color.teal.opacity(0.2))
                         .foregroundColor(.teal)
                         .cornerRadius(4)
+                        .accessibilityLabel("Buddy's device")
                 }
                 if !device.isActive {
                     Text("Archived")
@@ -210,6 +211,7 @@ struct DeviceDetailView: View {
     var onArchive: (() -> Void)?
 
     @State private var ownership: DeviceOwnership = .mine
+    @State private var errorMessage: String?
 
     var body: some View {
         Form {
@@ -253,12 +255,25 @@ struct DeviceDetailView: View {
         .onAppear {
             ownership = device.ownership
         }
+        .alert("Error", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "")
+        }
     }
 
     private func saveOwnership(_ newOwnership: DeviceOwnership) {
         var updated = device
         updated.ownership = newOwnership
-        try? appState.diveService.saveDevice(updated)
+        do {
+            try appState.diveService.saveDevice(updated)
+        } catch {
+            errorMessage = "Failed to save ownership: \(error.localizedDescription)"
+            ownership = device.ownership
+        }
     }
 }
 

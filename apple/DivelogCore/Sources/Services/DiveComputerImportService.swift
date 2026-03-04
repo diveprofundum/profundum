@@ -390,12 +390,12 @@ public final class DiveComputerImportService: Sendable {
     /// In a single write transaction:
     /// 1. Validates the dive exists, has multiple source devices, and the target
     ///    device has samples that wouldn't empty the original.
-    /// 2. Duplicates gas mixes referenced by the split samples to the new dive.
-    /// 3. Moves samples (`dive_id` update) and remaps `gasmix_index`.
-    /// 4. Moves fingerprints for the target device.
-    /// 5. Creates the new dive with recomputed stats.
+    /// 2. Creates the new dive with recomputed stats (must exist before FK refs).
+    /// 3. Duplicates gas mixes referenced by the split samples to the new dive.
+    /// 4. Moves samples (`dive_id` update) and remaps `gasmix_index`.
+    /// 5. Moves fingerprints for the target device.
     /// 6. Copies tags to the new dive.
-    /// 7. Recomputes stats on the original dive.
+    /// 7. Recomputes stats and time range on the original dive.
     ///
     /// - Parameters:
     ///   - diveId: The merged dive to split.
@@ -510,9 +510,13 @@ public final class DiveComputerImportService: Sendable {
 
             // 7. Recompute original dive stats from remaining samples
             let remainingStats = Self.computeBasicStats(from: remainingSamples)
+            let remainingStartUnix = originalDive.startTimeUnix + Int64(remainingStats.startTSec)
+            let remainingEndUnix = originalDive.startTimeUnix + Int64(remainingStats.endTSec)
             try db.execute(
                 sql: """
                     UPDATE dives SET
+                        start_time_unix = ?,
+                        end_time_unix = ?,
                         max_depth_m = ?,
                         avg_depth_m = ?,
                         bottom_time_sec = ?,
@@ -523,6 +527,8 @@ public final class DiveComputerImportService: Sendable {
                     WHERE id = ?
                 """,
                 arguments: [
+                    remainingStartUnix,
+                    remainingEndUnix,
                     remainingStats.maxDepthM,
                     remainingStats.avgDepthM,
                     remainingStats.bottomTimeSec,
@@ -560,9 +566,10 @@ public final class DiveComputerImportService: Sendable {
             )
         }
         let sorted = samples.sorted { $0.tSec < $1.tSec }
-        let startT = sorted.first!.tSec
-        let endT = sorted.last!.tSec
-        let maxD = sorted.map(\.depthM).max()!
+        // Safe: guard above ensures non-empty
+        let startT = sorted[0].tSec
+        let endT = sorted[sorted.count - 1].tSec
+        let maxD = sorted.lazy.map(\.depthM).max() ?? 0
         let temps = sorted.map(\.tempC)
         let minT = temps.min()
         let maxT = temps.max()

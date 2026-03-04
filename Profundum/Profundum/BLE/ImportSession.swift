@@ -660,10 +660,10 @@ class ImportSession: ObservableObject {
         )
         do {
             try diveService?.saveDevice(device)
+            isNewDevice = true
         } catch {
             importLog.error("Failed to save new device: \(error.localizedDescription, privacy: .public)")
         }
-        isNewDevice = true
         return device
     }
 

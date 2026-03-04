@@ -15,6 +15,7 @@ struct SyncView: View {
     @State private var limitDownloadRange = true
     @State private var cutoffDate = Calendar.current.date(byAdding: .month, value: -6, to: Date()) ?? Date()
     @State private var deviceOwnership: DeviceOwnership = .mine
+    @State private var ownershipError: String?
 
     var body: some View {
         NavigationStack {
@@ -58,6 +59,14 @@ struct SyncView: View {
                 allowedContentTypes: [.database, .data],
                 onCompletion: handleFileImport
             )
+            .alert("Error", isPresented: Binding(
+                get: { ownershipError != nil },
+                set: { if !$0 { ownershipError = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Failed to save ownership: \(ownershipError ?? "")")
+            }
         }
     }
 
@@ -210,9 +219,15 @@ struct SyncView: View {
                     .onChange(of: deviceOwnership) { _, newValue in
                         var updated = device
                         updated.ownership = newValue
-                        try? appState.diveService.saveDevice(updated)
+                        do {
+                            try appState.diveService.saveDevice(updated)
+                        } catch {
+                            ownershipError = error.localizedDescription
+                            deviceOwnership = device.ownership
+                        }
                     }
                 }
+                .accessibilityElement(children: .combine)
             }
 
             if session.isFirstSync {
