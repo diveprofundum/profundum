@@ -2,6 +2,9 @@ import Combine
 import CoreBluetooth
 import DivelogCore
 import os
+#if os(iOS)
+import UIKit
+#endif
 
 private let importLog = Logger(subsystem: "com.divelog.profundum", category: "ImportSession")
 
@@ -181,6 +184,12 @@ class ImportSession: ObservableObject {
         // Wrap transport with tracing for protocol-level I/O visibility
         let tracingTransport = TracingBLETransport(wrapping: transport)
 
+        // Keep screen awake during import — iOS throttles BLE when the screen locks,
+        // causing mid-transfer failures on slow dive computers (e.g. Halcyon Symbios).
+        #if os(iOS)
+        UIApplication.shared.isIdleTimerDisabled = true
+        #endif
+
         // Enable BLE-level logging for real-device debugging
         BLEPeripheralTransport.enableLogging = true
 
@@ -237,6 +246,9 @@ class ImportSession: ObservableObject {
                 await self.updateDeviceInfo(device: device, result: result)
 
                 BLEPeripheralTransport.enableLogging = false
+                #if os(iOS)
+                await MainActor.run { UIApplication.shared.isIdleTimerDisabled = false }
+                #endif
                 let saved = tracker.saved
                 let merged = tracker.merged
                 let skipped = tracker.skipped
@@ -267,6 +279,9 @@ class ImportSession: ObservableObject {
             } catch DiveComputerError.cancelled {
                 importLog.info("Import cancelled — dumping I/O trace")
                 tracingTransport.dumpTrace()
+                #if os(iOS)
+                await MainActor.run { UIApplication.shared.isIdleTimerDisabled = false }
+                #endif
                 let saved = tracker.saved
                 let merged = tracker.merged
                 let skipped = tracker.skipped
@@ -292,6 +307,9 @@ class ImportSession: ObservableObject {
             } catch {
                 importLog.error("Import failed: \(error.localizedDescription) — dumping I/O trace")
                 tracingTransport.dumpTrace()
+                #if os(iOS)
+                await MainActor.run { UIApplication.shared.isIdleTimerDisabled = false }
+                #endif
                 let saved = tracker.saved
                 let merged = tracker.merged
                 let skipped = tracker.skipped
@@ -338,6 +356,9 @@ class ImportSession: ObservableObject {
         phase = .idle
         statusMessage = ""
         downloadProgress = nil
+        #if os(iOS)
+        UIApplication.shared.isIdleTimerDisabled = false
+        #endif
     }
 
     // MARK: - Private
