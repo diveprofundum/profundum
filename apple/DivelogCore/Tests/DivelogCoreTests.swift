@@ -1038,4 +1038,54 @@ final class DivelogCoreTests: XCTestCase {
         let siFirst = try diveService.surfaceInterval(beforeDive: dive1)
         XCTAssertNil(siFirst)
     }
+
+    // MARK: - DiveQuery Device Filter
+
+    func testDiveQueryFilterByDevice() throws {
+        let deviceA = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93")
+        let deviceB = Device(model: "Petrel", serialNumber: "B-5678", firmwareVersion: "93")
+        try diveService.saveDevice(deviceA)
+        try diveService.saveDevice(deviceB)
+
+        let dive1 = Dive(
+            deviceId: deviceA.id,
+            startTimeUnix: 1700000000, endTimeUnix: 1700003600,
+            maxDepthM: 30.0, avgDepthM: 18.0, bottomTimeSec: 3000
+        )
+        let dive2 = Dive(
+            deviceId: deviceB.id,
+            startTimeUnix: 1700010000, endTimeUnix: 1700013600,
+            maxDepthM: 25.0, avgDepthM: 15.0, bottomTimeSec: 2500
+        )
+        let dive3 = Dive(
+            deviceId: deviceA.id,
+            startTimeUnix: 1700020000, endTimeUnix: 1700023600,
+            maxDepthM: 20.0, avgDepthM: 12.0, bottomTimeSec: 2000
+        )
+        try diveService.saveDive(dive1)
+        try diveService.saveDive(dive2)
+        try diveService.saveDive(dive3)
+
+        // Filter by device A
+        let queryA = DiveQuery(deviceId: deviceA.id, limit: nil)
+        let divesA = try diveService.listDives(query: queryA)
+        XCTAssertEqual(divesA.count, 2)
+        XCTAssertTrue(divesA.allSatisfy { $0.deviceId == deviceA.id })
+
+        // Filter by device B
+        let queryB = DiveQuery(deviceId: deviceB.id, limit: nil)
+        let divesB = try diveService.listDives(query: queryB)
+        XCTAssertEqual(divesB.count, 1)
+        XCTAssertEqual(divesB[0].deviceId, deviceB.id)
+
+        // No filter — all dives
+        let queryAll = DiveQuery(limit: nil)
+        let divesAll = try diveService.listDives(query: queryAll)
+        XCTAssertEqual(divesAll.count, 3)
+
+        // requestWithSites also works
+        let querySitesA = DiveQuery(deviceId: deviceA.id, limit: nil)
+        let divesSitesA = try diveService.listDivesWithSites(query: querySitesA)
+        XCTAssertEqual(divesSitesA.count, 2)
+    }
 }

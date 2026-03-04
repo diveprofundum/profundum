@@ -14,6 +14,7 @@ struct SyncView: View {
     @State private var forceFullSync = false
     @State private var limitDownloadRange = true
     @State private var cutoffDate = Calendar.current.date(byAdding: .month, value: -6, to: Date()) ?? Date()
+    @State private var deviceOwnership: DeviceOwnership = .mine
 
     var body: some View {
         NavigationStack {
@@ -192,6 +193,25 @@ struct SyncView: View {
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
+                }
+            }
+
+            if session.isNewDevice {
+                VStack(spacing: 4) {
+                    Text("Whose computer is this?")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Picker("Owner", selection: $deviceOwnership) {
+                        Text("Me").tag(DeviceOwnership.mine)
+                        Text("Someone else").tag(DeviceOwnership.other)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 250)
+                    .onChange(of: deviceOwnership) { _, newValue in
+                        var updated = device
+                        updated.ownership = newValue
+                        try? appState.diveService.saveDevice(updated)
+                    }
                 }
             }
 

@@ -172,6 +172,15 @@ struct DeviceRowView: View {
             HStack {
                 Text(device.displayName)
                     .font(.headline)
+                if device.ownership == .other {
+                    Text("Buddy's")
+                        .font(.caption)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.teal.opacity(0.2))
+                        .foregroundColor(.teal)
+                        .cornerRadius(4)
+                }
                 if !device.isActive {
                     Text("Archived")
                         .font(.caption)
@@ -196,8 +205,11 @@ struct DeviceRowView: View {
 }
 
 struct DeviceDetailView: View {
+    @EnvironmentObject var appState: AppState
     let device: Device
     var onArchive: (() -> Void)?
+
+    @State private var ownership: DeviceOwnership = .mine
 
     var body: some View {
         Form {
@@ -214,6 +226,17 @@ struct DeviceDetailView: View {
                 LabeledContent("Status", value: device.isActive ? "Active" : "Archived")
             }
 
+            Section("Ownership") {
+                Picker("This device belongs to", selection: $ownership) {
+                    Text("My computer").tag(DeviceOwnership.mine)
+                    Text("Someone else's").tag(DeviceOwnership.other)
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: ownership) { _, newValue in
+                    saveOwnership(newValue)
+                }
+            }
+
             if device.isActive {
                 Section {
                     Button("Archive Device") {
@@ -227,6 +250,15 @@ struct DeviceDetailView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .onAppear {
+            ownership = device.ownership
+        }
+    }
+
+    private func saveOwnership(_ newOwnership: DeviceOwnership) {
+        var updated = device
+        updated.ownership = newOwnership
+        try? appState.diveService.saveDevice(updated)
     }
 }
 

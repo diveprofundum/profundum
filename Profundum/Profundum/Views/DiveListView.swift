@@ -13,6 +13,8 @@ struct DiveListView: View {
     @State private var showDateFilter = false
     @State private var showNewDiveSheet = false
     @State private var errorMessage: String?
+    @State private var selectedDevice: Device?
+    @State private var allDevices: [Device] = []
     #if os(iOS)
     @State private var editMode: EditMode = .inactive
     @State private var selectedDiveIDs: Set<String> = []
@@ -40,6 +42,7 @@ struct DiveListView: View {
 
     private var hasActiveFilters: Bool {
         !selectedTypeFilters.isEmpty || !selectedTags.isEmpty || filterStartDate != nil || filterEndDate != nil
+            || selectedDevice != nil
     }
 
     var body: some View {
@@ -174,9 +177,11 @@ struct DiveListView: View {
                 NewDiveSheet()
             }
             .task {
+                await loadDevices()
                 await loadDives()
             }
             .refreshable {
+                await loadDevices()
                 await loadDives()
             }
             .onChange(of: searchText) { _, newValue in
@@ -252,6 +257,50 @@ struct DiveListView: View {
         VStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
+                    if !allDevices.isEmpty {
+                        Menu {
+                            Button {
+                                selectedDevice = nil
+                                Task { await loadDives() }
+                            } label: {
+                                if selectedDevice == nil {
+                                    Label("All Devices", systemImage: "checkmark")
+                                } else {
+                                    Text("All Devices")
+                                }
+                            }
+                            Divider()
+                            ForEach(allDevices, id: \.id) { device in
+                                Button {
+                                    selectedDevice = device
+                                    Task { await loadDives() }
+                                } label: {
+                                    if device.id == selectedDevice?.id {
+                                        Label(device.displayName, systemImage: "checkmark")
+                                    } else {
+                                        Text(device.displayName)
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "cpu")
+                                Text(selectedDevice?.displayName ?? "Device")
+                            }
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                selectedDevice != nil
+                                    ? Color.teal.opacity(0.2)
+                                    : Color.gray.opacity(0.15)
+                            )
+                            .foregroundColor(selectedDevice != nil ? .teal : .primary)
+                            .cornerRadius(16)
+                        }
+                    }
+
                     ForEach(DiveTypeFilter.allCases, id: \.self) { filter in
                         DiveTypeChipView(
                             filter: filter,
@@ -310,6 +359,7 @@ struct DiveListView: View {
     private func clearFilters() {
         selectedTypeFilters.removeAll()
         selectedTags.removeAll()
+        selectedDevice = nil
         filterStartDate = nil
         filterEndDate = nil
         Task { await loadDives() }
@@ -322,6 +372,10 @@ struct DiveListView: View {
             query.tagAny = selectedTags.map { $0.rawValue }
         }
 
+        if let selectedDevice {
+            query.deviceId = selectedDevice.id
+        }
+
         if let startDate = filterStartDate {
             query.startTimeMin = Int64(startDate.timeIntervalSince1970)
         }
@@ -331,6 +385,10 @@ struct DiveListView: View {
         }
 
         return query
+    }
+
+    private func loadDevices() async {
+        allDevices = (try? appState.diveService.listDevices()) ?? []
     }
 
     private func loadDives() async {

@@ -88,6 +88,7 @@ class ImportSession: ObservableObject {
     @Published var statusMessage: String = ""
     @Published var downloadProgress: (current: Int, total: Int?)?
     @Published var isFirstSync = false
+    @Published var isNewDevice = false
 
     let scanner: BLEScanner
     private var diveService: DiveService?
@@ -662,6 +663,7 @@ class ImportSession: ObservableObject {
         } catch {
             importLog.error("Failed to save new device: \(error.localizedDescription, privacy: .public)")
         }
+        isNewDevice = true
         return device
     }
 

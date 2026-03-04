@@ -384,6 +384,15 @@ public final class DivelogDatabase: Sendable {
             """)
         }
 
+        // Migration 14: Device ownership + gas mix device linkage
+        migrator.registerMigration("014_device_ownership") { db in
+            try db.execute(sql: """
+                ALTER TABLE devices ADD COLUMN ownership TEXT DEFAULT 'mine';
+                ALTER TABLE gas_mixes ADD COLUMN device_id TEXT REFERENCES devices(id);
+                CREATE INDEX IF NOT EXISTS idx_gas_mixes_device ON gas_mixes(device_id);
+            """)
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

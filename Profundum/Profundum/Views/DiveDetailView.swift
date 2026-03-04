@@ -27,6 +27,9 @@ struct DiveDetailView: View {
     @State private var showSurfGf = false
     @State private var showPpo2 = false
     @State private var showTankPressure = false
+    @State private var splitDeviceId: String?
+    @State private var showSplitConfirmation = false
+    @State private var splitError: String?
 
     var onDiveUpdated: (() -> Void)?
 
@@ -217,6 +220,33 @@ struct DiveDetailView: View {
         } message: {
             Text(errorMessage ?? "")
         }
+        .confirmationDialog(
+            "Split Dive",
+            isPresented: $showSplitConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Split", role: .destructive) {
+                performSplit()
+            }
+            Button("Cancel", role: .cancel) {
+                splitDeviceId = nil
+            }
+        } message: {
+            if let deviceId = splitDeviceId, let name = devicesWithSamples[deviceId] {
+                Text("This will move \(name)'s samples into a separate dive."
+                     + " Both dives will have their stats recomputed.")
+            } else {
+                Text("Split this device's data into a separate dive?")
+            }
+        }
+        .alert("Split Failed", isPresented: Binding(
+            get: { splitError != nil },
+            set: { if !$0 { splitError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(splitError ?? "")
+        }
     }
 
     private var headerSection: some View {
@@ -269,6 +299,18 @@ struct DiveDetailView: View {
                                     } else {
                                         Text(name)
                                     }
+                                }
+                            }
+                            Divider()
+                            ForEach(
+                                devicesWithSamples.sorted(by: { $0.value < $1.value }),
+                                id: \.key
+                            ) { deviceId, name in
+                                Button(role: .destructive) {
+                                    splitDeviceId = deviceId
+                                    showSplitConfirmation = true
+                                } label: {
+                                    Label("Split \(name) into separate dive", systemImage: "arrow.branch")
                                 }
                             }
                         } label: {
@@ -738,6 +780,21 @@ struct DiveDetailView: View {
         } catch {
             errorMessage = "Failed to export dive: \(error.localizedDescription)"
         }
+    }
+
+    private func performSplit() {
+        guard let deviceId = splitDeviceId else { return }
+        do {
+            let importService = DiveComputerImportService(database: appState.database)
+            _ = try importService.splitDive(diveId: dive.id, deviceId: deviceId)
+            Task {
+                await loadDiveData()
+                onDiveUpdated?()
+            }
+        } catch {
+            splitError = "Failed to split dive: \(error.localizedDescription)"
+        }
+        splitDeviceId = nil
     }
 
     private func loadDiveData() async {

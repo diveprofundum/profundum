@@ -9,6 +9,7 @@ public struct GasMix: Identifiable, Equatable, Sendable {
     public var o2Fraction: Float
     public var heFraction: Float
     public var usage: String?  // "none", "oxygen", "diluent", "sidemount"
+    public var deviceId: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -16,7 +17,8 @@ public struct GasMix: Identifiable, Equatable, Sendable {
         mixIndex: Int,
         o2Fraction: Float,
         heFraction: Float,
-        usage: String? = nil
+        usage: String? = nil,
+        deviceId: String? = nil
     ) {
         self.id = id
         self.diveId = diveId
@@ -24,6 +26,7 @@ public struct GasMix: Identifiable, Equatable, Sendable {
         self.o2Fraction = o2Fraction
         self.heFraction = heFraction
         self.usage = usage
+        self.deviceId = deviceId
     }
 }
 
@@ -39,5 +42,6 @@ extension GasMix: Codable, FetchableRecord, PersistableRecord {
         case o2Fraction = "o2_fraction"
         case heFraction = "he_fraction"
         case usage
+        case deviceId = "device_id"
     }
 }

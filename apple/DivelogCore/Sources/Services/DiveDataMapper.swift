@@ -294,7 +294,8 @@ public enum DiveDataMapper {
                 mixIndex: m.index,
                 o2Fraction: m.o2Fraction,
                 heFraction: m.heFraction,
-                usage: m.usage
+                usage: m.usage,
+                deviceId: deviceId
             )
         }
 

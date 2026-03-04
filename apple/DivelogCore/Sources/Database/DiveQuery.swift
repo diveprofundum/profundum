@@ -12,6 +12,7 @@ public struct DiveQuery: Sendable {
     public var tagAny: [String]
     public var siteId: String?
     public var teammateId: String?
+    public var deviceId: String?
     public var limit: Int?
     public var offset: Int?
 
@@ -25,6 +26,7 @@ public struct DiveQuery: Sendable {
         tagAny: [String] = [],
         siteId: String? = nil,
         teammateId: String? = nil,
+        deviceId: String? = nil,
         limit: Int? = 50,
         offset: Int? = nil
     ) {
@@ -37,6 +39,7 @@ public struct DiveQuery: Sendable {
         self.tagAny = tagAny
         self.siteId = siteId
         self.teammateId = teammateId
+        self.deviceId = deviceId
         self.limit = limit
         self.offset = offset
     }
@@ -72,6 +75,11 @@ public struct DiveQuery: Sendable {
         // Site filter
         if let siteId {
             request = request.filter(Column("site_id") == siteId)
+        }
+
+        // Device filter
+        if let deviceId {
+            request = request.filter(Column("device_id") == deviceId)
         }
 
         // Teammate filter (via join)
@@ -132,6 +140,11 @@ public struct DiveQuery: Sendable {
         // Site filter
         if let siteId {
             request = request.filter(Column("site_id") == siteId)
+        }
+
+        // Device filter
+        if let deviceId {
+            request = request.filter(Column("device_id") == deviceId)
         }
 
         // Teammate filter (via join)
