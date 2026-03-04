@@ -296,7 +296,7 @@ extension BLEScanner: CBPeripheralDelegate {
         // Dump all discovered characteristics — critical for diagnosing BLE protocol issues.
         for char in characteristics {
             let props = String(char.properties.rawValue, radix: 16)
-            scanLog.info("  Characteristic \(char.uuid) properties=0x\(props)")
+            scanLog.notice("  Characteristic \(char.uuid) properties=0x\(props)")
         }
 
         // Capture before use — pendingKnownComputer is nonisolated(unsafe)

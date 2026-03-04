@@ -126,10 +126,10 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         let rxProps = String(characteristic.properties.rawValue, radix: 16)
         let txUUID = (writeCharacteristic ?? characteristic).uuid.uuidString
         let txProps = String((writeCharacteristic ?? characteristic).properties.rawValue, radix: 16)
-        bleLog.info(
+        bleLog.notice(
             "BLE init: Rx=\(rxUUID) props=0x\(rxProps) Tx=\(txUUID) props=0x\(txProps)"
         )
-        bleLog.info("BLE init: writeType=\(writeTypeName) MTU=\(mtu)")
+        bleLog.notice("BLE init: writeType=\(writeTypeName) MTU=\(mtu)")
     }
 
     func read(count: Int, timeout: TimeInterval) throws -> Data {
@@ -198,12 +198,12 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         }
         lock.unlock()
 
-        bleLog.info("waitForIndication: waiting (timeout=\(timeout)s)")
+        bleLog.notice("waitForIndication: waiting (timeout=\(timeout)s)")
         let deadline: DispatchTime = timeout == .infinity
             ? .distantFuture
             : .now() + timeout
         let result = indicationSemaphore.wait(timeout: deadline)
-        bleLog.info("waitForIndication: done (timedOut=\(result == .timedOut))")
+        bleLog.notice("waitForIndication: done (timedOut=\(result == .timedOut))")
 
         lock.lock()
         let closed = isClosed
@@ -375,7 +375,7 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
             return
         }
 
-        bleLog.info(
+        bleLog.notice(
             "SUBSCRIBE success: \(charUUID) isNotifying=\(characteristic.isNotifying)"
         )
 
