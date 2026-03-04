@@ -505,6 +505,8 @@ class ImportSession: ObservableObject {
             try? await Task.sleep(for: .milliseconds(250))
         }
         importLog.error("Reconnect timed out after 15s")
+        // Clean up so isConnecting doesn't stay stuck
+        await MainActor.run { scanner.disconnect() }
         return nil
     }
 
