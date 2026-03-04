@@ -200,6 +200,8 @@ extension BLEScanner: CBCentralManagerDelegate {
             self?.isConnecting = false
             self?.connectedPeripheral = nil
             self?.pendingKnownComputer = nil
+            self?.pendingRxChar = nil
+            self?.pendingTxChar = nil
         }
     }
 
@@ -218,6 +220,8 @@ extension BLEScanner: CBCentralManagerDelegate {
                 }
                 self.transport = nil
                 self.connectedKnownComputer = nil
+                self.pendingRxChar = nil
+                self.pendingTxChar = nil
                 self.connectedPeripheral = nil
             }
         }
@@ -241,9 +245,11 @@ extension BLEScanner: CBPeripheralDelegate {
             let knownComputer = pendingKnownComputer
             if knownComputer != nil {
                 // Targeted discovery found nothing — retry with full discovery.
-                // The second callback won't recurse because the device does have
-                // services, just not the one we asked for.
+                // Clear pendingKnownComputer so the second callback (if also empty)
+                // takes the "no known computer" path and resets isConnecting instead
+                // of looping.
                 scanLog.info("Targeted service discovery found nothing — falling back to full discovery")
+                pendingKnownComputer = nil
                 peripheral.discoverServices(nil)
                 return
             }
@@ -312,13 +318,9 @@ extension BLEScanner: CBPeripheralDelegate {
 
                 // Only create the transport when both Rx and Tx are found.
                 guard let rxChar = pendingRxChar, let txChar = pendingTxChar else {
-                    if foundRx == nil && foundTx == nil {
-                        scanLog.info("Neither Rx nor Tx found in service \(service.uuid) — waiting for other services")
-                    } else {
-                        let have = foundRx != nil ? "Rx" : "Tx"
-                        let need = foundRx != nil ? "Tx" : "Rx"
-                        scanLog.info("Found \(have) in service \(service.uuid), still waiting for \(need)")
-                    }
+                    let haveRx = pendingRxChar != nil
+                    let haveTx = pendingTxChar != nil
+                    scanLog.info("Service \(service.uuid): Rx=\(haveRx) Tx=\(haveTx) — waiting for both")
                     return
                 }
 
