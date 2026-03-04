@@ -37,6 +37,11 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
     /// `.writeWithoutResponse` is required by most BLE dive computers (Shearwater, etc.).
     private let writeType: CBCharacteristicWriteType
 
+    /// Whether the Tx characteristic was validated to have write capability at init time.
+    /// When `false`, `write()` fails immediately with a clear error instead of a confusing
+    /// protocol-level failure.
+    private let writeCapabilityValidated: Bool
+
     /// Guards all mutable state: `readBuffer`, `lastError`, `isClosed`, `indicationReady`.
     private let lock = NSLock()
 
@@ -94,6 +99,12 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
             self.writeType = .withoutResponse
         } else {
             self.writeType = .withResponse
+        }
+        self.writeCapabilityValidated =
+            txChar.properties.contains(.write) || txChar.properties.contains(.writeWithoutResponse)
+        if !self.writeCapabilityValidated {
+            let props = String(txChar.properties.rawValue, radix: 16)
+            bleLog.error("Tx characteristic \(txChar.uuid) has no write capability — properties=0x\(props)")
         }
         super.init()
         peripheral.delegate = self
@@ -214,6 +225,13 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
     }
 
     func write(_ data: Data, timeout: TimeInterval) throws {
+        guard writeCapabilityValidated else {
+            throw DiveComputerError.libdivecomputer(
+                status: -1,
+                message: "Write characteristic lacks write capability"
+            )
+        }
+
         lock.lock()
         if isClosed {
             lock.unlock()
@@ -227,6 +245,12 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
 
         // Chunk writes to the peripheral's MTU to avoid silent truncation.
         let mtu = peripheral.maximumWriteValueLength(for: writeType)
+        guard mtu > 0 else {
+            throw DiveComputerError.libdivecomputer(
+                status: -1,
+                message: "BLE MTU is 0 — cannot write"
+            )
+        }
         let totalChunks = (data.count + mtu - 1) / mtu
         var offset = 0
         var chunkIndex = 0
