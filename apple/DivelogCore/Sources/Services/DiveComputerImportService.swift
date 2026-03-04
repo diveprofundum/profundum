@@ -12,6 +12,13 @@ public enum ImportOutcome: Equatable, Sendable {
 }
 
 /// Tracks import progress and detects when auto-stop is appropriate.
+///
+/// ## Thread Safety
+///
+/// Marked `@unchecked Sendable` because all mutable state is accessed from
+/// a single writer (the download task's `onDive` callback and the retry loop,
+/// which execute sequentially within `DiveDownloader.download()`). No lock
+/// is needed because there is no concurrent mutation.
 public final class ImportProgressTracker: @unchecked Sendable {
     public let consecutiveSkipThreshold: Int
     nonisolated(unsafe) public private(set) var saved = 0

@@ -208,6 +208,10 @@ class ImportSession: ObservableObject {
             var attempt = 0
             var currentTransport: TracingBLETransport = tracingTransport
 
+            // Refreshable fingerprint for incremental sync — updated after each
+            // successful attempt so libdivecomputer skips already-downloaded dives.
+            var currentLastFP = lastFP
+
             while consecutiveNoProgress < maxNoProgress {
                 attempt += 1
                 let savedBefore = tracker.saved
@@ -221,7 +225,7 @@ class ImportSession: ObservableObject {
                     let result = try downloader.download(
                         transport: currentTransport,
                         deviceName: bleName,
-                        lastFingerprint: lastFP,
+                        lastFingerprint: currentLastFP,
                         onDive: { parsed in
                             // Cutoff check (libdivecomputer enumerates newest-first)
                             if let cutoff = cutoffTime,
@@ -350,7 +354,8 @@ class ImportSession: ObservableObject {
                     )
                     currentTransport.dumpTrace()
 
-                    if !Self.isRetryableError(error) {
+                    let retryable = (error as? DiveComputerError)?.isRetryable ?? true
+                    if !retryable {
                         // Non-retryable — report error with partial results
                         await self.finalizeOnError(
                             tracker: tracker, device: device, error: error
@@ -400,8 +405,21 @@ class ImportSession: ObservableObject {
                     guard !Task.isCancelled else { continue }
                     self.isCancelled = false
                     tracker.resetConsecutiveSkips()
+
+                    // Refresh fingerprint so libdivecomputer skips dives we
+                    // already saved, avoiding redundant re-enumeration.
+                    currentLastFP = try? importService.lastFingerprint(
+                        deviceId: device.id
+                    )
                 }
             }
+
+            // Safety net: if the while loop exits without returning (e.g. Task
+            // cancelled at the sleep guard), ensure idle timer is re-enabled.
+            BLEPeripheralTransport.enableLogging = false
+            #if os(iOS)
+            await MainActor.run { UIApplication.shared.isIdleTimerDisabled = false }
+            #endif
         }
     }
 
@@ -488,20 +506,6 @@ class ImportSession: ObservableObject {
         }
         importLog.error("Reconnect timed out after 15s")
         return nil
-    }
-
-    /// Returns `true` for errors that might succeed on a fresh BLE connection.
-    private static func isRetryableError(_ error: Error) -> Bool {
-        guard let dcError = error as? DiveComputerError else {
-            // Unknown errors (e.g. from CoreBluetooth) are worth retrying
-            return true
-        }
-        switch dcError {
-        case .timeout, .disconnected, .libdivecomputer:
-            return true
-        case .cancelled, .unsupportedDevice, .duplicateDive:
-            return false
-        }
     }
 
     /// Shared cleanup for non-retryable errors or exhausted retries.
