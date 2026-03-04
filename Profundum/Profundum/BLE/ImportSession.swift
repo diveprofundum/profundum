@@ -199,10 +199,20 @@ class ImportSession: ObservableObject {
         downloadTask = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
 
-            let maxAttempts = 3
+            // Progress-aware retry: keep reconnecting as long as new dives are
+            // being downloaded. Some devices (e.g. Halcyon Symbios) can only
+            // handle one dive download per BLE session before needing a fresh
+            // connection. Give up after consecutive failures with no new saves.
+            let maxNoProgress = 2
+            var consecutiveNoProgress = 0
+            var attempt = 0
             var currentTransport: TracingBLETransport = tracingTransport
 
-            downloadLoop: for attempt in 1...maxAttempts {
+            while consecutiveNoProgress < maxNoProgress {
+                attempt += 1
+                let savedBefore = tracker.saved
+                let mergedBefore = tracker.merged
+
                 // Pre-download delay — let BLE stack settle after GATT setup
                 try? await Task.sleep(for: .milliseconds(750))
                 guard !Task.isCancelled else { break }
@@ -263,7 +273,7 @@ class ImportSession: ObservableObject {
                     await MainActor.run { UIApplication.shared.isIdleTimerDisabled = false }
                     #endif
                     if attempt > 1 {
-                        importLog.info("Retry succeeded on attempt \(attempt)")
+                        importLog.info("Import completed on attempt \(attempt)")
                     }
                     let saved = tracker.saved
                     let merged = tracker.merged
@@ -295,7 +305,7 @@ class ImportSession: ObservableObject {
                             self.statusMessage = "All dives already imported."
                         }
                     }
-                    break downloadLoop
+                    return
 
                 } catch DiveComputerError.cancelled {
                     importLog.info("Import cancelled — dumping I/O trace")
@@ -330,99 +340,59 @@ class ImportSession: ObservableObject {
                     return
 
                 } catch {
+                    let newSaves = tracker.saved - savedBefore
+                    let newMerges = tracker.merged - mergedBefore
+                    let madeProgress = newSaves > 0 || newMerges > 0
+
+                    let errDesc = error.localizedDescription
                     importLog.error(
-                        "Attempt \(attempt)/\(maxAttempts) failed: \(error.localizedDescription, privacy: .public)"
+                        "Attempt \(attempt) (\(newSaves) new, \(newMerges) merged): \(errDesc, privacy: .public)"
                     )
                     currentTransport.dumpTrace()
 
-                    if !Self.isRetryableError(error) || attempt == maxAttempts {
-                        // Non-retryable or final attempt — report error
-                        BLEPeripheralTransport.enableLogging = false
-                        #if os(iOS)
-                        await MainActor.run { UIApplication.shared.isIdleTimerDisabled = false }
-                        #endif
-                        let saved = tracker.saved
-                        let merged = tracker.merged
-                        let skipped = tracker.skipped
-                        let autoStopped = tracker.shouldAutoStop
-                        await MainActor.run {
-                            if saved > 0 || merged > 0 {
-                                self.phase = .completed(ImportResult(
-                                    newDives: saved,
-                                    mergedDives: merged,
-                                    skippedDives: skipped,
-                                    deviceName: device.displayName,
-                                    autoStopped: autoStopped
-                                ))
-                                let total = saved + merged
-                                let plural = total == 1 ? "" : "s"
-                                self.statusMessage =
-                                    "Connection lost. \(total) dive\(plural) saved before the error."
-                            } else {
-                                self.phase = .error(.downloadFailed(error.localizedDescription))
-                            }
-                        }
+                    if !Self.isRetryableError(error) {
+                        // Non-retryable — report error with partial results
+                        await self.finalizeOnError(
+                            tracker: tracker, device: device, error: error
+                        )
                         return
                     }
 
-                    // Retryable error — disconnect, reconnect, and try again
-                    let retryNumber = attempt  // attempt 1 failed → this is retry 1
-                    let totalRetries = maxAttempts - 1
-                    await MainActor.run {
-                        self.statusMessage =
-                            "Connection issue — retry \(retryNumber) of \(totalRetries)..."
+                    if madeProgress {
+                        consecutiveNoProgress = 0
+                        importLog.info(
+                            "Downloaded \(newSaves) new dives before session loss — reconnecting"
+                        )
+                    } else {
+                        consecutiveNoProgress += 1
+                        importLog.info(
+                            "No new dives this attempt — no-progress count: \(consecutiveNoProgress)/\(maxNoProgress)"
+                        )
+                        if consecutiveNoProgress >= maxNoProgress {
+                            await self.finalizeOnError(
+                                tracker: tracker, device: device, error: error
+                            )
+                            return
+                        }
                     }
 
+                    // Update UI — differentiate session reset from connection failure
+                    await MainActor.run {
+                        if madeProgress {
+                            self.statusMessage = "Connection reset — continuing import..."
+                        } else {
+                            self.statusMessage = "Connection issue — retrying..."
+                        }
+                    }
+
+                    // Reconnect
                     guard !Task.isCancelled,
                           let newTransport = await self.reconnect(
                               peripheral: peripheral
                           ) else {
-                        BLEPeripheralTransport.enableLogging = false
-                        #if os(iOS)
-                        await MainActor.run { UIApplication.shared.isIdleTimerDisabled = false }
-                        #endif
-                        let saved = tracker.saved
-                        let merged = tracker.merged
-                        let skipped = tracker.skipped
-                        let autoStopped = tracker.shouldAutoStop
-                        await MainActor.run {
-                            if Task.isCancelled {
-                                // User cancelled during reconnect
-                                if saved > 0 || merged > 0 {
-                                    self.phase = .completed(ImportResult(
-                                        newDives: saved,
-                                        mergedDives: merged,
-                                        skippedDives: skipped,
-                                        deviceName: device.displayName,
-                                        autoStopped: autoStopped
-                                    ))
-                                    let total = saved + merged
-                                    let plural = total == 1 ? "" : "s"
-                                    self.statusMessage =
-                                        "Cancelled. \(total) dive\(plural) saved before cancellation."
-                                } else {
-                                    self.phase = .paired(device)
-                                    self.statusMessage = "Download cancelled."
-                                }
-                                self.downloadProgress = nil
-                            } else if saved > 0 || merged > 0 {
-                                self.phase = .completed(ImportResult(
-                                    newDives: saved,
-                                    mergedDives: merged,
-                                    skippedDives: skipped,
-                                    deviceName: device.displayName,
-                                    autoStopped: autoStopped
-                                ))
-                                let total = saved + merged
-                                let plural = total == 1 ? "" : "s"
-                                self.statusMessage =
-                                    "Connection lost. \(total) dive\(plural) saved before the error."
-                            } else {
-                                self.phase = .error(.downloadFailed(
-                                    "Failed to reconnect to \(device.displayName). Please try again."
-                                ))
-                            }
-                        }
+                        await self.finalizeOnReconnectFailure(
+                            tracker: tracker, device: device
+                        )
                         return
                     }
                     currentTransport = TracingBLETransport(wrapping: newTransport)
@@ -531,6 +501,89 @@ class ImportSession: ObservableObject {
             return true
         case .cancelled, .unsupportedDevice, .duplicateDive:
             return false
+        }
+    }
+
+    /// Shared cleanup for non-retryable errors or exhausted retries.
+    /// Shows partial results if any dives were saved.
+    private func finalizeOnError(
+        tracker: ImportProgressTracker, device: Device, error: Error
+    ) async {
+        BLEPeripheralTransport.enableLogging = false
+        #if os(iOS)
+        await MainActor.run { UIApplication.shared.isIdleTimerDisabled = false }
+        #endif
+        let saved = tracker.saved
+        let merged = tracker.merged
+        let skipped = tracker.skipped
+        let autoStopped = tracker.shouldAutoStop
+        await MainActor.run {
+            if saved > 0 || merged > 0 {
+                self.phase = .completed(ImportResult(
+                    newDives: saved,
+                    mergedDives: merged,
+                    skippedDives: skipped,
+                    deviceName: device.displayName,
+                    autoStopped: autoStopped
+                ))
+                let total = saved + merged
+                let plural = total == 1 ? "" : "s"
+                self.statusMessage =
+                    "Connection lost. \(total) dive\(plural) saved before the error."
+            } else {
+                self.phase = .error(.downloadFailed(error.localizedDescription))
+            }
+        }
+    }
+
+    /// Shared cleanup when reconnection fails or is cancelled.
+    private func finalizeOnReconnectFailure(
+        tracker: ImportProgressTracker, device: Device
+    ) async {
+        BLEPeripheralTransport.enableLogging = false
+        #if os(iOS)
+        await MainActor.run { UIApplication.shared.isIdleTimerDisabled = false }
+        #endif
+        let saved = tracker.saved
+        let merged = tracker.merged
+        let skipped = tracker.skipped
+        let autoStopped = tracker.shouldAutoStop
+        await MainActor.run {
+            if Task.isCancelled {
+                if saved > 0 || merged > 0 {
+                    self.phase = .completed(ImportResult(
+                        newDives: saved,
+                        mergedDives: merged,
+                        skippedDives: skipped,
+                        deviceName: device.displayName,
+                        autoStopped: autoStopped
+                    ))
+                    let total = saved + merged
+                    let plural = total == 1 ? "" : "s"
+                    self.statusMessage =
+                        "Cancelled. \(total) dive\(plural) saved before cancellation."
+                } else {
+                    self.phase = .paired(device)
+                    self.statusMessage = "Download cancelled."
+                }
+                self.downloadProgress = nil
+            } else if saved > 0 || merged > 0 {
+                self.phase = .completed(ImportResult(
+                    newDives: saved,
+                    mergedDives: merged,
+                    skippedDives: skipped,
+                    deviceName: device.displayName,
+                    autoStopped: autoStopped
+                ))
+                let total = saved + merged
+                let plural = total == 1 ? "" : "s"
+                self.statusMessage =
+                    "Connection lost. \(total) dive\(plural) saved before the error."
+            } else {
+                self.phase = .error(.downloadFailed(
+                    "Failed to reconnect to \(device.displayName). Please try again."
+                ))
+            }
         }
     }
 
