@@ -305,7 +305,7 @@ class ImportSession: ObservableObject {
                     self.downloadProgress = nil
                 }
             } catch {
-                importLog.error("Import failed: \(error.localizedDescription) — dumping I/O trace")
+                importLog.error("Import failed: \(error.localizedDescription, privacy: .public) — dumping I/O trace")
                 tracingTransport.dumpTrace()
                 #if os(iOS)
                 await MainActor.run { UIApplication.shared.isIdleTimerDisabled = false }
@@ -440,12 +440,12 @@ class ImportSession: ObservableObject {
                 do {
                     try diveService?.saveDevice(existing)
                 } catch {
-                    importLog.error("Failed to update device: \(error.localizedDescription)")
+                    importLog.error("Failed to update device: \(error.localizedDescription, privacy: .public)")
                 }
                 return existing
             }
         } catch {
-            importLog.error("Failed to list devices: \(error.localizedDescription)")
+            importLog.error("Failed to list devices: \(error.localizedDescription, privacy: .public)")
         }
 
         // Create new device
@@ -460,7 +460,7 @@ class ImportSession: ObservableObject {
         do {
             try diveService?.saveDevice(device)
         } catch {
-            importLog.error("Failed to save new device: \(error.localizedDescription)")
+            importLog.error("Failed to save new device: \(error.localizedDescription, privacy: .public)")
         }
         return device
     }
@@ -488,7 +488,7 @@ class ImportSession: ObservableObject {
         do {
             try diveService?.saveDevice(updated)
         } catch {
-            importLog.error("Failed to save device info: \(error.localizedDescription)")
+            importLog.error("Failed to save device info: \(error.localizedDescription, privacy: .public)")
             return
         }
 
@@ -497,13 +497,14 @@ class ImportSession: ObservableObject {
         do {
             if let serial = result.serialNumber, !serial.isEmpty,
                let existing = try diveService?.findDeviceBySerial(serial, excludingId: updated.id) {
+                let devId = existing.id
                 importLog.info(
-                    "Found existing device \(existing.id) with serial \(serial) — merging"
+                    "Found device \(devId, privacy: .public) serial \(serial, privacy: .public) — merging"
                 )
                 try diveService?.mergeDevices(winnerId: existing.id, loserId: updated.id)
             }
         } catch {
-            importLog.error("Failed to merge devices: \(error.localizedDescription)")
+            importLog.error("Failed to merge devices: \(error.localizedDescription, privacy: .public)")
         }
     }
 }

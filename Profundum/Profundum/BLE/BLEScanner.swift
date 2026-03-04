@@ -236,7 +236,7 @@ extension BLEScanner: CBPeripheralDelegate {
         didDiscoverServices error: Error?
     ) {
         if let error {
-            scanLog.error("Service discovery failed: \(error.localizedDescription)")
+            scanLog.error("Service discovery failed: \(error.localizedDescription, privacy: .public)")
             Task { @MainActor [weak self] in self?.isConnecting = false }
             return
         }
@@ -283,12 +283,16 @@ extension BLEScanner: CBPeripheralDelegate {
         error: Error?
     ) {
         if let error {
-            scanLog.error("Characteristic discovery failed for \(service.uuid): \(error.localizedDescription)")
+            let svcUUID = service.uuid.uuidString
+            let errMsg = error.localizedDescription
+            scanLog.error(
+                "Char discovery failed \(svcUUID, privacy: .public): \(errMsg, privacy: .public)"
+            )
             Task { @MainActor [weak self] in self?.isConnecting = false }
             return
         }
         guard let characteristics = service.characteristics, !characteristics.isEmpty else {
-            scanLog.error("Characteristic discovery returned no characteristics for \(service.uuid)")
+            scanLog.error("Characteristic discovery returned no characteristics for \(service.uuid, privacy: .public)")
             // Don't reset isConnecting — other services may still report characteristics.
             return
         }
@@ -296,7 +300,7 @@ extension BLEScanner: CBPeripheralDelegate {
         // Dump all discovered characteristics — critical for diagnosing BLE protocol issues.
         for char in characteristics {
             let props = String(char.properties.rawValue, radix: 16)
-            scanLog.notice("  Characteristic \(char.uuid) properties=0x\(props)")
+            scanLog.notice("  Characteristic \(char.uuid, privacy: .public) properties=0x\(props, privacy: .public)")
         }
 
         // Capture before use — pendingKnownComputer is nonisolated(unsafe)
@@ -320,7 +324,8 @@ extension BLEScanner: CBPeripheralDelegate {
                 guard let rxChar = pendingRxChar, let txChar = pendingTxChar else {
                     let haveRx = pendingRxChar != nil
                     let haveTx = pendingTxChar != nil
-                    scanLog.info("Service \(service.uuid): Rx=\(haveRx) Tx=\(haveTx) — waiting for both")
+                    let svcUUID = service.uuid.uuidString
+                    scanLog.info("Service \(svcUUID, privacy: .public): Rx=\(haveRx) Tx=\(haveTx) — waiting")
                     return
                 }
 
@@ -340,7 +345,7 @@ extension BLEScanner: CBPeripheralDelegate {
             } else {
                 // Single-characteristic device (e.g. Shearwater) — create transport immediately.
                 guard let rxChar = foundRx else {
-                    scanLog.error("No Rx characteristic found in service \(service.uuid)")
+                    scanLog.error("No Rx characteristic found in service \(service.uuid, privacy: .public)")
                     // Don't reset isConnecting — other services may still have it.
                     return
                 }
@@ -364,7 +369,7 @@ extension BLEScanner: CBPeripheralDelegate {
             }
 
             guard let characteristic = rxChar else {
-                scanLog.error("No suitable Rx characteristic found in service \(service.uuid)")
+                scanLog.error("No suitable Rx characteristic found in service \(service.uuid, privacy: .public)")
                 // Don't reset isConnecting — other services may still have it.
                 return
             }

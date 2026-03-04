@@ -103,8 +103,11 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         self.writeCapabilityValidated =
             txChar.properties.contains(.write) || txChar.properties.contains(.writeWithoutResponse)
         if !self.writeCapabilityValidated {
+            let charUUID = txChar.uuid.uuidString
             let props = String(txChar.properties.rawValue, radix: 16)
-            bleLog.error("Tx characteristic \(txChar.uuid) has no write capability — properties=0x\(props)")
+            bleLog.error(
+                "Tx char \(charUUID, privacy: .public) no write — props=0x\(props, privacy: .public)"
+            )
         }
         super.init()
         peripheral.delegate = self
@@ -127,9 +130,12 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         let txUUID = (writeCharacteristic ?? characteristic).uuid.uuidString
         let txProps = String((writeCharacteristic ?? characteristic).properties.rawValue, radix: 16)
         bleLog.notice(
-            "BLE init: Rx=\(rxUUID) props=0x\(rxProps) Tx=\(txUUID) props=0x\(txProps)"
+            "BLE init: Rx=\(rxUUID, privacy: .public) props=0x\(rxProps, privacy: .public)"
         )
-        bleLog.notice("BLE init: writeType=\(writeTypeName) MTU=\(mtu)")
+        bleLog.notice(
+            "BLE init: Tx=\(txUUID, privacy: .public) props=0x\(txProps, privacy: .public)"
+        )
+        bleLog.notice("BLE init: writeType=\(writeTypeName, privacy: .public) MTU=\(mtu)")
     }
 
     func read(count: Int, timeout: TimeInterval) throws -> Data {
@@ -198,7 +204,7 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         }
         lock.unlock()
 
-        bleLog.notice("waitForIndication: waiting (timeout=\(timeout)s)")
+        bleLog.notice("waitForIndication: waiting (timeout=\(timeout, privacy: .public)s)")
         let deadline: DispatchTime = timeout == .infinity
             ? .distantFuture
             : .now() + timeout
@@ -271,7 +277,7 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
                 let txUUID = writeCharacteristic.uuid.uuidString
                 let wtName = writeType == .withoutResponse ? "noRsp" : "rsp"
                 bleLog.info(
-                    "WRITE \(n)/\(totalChunks) \(chunkSize)B to \(txUUID) (\(wtName))"
+                    "WRITE \(n)/\(totalChunks) \(chunkSize)B \(txUUID, privacy: .public) \(wtName, privacy: .public)"
                 )
             }
 
@@ -366,7 +372,7 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
         let charUUID = characteristic.uuid.uuidString
         if let error {
             bleLog.error(
-                "SUBSCRIBE error: \(charUUID) — \(error.localizedDescription)"
+                "SUBSCRIBE error: \(charUUID, privacy: .public) — \(error.localizedDescription, privacy: .public)"
             )
             lock.lock()
             lastError = error
@@ -376,7 +382,7 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
         }
 
         bleLog.notice(
-            "SUBSCRIBE success: \(charUUID) isNotifying=\(characteristic.isNotifying)"
+            "SUBSCRIBE success: \(charUUID, privacy: .public) isNotifying=\(characteristic.isNotifying)"
         )
 
         // Only gate on the Rx characteristic — the Tx subscription is informational.
@@ -397,7 +403,7 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
     ) {
         if let error {
             if Self.enableLogging {
-                bleLog.error("NOTIFY error: \(error.localizedDescription)")
+                bleLog.error("NOTIFY error: \(error.localizedDescription, privacy: .public)")
             }
             lock.lock()
             lastError = error
@@ -410,7 +416,7 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
 
         if Self.enableLogging {
             let fromUUID = characteristic.uuid.uuidString
-            bleLog.info("NOTIFY received: \(value.count) bytes from \(fromUUID)")
+            bleLog.info("NOTIFY received: \(value.count) bytes from \(fromUUID, privacy: .public)")
         }
 
         lock.lock()

@@ -109,19 +109,33 @@ public final class TracingBLETransport: BLETransport, @unchecked Sendable {
             let ts = String(format: "%+.3f", entry.elapsed)
             switch entry.operation {
             case .read(let requested, let returned):
-                traceLog.error("[\(ts)] READ  req=\(requested) got=\(returned.count) | \(returned.hexDump)")
+                let hex = returned.hexDump
+                traceLog.error(
+                    "[\(ts, privacy: .public)] READ req=\(requested) got=\(returned.count) | \(hex, privacy: .public)"
+                )
             case .readError(let requested, let error):
-                traceLog.error("[\(ts)] READ  req=\(requested) ERROR: \(error)")
+                traceLog.error(
+                    "[\(ts, privacy: .public)] READ req=\(requested) ERROR: \(error, privacy: .public)"
+                )
             case .write(let data):
-                traceLog.error("[\(ts)] WRITE \(data.count) bytes | \(data.hexDump)")
+                let hex = data.hexDump
+                traceLog.error(
+                    "[\(ts, privacy: .public)] WRITE \(data.count)B | \(hex, privacy: .public)"
+                )
             case .writeError(let data, let error):
-                traceLog.error("[\(ts)] WRITE \(data.count) bytes ERROR: \(error) | \(data.hexDump)")
+                let hex = data.hexDump
+                traceLog.error(
+                    "[\(ts, privacy: .public)] WRITE \(data.count)B ERR \(error, privacy: .public)"
+                )
+                traceLog.error(
+                    "[\(ts, privacy: .public)] WRITE data: \(hex, privacy: .public)"
+                )
             case .setTimeout(let ms):
-                traceLog.error("[\(ts)] SET_TIMEOUT \(ms) ms")
+                traceLog.error("[\(ts, privacy: .public)] SET_TIMEOUT \(ms) ms")
             case .purge:
-                traceLog.error("[\(ts)] PURGE")
+                traceLog.error("[\(ts, privacy: .public)] PURGE")
             case .close:
-                traceLog.error("[\(ts)] CLOSE")
+                traceLog.error("[\(ts, privacy: .public)] CLOSE")
             }
         }
         traceLog.error("=== End Trace ===")
