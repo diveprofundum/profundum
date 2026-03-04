@@ -381,9 +381,18 @@ class ImportSession: ObservableObject {
         // Use BLE advertised name as model (e.g., "Perdix 2", "Petrel 3")
         // rather than just the vendor name, since libdivecomputer's
         // descriptor match may return a wrong product name for newer models.
-        let model = discovered.name
+        var model = discovered.name
             ?? vendorName
             ?? "Unknown Dive Computer"
+        var serialNumber = ""
+
+        // Some devices (e.g. Halcyon Symbios) advertise their serial number
+        // as the BLE name instead of a model name. Parse it out.
+        if let bleName = discovered.name,
+           let parsed = discovered.knownComputer?.parseDeviceName(bleName) {
+            model = parsed.model
+            serialNumber = parsed.serial
+        }
 
         // Try to find existing device by BLE UUID
         do {
@@ -398,7 +407,14 @@ class ImportSession: ObservableObject {
                 // from the device hardware and is more accurate than
                 // libdivecomputer's descriptor match.
                 if let bleName = discovered.name, !bleName.isEmpty {
-                    existing.model = bleName
+                    if let parsed = discovered.knownComputer?.parseDeviceName(bleName) {
+                        existing.model = parsed.model
+                        if existing.serialNumber.isEmpty {
+                            existing.serialNumber = parsed.serial
+                        }
+                    } else {
+                        existing.model = bleName
+                    }
                 }
                 do {
                     try diveService?.saveDevice(existing)
@@ -414,7 +430,7 @@ class ImportSession: ObservableObject {
         // Create new device
         let device = Device(
             model: model,
-            serialNumber: "",
+            serialNumber: serialNumber,
             firmwareVersion: "",
             lastSyncUnix: Int64(Date().timeIntervalSince1970),
             bleUuid: bleUuid,
@@ -443,7 +459,8 @@ class ImportSession: ObservableObject {
             updated.manufacturer = vendor
         }
         if let product = result.productName, !product.isEmpty,
-           Device.genericModelNames.contains(updated.model) {
+           Device.genericModelNames.contains(updated.model)
+            || updated.model.allSatisfy(\.isNumber) {
             updated.model = product
         }
         updated.lastSyncUnix = Int64(Date().timeIntervalSince1970)

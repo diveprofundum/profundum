@@ -557,6 +557,87 @@ final class DiveComputerTests: XCTestCase {
         XCTAssertNil(notFound)
     }
 
+    // MARK: - Halcyon Symbios Tests
+
+    func testHalcyonSymbiosUUIDs() {
+        let halcyon = KnownDiveComputer.halcyonSymbios
+        XCTAssertEqual(halcyon.serviceUUID, "18424398-7CBC-11E9-8F9E-2A86E4087070")
+        XCTAssertEqual(halcyon.characteristicUUID, "00000201-8C3B-4F2C-A59E-8C08224F3253")
+        XCTAssertEqual(halcyon.dataServiceUUID, "00000001-8C3B-4F2C-A59E-8C08224F3253")
+        XCTAssertEqual(halcyon.writeCharacteristicUUID, "00000101-8C3B-4F2C-A59E-8C08224F3253")
+        XCTAssertEqual(halcyon.vendorName, "Halcyon")
+    }
+
+    func testHalcyonLookupByServiceUUID() {
+        let found = KnownDiveComputer.from(serviceUUID: "18424398-7CBC-11E9-8F9E-2A86E4087070")
+        XCTAssertEqual(found, .halcyonSymbios)
+
+        // Case-insensitive
+        let foundLower = KnownDiveComputer.from(serviceUUID: "18424398-7cbc-11e9-8f9e-2a86e4087070")
+        XCTAssertEqual(foundLower, .halcyonSymbios)
+    }
+
+    func testAllServiceUUIDsIncludesHalcyon() {
+        XCTAssertTrue(
+            KnownDiveComputer.allServiceUUIDs.contains("18424398-7CBC-11E9-8F9E-2A86E4087070")
+        )
+    }
+
+    // MARK: - parseDeviceName Tests
+
+    func testHalcyonParseDeviceName() {
+        let result = KnownDiveComputer.halcyonSymbios.parseDeviceName("2408070161")
+        XCTAssertEqual(result?.model, "Symbios Handset")
+        XCTAssertEqual(result?.serial, "2408070161")
+    }
+
+    func testHalcyonParseDeviceNameUnknownModel() {
+        let result = KnownDiveComputer.halcyonSymbios.parseDeviceName("2408990161")
+        XCTAssertEqual(result?.model, "Symbios")
+        XCTAssertEqual(result?.serial, "2408990161")
+    }
+
+    func testHalcyonParseDeviceNameEmpty() {
+        let result = KnownDiveComputer.halcyonSymbios.parseDeviceName("")
+        XCTAssertNil(result)
+    }
+
+    func testHalcyonParseDeviceNameTooShort() {
+        let result = KnownDiveComputer.halcyonSymbios.parseDeviceName("12345")
+        XCTAssertNil(result)
+    }
+
+    func testHalcyonParseDeviceNameNonNumeric() {
+        let result = KnownDiveComputer.halcyonSymbios.parseDeviceName("Perdix 2")
+        XCTAssertNil(result)
+    }
+
+    func testExistingDevicesParseDeviceNameNil() {
+        let existingDevices: [KnownDiveComputer] = [
+            .shearwater, .hwOstc, .suuntoEon, .garminDescent, .maresGenius,
+        ]
+        for device in existingDevices {
+            XCTAssertNil(
+                device.parseDeviceName("2408070161"),
+                "\(device) should return nil from parseDeviceName"
+            )
+        }
+    }
+
+    func testExistingDevicesReturnNilForNewProperties() {
+        // All pre-existing devices should return nil for the new optional properties
+        let existingDevices: [KnownDiveComputer] = [
+            .shearwater, .hwOstc, .suuntoEon, .garminDescent, .maresGenius,
+        ]
+        for device in existingDevices {
+            XCTAssertNil(device.dataServiceUUID, "\(device) should have nil dataServiceUUID")
+            XCTAssertNil(
+                device.writeCharacteristicUUID,
+                "\(device) should have nil writeCharacteristicUUID"
+            )
+        }
+    }
+
     // MARK: - DiveComputerError Tests
 
     func testErrorEquality() {

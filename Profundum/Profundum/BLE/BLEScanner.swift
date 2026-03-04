@@ -1,6 +1,9 @@
 import Combine
 import CoreBluetooth
 import DivelogCore
+import os
+
+private let scanLog = Logger(subsystem: "com.divelog.profundum", category: "BLEScanner")
 
 struct DiscoveredDevice: Identifiable {
     let id: UUID
@@ -165,8 +168,10 @@ extension BLEScanner: CBCentralManagerDelegate {
             peripheral.delegate = self
 
             if let known = knownComputer {
-                let serviceUUID = CBUUID(string: known.serviceUUID)
-                peripheral.discoverServices([serviceUUID])
+                // Use the data service UUID when it differs from the scan UUID
+                // (e.g. Halcyon Symbios advertises one UUID but communicates on another).
+                let dataUUID = CBUUID(string: known.dataServiceUUID ?? known.serviceUUID)
+                peripheral.discoverServices([dataUUID])
             } else {
                 // No known computer — discover all services
                 peripheral.discoverServices(nil)
@@ -221,8 +226,14 @@ extension BLEScanner: CBPeripheralDelegate {
 
         for service in services {
             if let known = knownComputer {
-                let targetCharUUID = CBUUID(string: known.characteristicUUID)
-                peripheral.discoverCharacteristics([targetCharUUID], for: service)
+                // Build the list of characteristic UUIDs to discover.
+                // Always include the Rx characteristic; add the separate Tx
+                // characteristic when the device uses split Rx/Tx (e.g. Halcyon).
+                var charUUIDs = [CBUUID(string: known.characteristicUUID)]
+                if let writeUUID = known.writeCharacteristicUUID {
+                    charUUIDs.append(CBUUID(string: writeUUID))
+                }
+                peripheral.discoverCharacteristics(charUUIDs, for: service)
             } else {
                 peripheral.discoverCharacteristics(nil, for: service)
             }
@@ -236,30 +247,55 @@ extension BLEScanner: CBPeripheralDelegate {
     ) {
         guard error == nil, let characteristics = service.characteristics else { return }
 
+        // Dump all discovered characteristics — critical for diagnosing BLE protocol issues.
+        for char in characteristics {
+            let props = String(char.properties.rawValue, radix: 16)
+            scanLog.info("  Characteristic \(char.uuid) properties=0x\(props)")
+        }
+
         // Capture before use — pendingKnownComputer is nonisolated(unsafe)
         let knownComputer = pendingKnownComputer
 
-        // Find the data transfer characteristic
-        let targetChar: CBCharacteristic? = {
-            if let known = knownComputer {
-                let targetUUID = CBUUID(string: known.characteristicUUID)
-                return characteristics.first { $0.uuid == targetUUID }
+        // Find the Rx (read/notify) characteristic and optional Tx (write) characteristic.
+        let rxChar: CBCharacteristic?
+        let txChar: CBCharacteristic?
+
+        if let known = knownComputer {
+            let rxUUID = CBUUID(string: known.characteristicUUID)
+            rxChar = characteristics.first { $0.uuid == rxUUID }
+
+            if let writeUUID = known.writeCharacteristicUUID {
+                let txUUID = CBUUID(string: writeUUID)
+                txChar = characteristics.first { $0.uuid == txUUID }
+                // Fail early if the expected Tx characteristic wasn't discovered.
+                // Without it, writes would silently go to the Rx characteristic
+                // and cause protocol-level timeouts.
+                if txChar == nil {
+                    scanLog.error("Expected Tx characteristic \(writeUUID) not found — aborting")
+                    Task { @MainActor [weak self] in self?.isConnecting = false }
+                    return
+                }
+            } else {
+                txChar = nil
             }
-            // Fallback: pick the first characteristic that supports notify + write
-            return characteristics.first { char in
-                char.properties.contains(.notify) &&
+        } else {
+            // Fallback: pick the first characteristic that supports notify/indicate + write
+            rxChar = characteristics.first { char in
+                (char.properties.contains(.notify) || char.properties.contains(.indicate)) &&
                     (char.properties.contains(.write) || char.properties.contains(.writeWithoutResponse))
             }
-        }()
+            txChar = nil
+        }
 
-        guard let characteristic = targetChar else { return }
+        guard let characteristic = rxChar else { return }
 
         Task { @MainActor [weak self] in
             guard let self else { return }
             self.isConnecting = false
             let bleTransport = BLEPeripheralTransport(
                 peripheral: peripheral,
-                characteristic: characteristic
+                characteristic: characteristic,
+                writeCharacteristic: txChar
             )
             self.transport = bleTransport
             self.connectedKnownComputer = knownComputer

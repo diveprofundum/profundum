@@ -16,23 +16,36 @@ private let bleLog = Logger(subsystem: "com.divelog.profundum", category: "BLETr
 /// Marked `@unchecked Sendable` because mutable state is protected manually:
 ///
 /// - **`lock`** (`NSLock`) guards all mutable state: `readBuffer`, `lastError`,
-///   and `isClosed`. Every read or write of these properties acquires the lock.
-/// - **Semaphores** (`readSemaphore`, `writeSemaphore`, `writeReadySemaphore`)
-///   are signalled *after* releasing the lock to unblock waiting threads safely.
+///   `isClosed`, and `indicationReady`. Every read or write of these properties
+///   acquires the lock.
+/// - **Semaphores** (`readSemaphore`, `writeSemaphore`, `writeReadySemaphore`,
+///   `indicationSemaphore`) are signalled *after* releasing the lock to unblock
+///   waiting threads safely.
 /// - **Callers** must not call `read`/`write` from the main actor or the Swift
 ///   cooperative thread pool — use a dedicated `DispatchQueue`.
 final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable {
     /// Set to `true` to enable detailed BLE-level logging via os_log.
     static var enableLogging = false
     private let peripheral: CBPeripheral
+    /// The Rx characteristic used for reading data (notifications/indications).
     private let characteristic: CBCharacteristic
+    /// The characteristic used for writing data. Falls back to `characteristic`
+    /// when the device uses a single bidirectional characteristic.
+    private let writeCharacteristic: CBCharacteristic
 
-    /// The CBCharacteristicWriteType determined from the characteristic's properties.
+    /// The CBCharacteristicWriteType determined from the write characteristic's properties.
     /// `.writeWithoutResponse` is required by most BLE dive computers (Shearwater, etc.).
     private let writeType: CBCharacteristicWriteType
 
-    /// Guards all mutable state: `readBuffer`, `lastError`, `isClosed`.
+    /// Guards all mutable state: `readBuffer`, `lastError`, `isClosed`, `indicationReady`.
     private let lock = NSLock()
+
+    /// Whether the Rx characteristic's notification/indication subscription is active.
+    /// Protected by `lock`.
+    private var indicationReady = false
+
+    /// Signalled when `didUpdateNotificationStateFor` fires (success or error).
+    private let indicationSemaphore = DispatchSemaphore(value: 0)
 
     /// Internal buffer for data received via BLE notifications. Protected by `lock`.
     private var readBuffer = Data()
@@ -56,13 +69,28 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         peripheral.name
     }
 
+    /// Indication-based transports (writeType == .withResponse) need a larger
+    /// timeout floor due to GATT confirmation round-trips on every packet.
+    var minimumTimeoutSeconds: TimeInterval {
+        writeType == .withResponse ? 10.0 : 5.0
+    }
+
+    /// - Parameters:
+    ///   - peripheral: The connected `CBPeripheral`.
+    ///   - characteristic: The Rx characteristic for reading (notifications/indications).
+    ///   - writeCharacteristic: An optional separate Tx characteristic for writing.
+    ///     When `nil`, `characteristic` is used for both reads and writes.
     @MainActor
-    init(peripheral: CBPeripheral, characteristic: CBCharacteristic) {
+    init(peripheral: CBPeripheral, characteristic: CBCharacteristic,
+         writeCharacteristic: CBCharacteristic? = nil) {
         self.peripheral = peripheral
         self.characteristic = characteristic
+        self.writeCharacteristic = writeCharacteristic ?? characteristic
+        // Determine write type from the write characteristic's properties.
         // Prefer writeWithoutResponse — most BLE dive computers require it.
         // Fall back to withResponse only if the characteristic doesn't support it.
-        if characteristic.properties.contains(.writeWithoutResponse) {
+        let txChar = writeCharacteristic ?? characteristic
+        if txChar.properties.contains(.writeWithoutResponse) {
             self.writeType = .withoutResponse
         } else {
             self.writeType = .withResponse
@@ -70,16 +98,27 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         super.init()
         peripheral.delegate = self
         peripheral.setNotifyValue(true, for: characteristic)
-
-        if Self.enableLogging {
-            let mtu = peripheral.maximumWriteValueLength(for: self.writeType)
-            let writeTypeName = self.writeType == .withoutResponse
-                ? "withoutResponse" : "withResponse"
-            let props = String(describing: characteristic.properties.rawValue)
-            bleLog.info(
-                "BLETransport init: writeType=\(writeTypeName), MTU=\(mtu), properties=\(props)"
-            )
+        // When Rx and Tx are separate characteristics that both support indications
+        // (e.g. Halcyon Symbios: both have .indicate), subscribe to the Tx characteristic
+        // too. The device may respond on the same characteristic it received the write on.
+        if let txChar = writeCharacteristic,
+           txChar.uuid != characteristic.uuid,
+           txChar.properties.contains(.indicate) || txChar.properties.contains(.notify) {
+            peripheral.setNotifyValue(true, for: txChar)
         }
+
+        // Always log characteristic setup — critical for diagnosing BLE protocol issues.
+        let mtu = peripheral.maximumWriteValueLength(for: self.writeType)
+        let writeTypeName = self.writeType == .withoutResponse
+            ? "withoutResponse" : "withResponse"
+        let rxUUID = characteristic.uuid.uuidString
+        let rxProps = String(characteristic.properties.rawValue, radix: 16)
+        let txUUID = (writeCharacteristic ?? characteristic).uuid.uuidString
+        let txProps = String((writeCharacteristic ?? characteristic).properties.rawValue, radix: 16)
+        bleLog.info(
+            "BLE init: Rx=\(rxUUID) props=0x\(rxProps) Tx=\(txUUID) props=0x\(txProps)"
+        )
+        bleLog.info("BLE init: writeType=\(writeTypeName) MTU=\(mtu)")
     }
 
     func read(count: Int, timeout: TimeInterval) throws -> Data {
@@ -134,6 +173,46 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         }
     }
 
+    /// Blocks until the Rx characteristic's notification/indication subscription
+    /// is confirmed by CoreBluetooth. No-op after the first successful call.
+    ///
+    /// This is critical for devices that use BLE **indications** (property 0x20)
+    /// instead of notifications — the GATT subscription handshake must complete
+    /// before the device will emit data in response to writes.
+    private func waitForIndicationSubscription(timeout: TimeInterval) throws {
+        lock.lock()
+        if indicationReady {
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+
+        bleLog.info("waitForIndication: waiting (timeout=\(timeout)s)")
+        let deadline: DispatchTime = timeout == .infinity
+            ? .distantFuture
+            : .now() + timeout
+        let result = indicationSemaphore.wait(timeout: deadline)
+        bleLog.info("waitForIndication: done (timedOut=\(result == .timedOut))")
+
+        lock.lock()
+        let closed = isClosed
+        let error = lastError
+        if error != nil { lastError = nil }
+        let ready = indicationReady
+        lock.unlock()
+
+        if closed { throw DiveComputerError.disconnected }
+        if let error {
+            throw DiveComputerError.libdivecomputer(
+                status: -1,
+                message: "Indication subscription failed: \(error.localizedDescription)"
+            )
+        }
+        if result == .timedOut && !ready {
+            throw DiveComputerError.timeout
+        }
+    }
+
     func write(_ data: Data, timeout: TimeInterval) throws {
         lock.lock()
         if isClosed {
@@ -141,6 +220,10 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
             throw DiveComputerError.disconnected
         }
         lock.unlock()
+
+        // Ensure indication/notification subscription is active before first write.
+        // Blocks only on the first call; subsequent writes see indicationReady == true.
+        try waitForIndicationSubscription(timeout: timeout)
 
         // Chunk writes to the peripheral's MTU to avoid silent truncation.
         let mtu = peripheral.maximumWriteValueLength(for: writeType)
@@ -161,9 +244,10 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
 
             if Self.enableLogging {
                 let n = chunkIndex + 1
-                let tot = data.count
+                let txUUID = writeCharacteristic.uuid.uuidString
+                let wtName = writeType == .withoutResponse ? "noRsp" : "rsp"
                 bleLog.info(
-                    "WRITE chunk \(n)/\(totalChunks): \(chunkSize)B (total \(tot), offset \(offset))"
+                    "WRITE \(n)/\(totalChunks) \(chunkSize)B to \(txUUID) (\(wtName))"
                 )
             }
 
@@ -182,9 +266,9 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
                     lock.unlock()
                     if closed { throw DiveComputerError.disconnected }
                 }
-                peripheral.writeValue(chunk, for: characteristic, type: .withoutResponse)
+                peripheral.writeValue(chunk, for: writeCharacteristic, type: .withoutResponse)
             } else {
-                peripheral.writeValue(chunk, for: characteristic, type: .withResponse)
+                peripheral.writeValue(chunk, for: writeCharacteristic, type: .withResponse)
 
                 let deadline: DispatchTime = timeout == .infinity
                     ? .distantFuture
@@ -231,17 +315,57 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         if characteristic.isNotifying {
             peripheral.setNotifyValue(false, for: characteristic)
         }
+        if writeCharacteristic.uuid != characteristic.uuid, writeCharacteristic.isNotifying {
+            peripheral.setNotifyValue(false, for: writeCharacteristic)
+        }
 
-        // Unblock any waiting reads/writes
+        // Unblock any waiting reads/writes/indication subscription
         readSemaphore.signal()
         writeSemaphore.signal()
         writeReadySemaphore.signal()
+        indicationSemaphore.signal()
     }
 }
 
 // MARK: - CBPeripheralDelegate
 
 extension BLEPeripheralTransport: CBPeripheralDelegate {
+    nonisolated func peripheral(
+        _ peripheral: CBPeripheral,
+        didUpdateNotificationStateFor characteristic: CBCharacteristic,
+        error: Error?
+    ) {
+        // Only handle our Rx or Tx characteristics — ignore unrelated state changes.
+        guard characteristic.uuid == self.characteristic.uuid
+            || characteristic.uuid == self.writeCharacteristic.uuid else { return }
+
+        let charUUID = characteristic.uuid.uuidString
+        if let error {
+            bleLog.error(
+                "SUBSCRIBE error: \(charUUID) — \(error.localizedDescription)"
+            )
+            lock.lock()
+            lastError = error
+            lock.unlock()
+            indicationSemaphore.signal()
+            return
+        }
+
+        bleLog.info(
+            "SUBSCRIBE success: \(charUUID) isNotifying=\(characteristic.isNotifying)"
+        )
+
+        // Only gate on the Rx characteristic — the Tx subscription is informational.
+        // If we set indicationReady on Tx first, the write gate opens before the
+        // device is ready to emit responses on Rx.
+        if characteristic.isNotifying, characteristic.uuid == self.characteristic.uuid {
+            lock.lock()
+            indicationReady = true
+            lock.unlock()
+            indicationSemaphore.signal()
+        }
+    }
+
     nonisolated func peripheral(
         _ peripheral: CBPeripheral,
         didUpdateValueFor characteristic: CBCharacteristic,
@@ -261,7 +385,8 @@ extension BLEPeripheralTransport: CBPeripheralDelegate {
         guard let value = characteristic.value, !value.isEmpty else { return }
 
         if Self.enableLogging {
-            bleLog.info("NOTIFY received: \(value.count) bytes")
+            let fromUUID = characteristic.uuid.uuidString
+            bleLog.info("NOTIFY received: \(value.count) bytes from \(fromUUID)")
         }
 
         lock.lock()
