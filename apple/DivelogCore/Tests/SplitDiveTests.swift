@@ -214,6 +214,27 @@ final class SplitDiveTests: XCTestCase {
         XCTAssertEqual(Set(originalTags), Set(newTags), "Tags should be copied to new dive")
     }
 
+    func testSplitPrimaryDeviceReassignsOriginal() throws {
+        let deviceA = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93")
+        let deviceB = Device(model: "Petrel", serialNumber: "B-5678", firmwareVersion: "93")
+        let diveId = try createMergedDive(deviceA: deviceA, deviceB: deviceB)
+
+        // The merged dive's primary device_id is deviceA. Split deviceA out.
+        let originalDive = try diveService.getDive(id: diveId)
+        XCTAssertEqual(originalDive?.deviceId, deviceA.id)
+
+        let result = try importService.splitDive(diveId: diveId, deviceId: deviceA.id)
+
+        // Original dive's device_id should be reassigned to deviceB
+        let updatedOriginal = try diveService.getDive(id: diveId)
+        XCTAssertEqual(updatedOriginal?.deviceId, deviceB.id,
+                        "Original dive should be reassigned to remaining device")
+
+        // New dive should have deviceA
+        let newDive = try diveService.getDive(id: result.newDiveId)
+        XCTAssertEqual(newDive?.deviceId, deviceA.id)
+    }
+
     // MARK: - Error Cases
 
     func testSplitDiveNotFound() throws {

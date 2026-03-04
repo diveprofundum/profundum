@@ -446,6 +446,7 @@ class ImportSession: ObservableObject {
         phase = .idle
         statusMessage = ""
         downloadProgress = nil
+        isNewDevice = false
         #if os(iOS)
         UIApplication.shared.isIdleTimerDisabled = false
         #endif

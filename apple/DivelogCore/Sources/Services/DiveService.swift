@@ -100,13 +100,17 @@ public final class DiveService: Sendable {
                 return false
             }
 
-            // Reassign dives, samples, and source fingerprints from loser to winner
+            // Reassign dives, samples, gas mixes, and source fingerprints from loser to winner
             try db.execute(
                 sql: "UPDATE dives SET device_id = ? WHERE device_id = ?",
                 arguments: [winnerId, loserId]
             )
             try db.execute(
                 sql: "UPDATE samples SET device_id = ? WHERE device_id = ?",
+                arguments: [winnerId, loserId]
+            )
+            try db.execute(
+                sql: "UPDATE gas_mixes SET device_id = ? WHERE device_id = ?",
                 arguments: [winnerId, loserId]
             )
             try db.execute(

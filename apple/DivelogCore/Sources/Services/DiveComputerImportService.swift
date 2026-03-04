@@ -508,13 +508,23 @@ public final class DiveComputerImportService: Sendable {
                 try DiveTag(diveId: newDiveId, tag: tag.tag).insert(db)
             }
 
-            // 7. Recompute original dive stats from remaining samples
+            // 7. Recompute original dive stats from remaining samples.
+            // If the split device was the primary, reassign device_id to a remaining source.
             let remainingStats = Self.computeBasicStats(from: remainingSamples)
             let remainingStartUnix = originalDive.startTimeUnix + Int64(remainingStats.startTSec)
             let remainingEndUnix = originalDive.startTimeUnix + Int64(remainingStats.endTSec)
+            let newPrimaryDeviceId: String = {
+                if originalDive.deviceId == deviceId {
+                    // Primary device was split out — pick from remaining samples
+                    return remainingSamples.first(where: { $0.deviceId != nil })?.deviceId
+                        ?? originalDive.deviceId
+                }
+                return originalDive.deviceId
+            }()
             try db.execute(
                 sql: """
                     UPDATE dives SET
+                        device_id = ?,
                         start_time_unix = ?,
                         end_time_unix = ?,
                         max_depth_m = ?,
@@ -527,6 +537,7 @@ public final class DiveComputerImportService: Sendable {
                     WHERE id = ?
                 """,
                 arguments: [
+                    newPrimaryDeviceId,
                     remainingStartUnix,
                     remainingEndUnix,
                     remainingStats.maxDepthM,
@@ -588,7 +599,10 @@ public final class DiveComputerImportService: Sendable {
             weightedSum += sorted[i].depthM * dt
             totalDt += dt
         }
-        let avgD = totalDt > 0 ? weightedSum / totalDt : sorted[0].depthM
+        // Fallback to arithmetic mean if all timestamps are equal
+        let avgD = totalDt > 0
+            ? weightedSum / totalDt
+            : sorted.map(\.depthM).reduce(0, +) / Float(sorted.count)
 
         return BasicStats(
             startTSec: startT,
