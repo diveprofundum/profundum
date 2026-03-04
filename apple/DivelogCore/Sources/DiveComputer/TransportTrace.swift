@@ -97,7 +97,6 @@ public final class TracingBLETransport: BLETransport, @unchecked Sendable {
     // MARK: - Trace Output
 
     /// Prints a human-readable hex dump of all recorded I/O to os_log.
-    /// Prints a human-readable hex dump of all recorded I/O to os_log.
     ///
     /// All entries are logged at `.error` level so they persist in Console.app —
     /// this method is only called on import failure/cancellation, so the elevated

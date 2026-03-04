@@ -205,6 +205,7 @@ class ImportSession: ObservableObject {
             downloadLoop: for attempt in 1...maxAttempts {
                 // Pre-download delay — let BLE stack settle after GATT setup
                 try? await Task.sleep(for: .milliseconds(750))
+                guard !Task.isCancelled else { break }
 
                 do {
                     let result = try downloader.download(
@@ -365,27 +366,68 @@ class ImportSession: ObservableObject {
                     }
 
                     // Retryable error — disconnect, reconnect, and try again
-                    let remaining = maxAttempts - attempt
+                    let retryNumber = attempt  // attempt 1 failed → this is retry 1
+                    let totalRetries = maxAttempts - 1
                     await MainActor.run {
                         self.statusMessage =
-                            "Connection issue — retrying (\(attempt)/\(remaining))..."
+                            "Connection issue — retry \(retryNumber) of \(totalRetries)..."
                     }
 
-                    guard let newTransport = await self.reconnect(
-                        peripheral: peripheral
-                    ) else {
+                    guard !Task.isCancelled,
+                          let newTransport = await self.reconnect(
+                              peripheral: peripheral
+                          ) else {
                         BLEPeripheralTransport.enableLogging = false
                         #if os(iOS)
                         await MainActor.run { UIApplication.shared.isIdleTimerDisabled = false }
                         #endif
+                        let saved = tracker.saved
+                        let merged = tracker.merged
+                        let skipped = tracker.skipped
+                        let autoStopped = tracker.shouldAutoStop
                         await MainActor.run {
-                            self.phase = .error(.downloadFailed(
-                                "Failed to reconnect to \(device.displayName). Please try again."
-                            ))
+                            if Task.isCancelled {
+                                // User cancelled during reconnect
+                                if saved > 0 || merged > 0 {
+                                    self.phase = .completed(ImportResult(
+                                        newDives: saved,
+                                        mergedDives: merged,
+                                        skippedDives: skipped,
+                                        deviceName: device.displayName,
+                                        autoStopped: autoStopped
+                                    ))
+                                    let total = saved + merged
+                                    let plural = total == 1 ? "" : "s"
+                                    self.statusMessage =
+                                        "Cancelled. \(total) dive\(plural) saved before cancellation."
+                                } else {
+                                    self.phase = .paired(device)
+                                    self.statusMessage = "Download cancelled."
+                                }
+                                self.downloadProgress = nil
+                            } else if saved > 0 || merged > 0 {
+                                self.phase = .completed(ImportResult(
+                                    newDives: saved,
+                                    mergedDives: merged,
+                                    skippedDives: skipped,
+                                    deviceName: device.displayName,
+                                    autoStopped: autoStopped
+                                ))
+                                let total = saved + merged
+                                let plural = total == 1 ? "" : "s"
+                                self.statusMessage =
+                                    "Connection lost. \(total) dive\(plural) saved before the error."
+                            } else {
+                                self.phase = .error(.downloadFailed(
+                                    "Failed to reconnect to \(device.displayName). Please try again."
+                                ))
+                            }
                         }
                         return
                     }
                     currentTransport = TracingBLETransport(wrapping: newTransport)
+                    // Only reset if user hasn't cancelled during reconnect
+                    guard !Task.isCancelled else { continue }
                     self.isCancelled = false
                     tracker.resetConsecutiveSkips()
                 }
