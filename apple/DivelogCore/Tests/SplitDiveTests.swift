@@ -295,6 +295,19 @@ final class SplitDiveTests: XCTestCase {
         XCTAssertTrue(newMixes.isEmpty, "No gas mixes should be duplicated")
     }
 
+    func testComputeBasicStatsEmptySamples() {
+        let stats = DiveComputerImportService.computeBasicStats(from: [])
+        XCTAssertEqual(stats.startTSec, 0)
+        XCTAssertEqual(stats.endTSec, 0)
+        XCTAssertEqual(stats.maxDepthM, 0)
+        XCTAssertEqual(stats.avgDepthM, 0)
+        XCTAssertEqual(stats.bottomTimeSec, 0)
+        XCTAssertNil(stats.minTempC)
+        XCTAssertNil(stats.maxTempC)
+        XCTAssertNil(stats.avgTempC)
+        XCTAssertNil(stats.maxCeilingM)
+    }
+
     func testSplitNoSamplesForDevice() throws {
         let deviceA = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93")
         let deviceB = Device(model: "Petrel", serialNumber: "B-5678", firmwareVersion: "93")
