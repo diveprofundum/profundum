@@ -1,6 +1,13 @@
 import Foundation
 import GRDB
 
+/// Whether a device belongs to the current user or someone else (e.g. a buddy).
+/// Controls merge behavior: dives from `other` devices are never time-merged.
+public enum DeviceOwnership: String, Codable, Sendable, CaseIterable {
+    case mine
+    case other
+}
+
 /// A dive computer device.
 public struct Device: Identifiable, Equatable, Hashable, Sendable {
     public var id: String
@@ -18,6 +25,8 @@ public struct Device: Identifiable, Equatable, Hashable, Sendable {
     public var bleUuid: String?
     /// Manufacturer name (e.g. "Shearwater"). Nullable for backwards compat.
     public var manufacturer: String?
+    /// Whether this device belongs to the current user or someone else.
+    public var ownership: DeviceOwnership
 
     public init(
         id: String = UUID().uuidString,
@@ -29,7 +38,8 @@ public struct Device: Identifiable, Equatable, Hashable, Sendable {
         vendorId: Int? = nil,
         productId: Int? = nil,
         bleUuid: String? = nil,
-        manufacturer: String? = nil
+        manufacturer: String? = nil,
+        ownership: DeviceOwnership = .mine
     ) {
         self.id = id
         self.model = model
@@ -41,6 +51,7 @@ public struct Device: Identifiable, Equatable, Hashable, Sendable {
         self.productId = productId
         self.bleUuid = bleUuid
         self.manufacturer = manufacturer
+        self.ownership = ownership
     }
 
     /// Model names that are placeholders and should be replaced by more specific values.
@@ -85,5 +96,6 @@ extension Device: Codable, FetchableRecord, PersistableRecord {
         case productId = "product_id"
         case bleUuid = "ble_uuid"
         case manufacturer
+        case ownership
     }
 }

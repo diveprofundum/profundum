@@ -14,6 +14,8 @@ struct SyncView: View {
     @State private var forceFullSync = false
     @State private var limitDownloadRange = true
     @State private var cutoffDate = Calendar.current.date(byAdding: .month, value: -6, to: Date()) ?? Date()
+    @State private var deviceOwnership: DeviceOwnership = .mine
+    @State private var ownershipError: String?
 
     var body: some View {
         NavigationStack {
@@ -57,6 +59,14 @@ struct SyncView: View {
                 allowedContentTypes: [.database, .data],
                 onCompletion: handleFileImport
             )
+            .alert("Error", isPresented: Binding(
+                get: { ownershipError != nil },
+                set: { if !$0 { ownershipError = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Failed to save ownership: \(ownershipError ?? "")")
+            }
         }
     }
 
@@ -193,6 +203,31 @@ struct SyncView: View {
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 }
+            }
+
+            if session.isNewDevice {
+                VStack(spacing: 4) {
+                    Text("Whose computer is this?")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Picker("Owner", selection: $deviceOwnership) {
+                        Text("Me").tag(DeviceOwnership.mine)
+                        Text("Someone else").tag(DeviceOwnership.other)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 250)
+                    .onChange(of: deviceOwnership) { _, newValue in
+                        var updated = device
+                        updated.ownership = newValue
+                        do {
+                            try appState.diveService.saveDevice(updated)
+                        } catch {
+                            ownershipError = error.localizedDescription
+                            deviceOwnership = device.ownership
+                        }
+                    }
+                }
+                .accessibilityElement(children: .combine)
             }
 
             if session.isFirstSync {

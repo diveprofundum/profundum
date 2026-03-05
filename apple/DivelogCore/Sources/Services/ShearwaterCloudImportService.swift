@@ -392,7 +392,8 @@ public final class ShearwaterCloudImportService: Sendable {
                                     mixIndex: nextMixIndex,
                                     o2Fraction: mix.o2Fraction,
                                     heFraction: mix.heFraction,
-                                    usage: mix.usage
+                                    usage: mix.usage,
+                                    deviceId: ir.deviceId
                                 ).insert(db)
                                 nextMixIndex += 1
                             }
@@ -620,7 +621,8 @@ public final class ShearwaterCloudImportService: Sendable {
                         mixIndex: idx,
                         o2Fraction: mix.o2Fraction,
                         heFraction: mix.heFraction,
-                        usage: mix.usage
+                        usage: mix.usage,
+                        deviceId: primaryIr.deviceId
                     ).insert(db)
                 }
             }

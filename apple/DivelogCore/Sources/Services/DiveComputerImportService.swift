@@ -170,22 +170,38 @@ public final class DiveComputerImportService: Sendable {
             }
 
             // Time-based cross-source match → merge or skip
+            // Only merge when both the importing device and the existing dive's
+            // device are owned by the user. Buddy devices should never auto-merge.
             if let fp = parsed.fingerprint,
                let existingDiveId = try Self.findExistingDiveByTime(
                    startTimeUnix: parsed.startTimeUnix, deviceId: deviceId, db: db
                ) {
-                if try Self.hasSamplesFromDevice(
-                    diveId: existingDiveId, deviceId: deviceId, db: db
-                ) {
-                    try Self.insertSourceFingerprint(
-                        fp, deviceId: deviceId, diveId: existingDiveId, db: db
-                    )
-                    return .skipped
+                let importingOwnership = try Device.fetchOne(db, key: deviceId)?.ownership ?? .mine
+                let shouldMerge: Bool
+                if importingOwnership == .other {
+                    shouldMerge = false
+                } else {
+                    let existingDive = try Dive.fetchOne(db, key: existingDiveId)
+                    let existingDeviceOwnership = try existingDive
+                        .flatMap { try Device.fetchOne(db, key: $0.deviceId) }?.ownership ?? .mine
+                    shouldMerge = existingDeviceOwnership == .mine
                 }
-                try Self.mergeSamplesInTransaction(
-                    parsed, deviceId: deviceId, intoDiveId: existingDiveId, db: db
-                )
-                return .merged
+
+                if shouldMerge {
+                    if try Self.hasSamplesFromDevice(
+                        diveId: existingDiveId, deviceId: deviceId, db: db
+                    ) {
+                        try Self.insertSourceFingerprint(
+                            fp, deviceId: deviceId, diveId: existingDiveId, db: db
+                        )
+                        return .skipped
+                    }
+                    try Self.mergeSamplesInTransaction(
+                        parsed, deviceId: deviceId, intoDiveId: existingDiveId, db: db
+                    )
+                    return .merged
+                }
+                // Fall through to new dive for buddy devices
             }
 
             // New dive
@@ -277,7 +293,8 @@ public final class DiveComputerImportService: Sendable {
                     mixIndex: nextMixIndex,
                     o2Fraction: m.o2Fraction,
                     heFraction: m.heFraction,
-                    usage: m.usage
+                    usage: m.usage,
+                    deviceId: deviceId
                 ).insert(db)
                 nextMixIndex += 1
             }
@@ -350,6 +367,254 @@ public final class DiveComputerImportService: Sendable {
             LIMIT 1
             """, arguments: [startTimeUnix, deviceId])
         return row?["id"] as String?
+    }
+
+    // MARK: - Split (Un-Merge)
+
+    /// Errors that can occur during a dive split operation.
+    public enum SplitError: Error, Equatable {
+        case diveNotFound
+        case notMerged
+        case noSamplesForDevice
+        case wouldRemoveAllSamples
+    }
+
+    /// Result of a successful dive split.
+    public struct SplitResult: Sendable {
+        public let newDiveId: String
+        public let originalDiveId: String
+    }
+
+    /// Splits samples from `deviceId` out of a merged dive into a new dive.
+    ///
+    /// In a single write transaction:
+    /// 1. Validates the dive exists, has multiple source devices, and the target
+    ///    device has samples that wouldn't empty the original.
+    /// 2. Creates the new dive with recomputed stats (must exist before FK refs).
+    /// 3. Duplicates gas mixes referenced by the split samples to the new dive.
+    /// 4. Moves samples (`dive_id` update) and remaps `gasmix_index`.
+    /// 5. Moves fingerprints for the target device.
+    /// 6. Copies tags to the new dive.
+    /// 7. Recomputes stats and time range on the original dive.
+    ///
+    /// - Parameters:
+    ///   - diveId: The merged dive to split.
+    ///   - deviceId: The device whose samples should be extracted.
+    /// - Returns: A `SplitResult` with the new and original dive IDs.
+    public func splitDive(diveId: String, deviceId: String) throws -> SplitResult {
+        try database.dbQueue.write { db in
+            // 1. Validate
+            guard let originalDive = try Dive.fetchOne(db, key: diveId) else {
+                throw SplitError.diveNotFound
+            }
+            let allSamples = try DiveSample
+                .filter(Column("dive_id") == diveId)
+                .order(Column("t_sec"))
+                .fetchAll(db)
+            let sourceDeviceIds = Set(allSamples.compactMap(\.deviceId))
+            guard sourceDeviceIds.count >= 2 else {
+                throw SplitError.notMerged
+            }
+            let splitSamples = allSamples.filter { $0.deviceId == deviceId }
+            guard !splitSamples.isEmpty else {
+                throw SplitError.noSamplesForDevice
+            }
+            let remainingSamples = allSamples.filter { $0.deviceId != deviceId }
+            guard !remainingSamples.isEmpty else {
+                throw SplitError.wouldRemoveAllSamples
+            }
+
+            // 2. Create new dive with recomputed stats (must exist before FK references)
+            let splitMixIndices = Set(splitSamples.compactMap(\.gasmixIndex))
+            let existingMixes = try GasMix
+                .filter(Column("dive_id") == diveId)
+                .fetchAll(db)
+            let newDiveId = UUID().uuidString
+            let splitStats = Self.computeBasicStats(from: splitSamples)
+            let newDive = Dive(
+                id: newDiveId,
+                deviceId: deviceId,
+                startTimeUnix: originalDive.startTimeUnix + Int64(splitStats.startTSec),
+                endTimeUnix: originalDive.startTimeUnix + Int64(splitStats.endTSec),
+                maxDepthM: splitStats.maxDepthM,
+                avgDepthM: splitStats.avgDepthM,
+                bottomTimeSec: splitStats.bottomTimeSec,
+                isCcr: originalDive.isCcr,
+                decoRequired: originalDive.decoRequired,
+                cnsPercent: originalDive.cnsPercent,
+                otu: originalDive.otu,
+                siteId: originalDive.siteId,
+                notes: originalDive.notes,
+                minTempC: splitStats.minTempC,
+                maxTempC: splitStats.maxTempC,
+                avgTempC: splitStats.avgTempC,
+                gfLow: originalDive.gfLow,
+                gfHigh: originalDive.gfHigh,
+                decoModel: originalDive.decoModel,
+                salinity: originalDive.salinity,
+                surfacePressureBar: originalDive.surfacePressureBar,
+                lat: originalDive.lat,
+                lon: originalDive.lon,
+                maxCeilingM: splitStats.maxCeilingM,
+                environment: originalDive.environment,
+                visibility: originalDive.visibility,
+                weather: originalDive.weather
+            )
+            try newDive.insert(db)
+
+            // 3. Duplicate gas mixes referenced by split samples
+            var indexRemap: [Int: Int] = [:]
+            var newMixIndex = 0
+            for mix in existingMixes where splitMixIndices.contains(mix.mixIndex) {
+                indexRemap[mix.mixIndex] = newMixIndex
+                try GasMix(
+                    diveId: newDiveId,
+                    mixIndex: newMixIndex,
+                    o2Fraction: mix.o2Fraction,
+                    heFraction: mix.heFraction,
+                    usage: mix.usage,
+                    deviceId: deviceId
+                ).insert(db)
+                newMixIndex += 1
+            }
+
+            // 4. Move samples — update dive_id and remap gasmixIndex
+            for sample in splitSamples {
+                let remappedIndex = sample.gasmixIndex.flatMap { indexRemap[$0] }
+                try db.execute(
+                    sql: """
+                        UPDATE samples SET dive_id = ?, gasmix_index = ?
+                        WHERE id = ?
+                    """,
+                    arguments: [newDiveId, remappedIndex, sample.id]
+                )
+            }
+
+            // 5. Move fingerprints for this device
+            try db.execute(
+                sql: """
+                    UPDATE dive_source_fingerprints
+                    SET dive_id = ?
+                    WHERE dive_id = ? AND device_id = ?
+                """,
+                arguments: [newDiveId, diveId, deviceId]
+            )
+
+            // 6. Copy tags
+            let tags = try DiveTag
+                .filter(Column("dive_id") == diveId)
+                .fetchAll(db)
+            for tag in tags {
+                try DiveTag(diveId: newDiveId, tag: tag.tag).insert(db)
+            }
+
+            // 7. Recompute original dive stats from remaining samples.
+            // If the split device was the primary, reassign device_id to a remaining source.
+            let remainingStats = Self.computeBasicStats(from: remainingSamples)
+            let remainingStartUnix = originalDive.startTimeUnix + Int64(remainingStats.startTSec)
+            let remainingEndUnix = originalDive.startTimeUnix + Int64(remainingStats.endTSec)
+            let newPrimaryDeviceId: String = {
+                if originalDive.deviceId == deviceId {
+                    // Primary device was split out — pick from remaining samples
+                    return remainingSamples.first(where: { $0.deviceId != nil })?.deviceId
+                        ?? originalDive.deviceId
+                }
+                return originalDive.deviceId
+            }()
+            try db.execute(
+                sql: """
+                    UPDATE dives SET
+                        device_id = ?,
+                        start_time_unix = ?,
+                        end_time_unix = ?,
+                        max_depth_m = ?,
+                        avg_depth_m = ?,
+                        bottom_time_sec = ?,
+                        min_temp_c = ?,
+                        max_temp_c = ?,
+                        avg_temp_c = ?,
+                        max_ceiling_m = ?
+                    WHERE id = ?
+                """,
+                arguments: [
+                    newPrimaryDeviceId,
+                    remainingStartUnix,
+                    remainingEndUnix,
+                    remainingStats.maxDepthM,
+                    remainingStats.avgDepthM,
+                    remainingStats.bottomTimeSec,
+                    remainingStats.minTempC,
+                    remainingStats.maxTempC,
+                    remainingStats.avgTempC,
+                    remainingStats.maxCeilingM,
+                    diveId
+                ]
+            )
+
+            return SplitResult(newDiveId: newDiveId, originalDiveId: diveId)
+        }
+    }
+
+    /// Basic stats computed from a set of samples (pure function).
+    struct BasicStats {
+        let startTSec: Int32
+        let endTSec: Int32
+        let maxDepthM: Float
+        let avgDepthM: Float
+        let bottomTimeSec: Int32
+        let minTempC: Float?
+        let maxTempC: Float?
+        let avgTempC: Float?
+        let maxCeilingM: Float?
+    }
+
+    static func computeBasicStats(from samples: [DiveSample]) -> BasicStats {
+        guard !samples.isEmpty else {
+            return BasicStats(
+                startTSec: 0, endTSec: 0, maxDepthM: 0, avgDepthM: 0,
+                bottomTimeSec: 0, minTempC: nil, maxTempC: nil, avgTempC: nil,
+                maxCeilingM: nil
+            )
+        }
+        let sorted = samples.sorted { $0.tSec < $1.tSec }
+        // Safe: guard above ensures non-empty
+        let startT = sorted[0].tSec
+        let endT = sorted[sorted.count - 1].tSec
+        let maxD = sorted.lazy.map(\.depthM).max() ?? 0
+        let temps = sorted.map(\.tempC)
+        let minT = temps.min()
+        let maxT = temps.max()
+        let avgT: Float? = temps.isEmpty ? nil : temps.reduce(0, +) / Float(temps.count)
+        let maxCeiling: Float? = {
+            let ceilings = sorted.compactMap(\.ceilingM).filter { $0 > 0 }
+            return ceilings.max()
+        }()
+
+        // Time-weighted average depth
+        var weightedSum: Float = 0
+        var totalDt: Float = 0
+        for i in 0..<(sorted.count - 1) {
+            let dt = Float(sorted[i + 1].tSec - sorted[i].tSec)
+            guard dt > 0 else { continue }
+            weightedSum += sorted[i].depthM * dt
+            totalDt += dt
+        }
+        // Fallback to arithmetic mean if all timestamps are equal
+        let avgD = totalDt > 0
+            ? weightedSum / totalDt
+            : sorted.map(\.depthM).reduce(0, +) / Float(sorted.count)
+
+        return BasicStats(
+            startTSec: startT,
+            endTSec: endT,
+            maxDepthM: maxD,
+            avgDepthM: avgD,
+            bottomTimeSec: endT - startT,
+            minTempC: minT,
+            maxTempC: maxT,
+            avgTempC: avgT,
+            maxCeilingM: maxCeiling
+        )
     }
 
     /// Links an existing dive to a new BLE fingerprint (skips if already linked).

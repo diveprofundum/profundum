@@ -88,6 +88,7 @@ class ImportSession: ObservableObject {
     @Published var statusMessage: String = ""
     @Published var downloadProgress: (current: Int, total: Int?)?
     @Published var isFirstSync = false
+    @Published var isNewDevice = false
 
     let scanner: BLEScanner
     private var diveService: DiveService?
@@ -445,6 +446,7 @@ class ImportSession: ObservableObject {
         phase = .idle
         statusMessage = ""
         downloadProgress = nil
+        isNewDevice = false
         #if os(iOS)
         UIApplication.shared.isIdleTimerDisabled = false
         #endif
@@ -659,6 +661,7 @@ class ImportSession: ObservableObject {
         )
         do {
             try diveService?.saveDevice(device)
+            isNewDevice = true
         } catch {
             importLog.error("Failed to save new device: \(error.localizedDescription, privacy: .public)")
         }
