@@ -77,14 +77,19 @@ public final class DiveComputerImportService: Sendable {
         }
     }
 
-    /// Finds an existing dive by start time from a different device (cross-source dedup).
+    /// Finds an existing dive from a different device whose time range overlaps.
     /// - Parameters:
-    ///   - startTimeUnix: The start time to search for.
+    ///   - startTimeUnix: The start time of the incoming dive.
+    ///   - endTimeUnix: The end time of the incoming dive.
     ///   - deviceId: The device ID of the incoming dive (excluded from results).
-    /// - Returns: The existing dive's ID if found within ±300s from a different device, or `nil`.
-    public func findExistingDiveByTime(startTimeUnix: Int64, deviceId: String) throws -> String? {
+    /// - Returns: The existing dive's ID if an overlapping dive from another device exists, or `nil`.
+    public func findExistingDiveByOverlap(
+        startTimeUnix: Int64, endTimeUnix: Int64, deviceId: String
+    ) throws -> String? {
         try database.dbQueue.read { db in
-            try Self.findExistingDiveByTime(startTimeUnix: startTimeUnix, deviceId: deviceId, db: db)
+            try Self.findExistingDiveByOverlap(
+                startTimeUnix: startTimeUnix, endTimeUnix: endTimeUnix, deviceId: deviceId, db: db
+            )
         }
     }
 
@@ -191,10 +196,12 @@ public final class DiveComputerImportService: Sendable {
                 }
             }
 
-            // Time-based cross-source match → merge or skip
+            // Time-overlap cross-source match → merge or skip
             if let fp = parsed.fingerprint,
-               let existingDiveId = try Self.findExistingDiveByTime(
-                   startTimeUnix: parsed.startTimeUnix, deviceId: deviceId, db: db
+               let existingDiveId = try Self.findExistingDiveByOverlap(
+                   startTimeUnix: parsed.startTimeUnix,
+                   endTimeUnix: parsed.endTimeUnix,
+                   deviceId: deviceId, db: db
                ) {
                 if try Self.shouldMergeDevices(
                     importingDeviceId: deviceId, existingDiveId: existingDiveId, db: db
@@ -378,18 +385,22 @@ public final class DiveComputerImportService: Sendable {
         return nil
     }
 
-    /// Finds an existing dive by start time from a different device.
-    /// Uses ±300s tolerance to handle clock drift between import paths.
-    /// 5 minutes is well under the shortest realistic surface interval.
-    private static func findExistingDiveByTime(
-        startTimeUnix: Int64, deviceId: String, db: Database
+    /// Finds an existing dive from a different device whose time range overlaps
+    /// the incoming dive.  Two dives overlap when each one starts before the
+    /// other ends: `start_a < end_b AND start_b < end_a`.  This is far more
+    /// robust than a fixed start-time tolerance because different dive computers
+    /// detect dive-start at different depths/times (observed >6 min skew between
+    /// Shearwater Perdix 2 and Petrel 3 on the same dive).
+    private static func findExistingDiveByOverlap(
+        startTimeUnix: Int64, endTimeUnix: Int64, deviceId: String, db: Database
     ) throws -> String? {
         let row = try Row.fetchOne(db, sql: """
             SELECT id FROM dives
-            WHERE ABS(start_time_unix - ?) <= 300
+            WHERE start_time_unix < ?
+              AND end_time_unix > ?
               AND device_id != ?
             LIMIT 1
-            """, arguments: [startTimeUnix, deviceId])
+            """, arguments: [endTimeUnix, startTimeUnix, deviceId])
         return row?["id"] as String?
     }
 

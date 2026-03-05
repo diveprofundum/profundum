@@ -77,7 +77,7 @@ final class CrossSourceDedupTests: XCTestCase {
     }
 
     func testShearwaterThenBLEDedupWithTimestampOffset() throws {
-        // Same as above but with a small timestamp difference (within ±300s)
+        // Same as above but with a small timestamp difference (overlapping time ranges)
         let shearwaterDevice = Device(model: "Perdix", serialNumber: "SW-1234", firmwareVersion: "93")
         try diveService.saveDevice(shearwaterDevice)
 
@@ -310,7 +310,7 @@ final class CrossSourceDedupTests: XCTestCase {
         )
         try diveService.saveDive(shearwaterDive)
 
-        // Exactly 300s offset — should still match (ABS <= 300)
+        // 300s offset — overlapping time ranges, should merge
         let bleParsedAtBoundary = ParsedDive(
             startTimeUnix: 1700000300,
             endTimeUnix: 1700003900,
@@ -321,12 +321,12 @@ final class CrossSourceDedupTests: XCTestCase {
             samples: [ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0)]
         )
         let boundaryOutcome = try importService.saveImportedDive(bleParsedAtBoundary, deviceId: bleDevice.id)
-        XCTAssertEqual(boundaryOutcome, .merged, "Dive at exactly 300s offset should be merged")
+        XCTAssertEqual(boundaryOutcome, .merged, "Overlapping dive should be merged")
 
-        // 301s offset — should NOT match
+        // Non-overlapping: starts after existing dive ends → should be saved as new
         let bleParsedBeyond = ParsedDive(
-            startTimeUnix: 1700000301,
-            endTimeUnix: 1700003901,
+            startTimeUnix: 1700003700,  // starts 100s after existing dive ends
+            endTimeUnix: 1700007300,
             maxDepthM: 30.0,
             avgDepthM: 18.0,
             bottomTimeSec: 3000,
@@ -334,7 +334,7 @@ final class CrossSourceDedupTests: XCTestCase {
             samples: [ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0)]
         )
         let beyondOutcome = try importService.saveImportedDive(bleParsedBeyond, deviceId: bleDevice.id)
-        XCTAssertEqual(beyondOutcome, .saved, "Dive at 301s offset should be saved as new")
+        XCTAssertEqual(beyondOutcome, .saved, "Non-overlapping dive should be saved as new")
     }
 
     // MARK: - Duplicate Fingerprint Linking Is Idempotent
