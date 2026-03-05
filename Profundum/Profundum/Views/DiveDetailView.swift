@@ -341,7 +341,9 @@ struct DiveDetailView: View {
         ], spacing: 12) {
             StatCard(title: "Max Depth", value: UnitFormatter.formatDepth(dive.maxDepthM, unit: appState.depthUnit))
             StatCard(title: "Avg Depth", value: UnitFormatter.formatDepth(dive.avgDepthM, unit: appState.depthUnit))
-            StatCard(title: "Bottom Time", value: "\((stats?.bottomTimeSec ?? dive.bottomTimeSec) / 60) min")
+            if dive.decoRequired {
+                StatCard(title: "Bottom Time", value: "\((stats?.bottomTimeSec ?? dive.bottomTimeSec) / 60) min")
+            }
             StatCard(title: "Total Time", value: formatTotalTime())
 
             if dive.cnsPercent > 0 {

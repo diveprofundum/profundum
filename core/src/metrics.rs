@@ -46,7 +46,7 @@ pub struct DiveInput {
     pub start_time_unix: i64,
     /// End time as Unix timestamp
     pub end_time_unix: i64,
-    /// Bottom time in seconds (time at depth > 3m)
+    /// Bottom time in seconds (from dive computer / legacy fallback)
     pub bottom_time_sec: i32,
 }
 
@@ -76,7 +76,7 @@ pub struct SampleInput {
 pub struct DiveStats {
     /// Total dive time in seconds
     pub total_time_sec: i32,
-    /// Bottom time in seconds (time at depth > 3m)
+    /// Bottom time in seconds (deco dives: descent + time at working depth; non-deco: 0)
     pub bottom_time_sec: i32,
     /// Deco time in seconds (time with ceiling > 0)
     pub deco_time_sec: i32,
@@ -133,8 +133,8 @@ impl DiveStats {
         let mut gas_switch_count: u32 = 0;
         let mut prev_gasmix_index: Option<i32> = None;
 
-        // Bottom time (depth > 3m)
-        let mut bottom_time_sec: i32 = 0;
+        // Deco detection
+        let mut has_deco = false;
 
         for (i, sample) in samples.iter().enumerate() {
             // Depth stats
@@ -167,6 +167,7 @@ impl DiveStats {
             // Deco time: when ceiling > 0
             if let Some(ceiling) = sample.ceiling_m {
                 if ceiling > 0.0 {
+                    has_deco = true;
                     let deco_dt = if i + 1 < samples.len() {
                         samples[i + 1].t_sec - sample.t_sec
                     } else if i > 0 {
@@ -197,19 +198,21 @@ impl DiveStats {
                 }
                 prev_gasmix_index = Some(idx);
             }
-
-            // Bottom time (below 3m threshold)
-            if sample.depth_m > 3.0 {
-                let bt_dt = if i + 1 < samples.len() {
-                    samples[i + 1].t_sec - sample.t_sec
-                } else if i > 0 {
-                    sample.t_sec - samples[i - 1].t_sec
-                } else {
-                    1
-                };
-                bottom_time_sec += bt_dt;
-            }
         }
+
+        // Bottom time: only meaningful for deco dives.
+        // Defined as descent + time at working depth, ending when the sustained
+        // ascent to the first deco stop begins.  We approximate this as the time
+        // of the last sample within 1m of max depth.
+        let bottom_time_sec: i32 = if has_deco && max_depth_m > 0.0 {
+            let threshold = (max_depth_m - 1.0).max(0.0);
+            samples
+                .iter()
+                .rposition(|s| s.depth_m >= threshold)
+                .map_or(0, |idx| samples[idx].t_sec)
+        } else {
+            0
+        };
 
         let avg_depth_m = if !samples.is_empty() {
             (depth_sum / samples.len() as f64) as f32
@@ -862,8 +865,8 @@ mod tests {
         // 29700/1800 = 16.5
         assert_eq!(stats.weighted_avg_depth_m, 16.5);
 
-        // bottom_time (depth > 3.0): samples 1-6, dt=[60,180,300,300,300,300] = 1440
-        assert_eq!(stats.bottom_time_sec, 1440);
+        // bottom_time (deco dive): last sample at max depth 30m is at t=600
+        assert_eq!(stats.bottom_time_sec, 600);
 
         // deco_time (ceiling > 0): samples 3,4,5 with dt=[300,300,300] = 900
         assert_eq!(stats.deco_time_sec, 900);
@@ -1041,8 +1044,8 @@ mod tests {
         // Single sample: weighted_avg = depth (weight=1, sum=10*1=10, 10/1=10)
         assert_eq!(stats.weighted_avg_depth_m, 10.0);
         assert_eq!(stats.avg_depth_m, 10.0);
-        // depth > 3m, dt=1 fallback
-        assert_eq!(stats.bottom_time_sec, 1);
+        // Deco dive (ceiling=2>0), single sample at max depth 10m → bottom_time = t_sec = 0
+        assert_eq!(stats.bottom_time_sec, 0);
         // ceiling > 0, dt=1 fallback
         assert_eq!(stats.deco_time_sec, 1);
         assert_eq!(stats.max_gf99, 50.0);
@@ -1178,9 +1181,8 @@ mod tests {
     }
 
     #[test]
-    fn test_bottom_time_last_sample_at_depth() {
-        // Last sample has depth > 3m, exercises the `else if i > 0` fallback
-        // for bottom_time dt (line 204-205).
+    fn test_bottom_time_non_deco_dive_is_zero() {
+        // Non-deco dive (no ceiling data) → bottom_time_sec = 0
         let dive = create_test_dive();
         let samples = vec![
             SampleInput {
@@ -1215,34 +1217,30 @@ mod tests {
             },
         ];
         let stats = DiveStats::compute(&dive, &samples);
-        // sample 0: depth=0, not >3
-        // sample 1 (i=1): depth=10>3, i+1<3 → dt=400-100=300
-        // sample 2 (i=2, last): depth=15>3, i+1=3 NOT <3, i>0 → dt=400-100=300
-        // total bottom = 300+300 = 600
-        assert_eq!(stats.bottom_time_sec, 600);
+        assert_eq!(stats.bottom_time_sec, 0);
     }
 
     #[test]
-    fn test_bottom_time_boundary_exactly_3m() {
-        // depth = 3.0 exactly should NOT count as bottom time (catches > → >=)
+    fn test_bottom_time_non_deco_with_ceiling_zero() {
+        // All ceiling = 0.0 (no deco obligation) → bottom_time_sec = 0
         let dive = create_test_dive();
         let samples = vec![
             SampleInput {
                 t_sec: 0,
-                depth_m: 3.0,
+                depth_m: 20.0,
                 temp_c: 20.0,
                 setpoint_ppo2: None,
-                ceiling_m: None,
+                ceiling_m: Some(0.0),
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
             },
             SampleInput {
-                t_sec: 60,
-                depth_m: 3.0,
+                t_sec: 600,
+                depth_m: 20.0,
                 temp_c: 20.0,
                 setpoint_ppo2: None,
-                ceiling_m: None,
+                ceiling_m: Some(0.0),
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
@@ -1401,5 +1399,272 @@ mod tests {
         assert_eq!(stats.max_depth_m, 25.0);
         assert_eq!(stats.min_temp_c, 18.0);
         assert_eq!(stats.max_temp_c, 18.0);
+    }
+
+    // ── Bottom time algorithm tests ──────────────────────────
+
+    #[test]
+    fn test_bottom_time_deco_dive_ends_at_last_max_depth() {
+        // Profile: descend to 40m, stay, ascend to 6m deco stop, surface
+        // Bottom time = t_sec of last sample at ≥ 39m
+        let dive = DiveInput {
+            start_time_unix: 0,
+            end_time_unix: 3600,
+            bottom_time_sec: 0,
+        };
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(0.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 180,
+                depth_m: 40.0,
+                temp_c: 16.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(0.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 900,
+                depth_m: 40.0,
+                temp_c: 16.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(6.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 1200,
+                depth_m: 40.0,
+                temp_c: 16.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(9.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            // Ascent begins here — leaves working depth
+            SampleInput {
+                t_sec: 1500,
+                depth_m: 21.0,
+                temp_c: 17.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(6.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 1800,
+                depth_m: 6.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(3.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 2400,
+                depth_m: 3.0,
+                temp_c: 19.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(0.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 2700,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(0.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+        ];
+        let stats = DiveStats::compute(&dive, &samples);
+        // Last sample at ≥ 39m (max 40 - 1) is at t=1200
+        assert_eq!(stats.bottom_time_sec, 1200);
+        // deco_time covers samples with ceiling > 0
+        assert!(stats.deco_time_sec > 0);
+    }
+
+    #[test]
+    fn test_bottom_time_multi_level_deco() {
+        // Multi-level: 30m → 25m → back to 30m → ascent to deco stops
+        // Bottom time = last time at ≥ 29m
+        let dive = DiveInput {
+            start_time_unix: 0,
+            end_time_unix: 3000,
+            bottom_time_sec: 0,
+        };
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(0.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 120,
+                depth_m: 30.0,
+                temp_c: 16.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(0.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 300,
+                depth_m: 25.0,
+                temp_c: 17.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(3.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            // Return to max depth
+            SampleInput {
+                t_sec: 600,
+                depth_m: 30.0,
+                temp_c: 16.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(6.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            // Leave bottom for good
+            SampleInput {
+                t_sec: 900,
+                depth_m: 15.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(3.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 1200,
+                depth_m: 5.0,
+                temp_c: 19.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(0.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 1500,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(0.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+        ];
+        let stats = DiveStats::compute(&dive, &samples);
+        // Last sample at ≥ 29m is the return at t=600
+        assert_eq!(stats.bottom_time_sec, 600);
+    }
+
+    #[test]
+    fn test_bottom_time_depth_oscillation_within_threshold() {
+        // Diver at 29.5-30m (both within 1m of max=30) — bottom time includes full phase
+        let dive = DiveInput {
+            start_time_unix: 0,
+            end_time_unix: 2000,
+            bottom_time_sec: 0,
+        };
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(0.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 120,
+                depth_m: 30.0,
+                temp_c: 16.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(3.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            // Slight shallowing due to surge — still in working depth band
+            SampleInput {
+                t_sec: 300,
+                depth_m: 29.5,
+                temp_c: 16.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(3.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 600,
+                depth_m: 29.2,
+                temp_c: 16.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(6.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            // Ascent begins
+            SampleInput {
+                t_sec: 900,
+                depth_m: 15.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(3.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+            SampleInput {
+                t_sec: 1200,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(0.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+            },
+        ];
+        let stats = DiveStats::compute(&dive, &samples);
+        // max=30, threshold=29. All bottom samples (30, 29.5, 29.2) are >= 29.
+        // Last at ≥ 29m is at t=600.
+        assert_eq!(stats.bottom_time_sec, 600);
     }
 }
