@@ -1,7 +1,7 @@
 # Equivalent mutants that cannot be killed by any test.
 #
 # Each exclusion targets a SPECIFIC mutation (by file:line:col) that produces
-# identical observable output for ALL valid inputs. Only 19 mutations are
+# identical observable output for ALL valid inputs. Only 20 mutations are
 # excluded — all others are caught by tests or unviable.
 #
 # If production code changes shift line numbers, stale patterns will stop
@@ -16,26 +16,29 @@ exclude_re = [
     "src/metrics\\.rs:141:.*replace > with >= in DiveStats::compute",   # max_depth_m
     "src/metrics\\.rs:159:.*replace < with <= in DiveStats::compute",   # min_temp_c
     "src/metrics\\.rs:162:.*replace > with >= in DiveStats::compute",   # max_temp_c
-    "src/metrics\\.rs:179:.*replace > with >= in DiveStats::compute",   # max_ceiling_m
-    "src/metrics\\.rs:186:.*replace > with >= in DiveStats::compute",   # max_gf99
+    "src/metrics\\.rs:180:.*replace > with >= in DiveStats::compute",   # max_ceiling_m
+    "src/metrics\\.rs:187:.*replace > with >= in DiveStats::compute",   # max_gf99
     # weight_sum > 0.0: weight_sum is always strictly positive when samples exist
-    "src/metrics\\.rs:220:.*replace > with >= in DiveStats::compute",
+    "src/metrics\\.rs:223:.*replace > with >= in DiveStats::compute",
+    # max_depth_m > 0.0: has_deco && max_depth_m == 0.0 is physically impossible
+    # (no deco obligation at zero depth); >= produces equivalent result
+    "src/metrics\\.rs:207:.*replace > with >= in DiveStats::compute",
 
     # ── metrics.rs: DiveStats::compute_rates — boundary guards ───────────
     # dt_min > 0.0 guards: dt_min=0 only when timestamps are duplicated,
     # which never occurs in real dive profiles. Either way, rate=0.
-    "src/metrics\\.rs:311:.*replace > with >= in DiveStats::compute_rates",  # descent dt_min
-    "src/metrics\\.rs:313:.*replace > with >= in DiveStats::compute_rates",  # descent dt_min inner
-    "src/metrics\\.rs:326:.*replace > with >= in DiveStats::compute_rates",  # ascent dt_min
+    "src/metrics\\.rs:314:.*replace > with >= in DiveStats::compute_rates",  # descent dt_min outer
+    "src/metrics\\.rs:316:.*replace > with >= in DiveStats::compute_rates",  # descent dt_min inner
+    "src/metrics\\.rs:329:.*replace > with >= in DiveStats::compute_rates",  # ascent dt_min
     # last_max_idx < samples.len()-1: boundary and len-1 arithmetic
-    "src/metrics\\.rs:323:43:.*replace < with <= in DiveStats::compute_rates",
-    "src/metrics\\.rs:323:59:.*replace - with \\+ in DiveStats::compute_rates",
-    "src/metrics\\.rs:323:59:.*replace - with / in DiveStats::compute_rates",
+    "src/metrics\\.rs:326:43:.*replace < with <= in DiveStats::compute_rates",
+    "src/metrics\\.rs:326:59:.*replace - with \\+ in DiveStats::compute_rates",
+    "src/metrics\\.rs:326:59:.*replace - with / in DiveStats::compute_rates",
 
     # ── metrics.rs: SegmentStats::compute — idempotent max/min tracking ──
-    "src/metrics\\.rs:385:.*replace > with >= in SegmentStats::compute",   # max_depth_m
-    "src/metrics\\.rs:390:.*replace < with <= in SegmentStats::compute",   # min_temp_c
-    "src/metrics\\.rs:393:.*replace > with >= in SegmentStats::compute",   # max_temp_c
+    "src/metrics\\.rs:388:.*replace > with >= in SegmentStats::compute",   # max_depth_m
+    "src/metrics\\.rs:393:.*replace < with <= in SegmentStats::compute",   # min_temp_c
+    "src/metrics\\.rs:396:.*replace > with >= in SegmentStats::compute",   # max_temp_c
 
     # ── buhlmann.rs — FP threshold guards ────────────────────────────────
     # Leading compartment tie-break: exact FP equality across 16 compartments'

@@ -109,12 +109,15 @@ public final class DiveComputerImportService: Sendable {
     ///
     /// Dedup strategy (in order):
     /// 1. **Fingerprint dedup** — checks both legacy `dives.fingerprint` and
-    ///    `dive_source_fingerprints`. If matched, links the BLE fingerprint to
-    ///    the existing dive and returns `.skipped`.
+    ///    `dive_source_fingerprints`. If matched:
+    ///    - If the importing device already has samples → `.skipped`
+    ///    - If both devices are owned (`.mine`) → merge samples → `.merged`
+    ///    - Otherwise (buddy device) → fall through to new dive
     /// 2. **Time-based cross-source match** — if a dive with the same
     ///    `start_time_unix` (±300s) exists from a different device:
     ///    - If the existing dive already has samples from this device → `.skipped`
-    ///    - Otherwise → merge samples + gas mixes into existing dive → `.merged`
+    ///    - If both devices are owned → merge samples → `.merged`
+    ///    - Otherwise → fall through to new dive
     /// 3. **New dive** — inserts dive, tags, samples, gas mixes, and a
     ///    `DiveSourceFingerprint` record → `.saved`.
     ///
@@ -124,11 +127,16 @@ public final class DiveComputerImportService: Sendable {
     /// - Returns: The import outcome (.saved, .merged, or .skipped).
     @discardableResult
     public func saveImportedDive(_ parsed: ParsedDive, deviceId: String) throws -> ImportOutcome {
-        // Fast path: fingerprint-exact-match → skip without write lock
+        // Fast path: fingerprint-exact-match → skip only if this device already contributed samples
         if let fp = parsed.fingerprint,
            let existingDiveId = try findExistingDiveByFingerprint(fingerprint: fp) {
-            try linkFingerprint(fp, deviceId: deviceId, toDiveId: existingDiveId)
-            return .skipped
+            if try hasSamplesFromDevice(diveId: existingDiveId, deviceId: deviceId) {
+                try linkFingerprint(fp, deviceId: deviceId, toDiveId: existingDiveId)
+                return .skipped
+            }
+            // Fall through — this device hasn't contributed samples.
+            // Buddy devices will also fall through here and be handled by
+            // shouldMergeDevices in the write transaction (creating a new dive).
         }
 
         // Prepare domain objects outside the write lock (pure mapping)
@@ -162,32 +170,35 @@ public final class DiveComputerImportService: Sendable {
                 if let existingDiveId = try Self.findExistingDiveByFingerprint(
                     fingerprint: fp, db: db
                 ) {
-                    try Self.insertSourceFingerprint(
-                        fp, deviceId: deviceId, diveId: existingDiveId, db: db
-                    )
-                    return .skipped
+                    if try Self.hasSamplesFromDevice(
+                        diveId: existingDiveId, deviceId: deviceId, db: db
+                    ) {
+                        try Self.insertSourceFingerprint(
+                            fp, deviceId: deviceId, diveId: existingDiveId, db: db
+                        )
+                        return .skipped
+                    }
+                    // Cross-device merge via fingerprint match
+                    if try Self.shouldMergeDevices(
+                        importingDeviceId: deviceId, existingDiveId: existingDiveId, db: db
+                    ) {
+                        try Self.mergeSamplesInTransaction(
+                            parsed, deviceId: deviceId, intoDiveId: existingDiveId, db: db
+                        )
+                        return .merged
+                    }
+                    // Fall through — buddy device
                 }
             }
 
             // Time-based cross-source match → merge or skip
-            // Only merge when both the importing device and the existing dive's
-            // device are owned by the user. Buddy devices should never auto-merge.
             if let fp = parsed.fingerprint,
                let existingDiveId = try Self.findExistingDiveByTime(
                    startTimeUnix: parsed.startTimeUnix, deviceId: deviceId, db: db
                ) {
-                let importingOwnership = try Device.fetchOne(db, key: deviceId)?.ownership ?? .mine
-                let shouldMerge: Bool
-                if importingOwnership == .other {
-                    shouldMerge = false
-                } else {
-                    let existingDive = try Dive.fetchOne(db, key: existingDiveId)
-                    let existingDeviceOwnership = try existingDive
-                        .flatMap { try Device.fetchOne(db, key: $0.deviceId) }?.ownership ?? .mine
-                    shouldMerge = existingDeviceOwnership == .mine
-                }
-
-                if shouldMerge {
+                if try Self.shouldMergeDevices(
+                    importingDeviceId: deviceId, existingDiveId: existingDiveId, db: db
+                ) {
                     if try Self.hasSamplesFromDevice(
                         diveId: existingDiveId, deviceId: deviceId, db: db
                     ) {
@@ -333,6 +344,19 @@ public final class DiveComputerImportService: Sendable {
     }
 
     // MARK: - Private Helpers
+
+    /// Checks device ownership to determine if a merge is appropriate.
+    /// Only merges when both the importing device and the existing dive's device are owned by the user.
+    private static func shouldMergeDevices(
+        importingDeviceId: String, existingDiveId: String, db: Database
+    ) throws -> Bool {
+        let importingOwnership = try Device.fetchOne(db, key: importingDeviceId)?.ownership ?? .mine
+        guard importingOwnership != .other else { return false }
+        let existingDive = try Dive.fetchOne(db, key: existingDiveId)
+        let existingDeviceOwnership = try existingDive
+            .flatMap { try Device.fetchOne(db, key: $0.deviceId) }?.ownership ?? .mine
+        return existingDeviceOwnership == .mine
+    }
 
     /// Checks both the legacy `dives.fingerprint` column and the `dive_source_fingerprints`
     /// table for a matching fingerprint. Returns the existing dive ID if found.

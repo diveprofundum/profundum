@@ -507,6 +507,173 @@ final class BLEMergeTests: XCTestCase {
         XCTAssertEqual(samplesB[1].gasmixIndex, 1, "Identical order should preserve index 1")
     }
 
+    // MARK: - Fingerprint Cross-Device Merge (#126)
+
+    func testFingerprintMatchWithoutSamplesMergesInsteadOfSkipping() throws {
+        // Bug #126: device B imports with same fingerprint as device A.
+        // Before fix: returned .skipped even though B never contributed samples.
+        let deviceA = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93")
+        let deviceB = Device(model: "Petrel", serialNumber: "B-5678", firmwareVersion: "93")
+        try diveService.saveDevice(deviceA)
+        try diveService.saveDevice(deviceB)
+
+        let sharedFingerprint = Data([0xAA, 0xBB, 0xCC])
+
+        let parsedA = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            fingerprint: sharedFingerprint,
+            samples: [
+                ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0),
+                ParsedSample(tSec: 60, depthM: 15.0, tempC: 20.0),
+            ]
+        )
+        let outcomeA = try importService.saveImportedDive(parsedA, deviceId: deviceA.id)
+        XCTAssertEqual(outcomeA, .saved)
+
+        // Device B imports the same dive — same fingerprint, different samples
+        let parsedB = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            fingerprint: sharedFingerprint,
+            samples: [
+                ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.5, tankPressure1Bar: 200.0),
+                ParsedSample(tSec: 60, depthM: 15.0, tempC: 20.5, tankPressure1Bar: 190.0),
+            ]
+        )
+        let outcomeB = try importService.saveImportedDive(parsedB, deviceId: deviceB.id)
+        XCTAssertEqual(outcomeB, .merged, "Should merge when fingerprint matches but device has no samples")
+
+        // Only 1 dive should exist
+        let dives = try diveService.listDives()
+        XCTAssertEqual(dives.count, 1)
+
+        // Both devices' samples should be present
+        let samples = try diveService.getSamples(diveId: dives[0].id)
+        XCTAssertEqual(samples.count, 4)
+    }
+
+    func testFingerprintMatchWithExistingSamplesSkips() throws {
+        // Re-importing from the same device with the same fingerprint should still skip.
+        let deviceA = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93")
+        try diveService.saveDevice(deviceA)
+
+        let fp = Data([0xAA, 0xBB, 0xCC])
+        let parsed = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            fingerprint: fp,
+            samples: [ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0)]
+        )
+        let first = try importService.saveImportedDive(parsed, deviceId: deviceA.id)
+        XCTAssertEqual(first, .saved)
+
+        // Re-import same device, same fingerprint
+        let second = try importService.saveImportedDive(parsed, deviceId: deviceA.id)
+        XCTAssertEqual(second, .skipped)
+
+        // Sample count unchanged
+        let dives = try diveService.listDives()
+        let samples = try diveService.getSamples(diveId: dives[0].id)
+        XCTAssertEqual(samples.count, 1)
+    }
+
+    func testFingerprintCrossDeviceMergePreservesBothDeviceSamples() throws {
+        // After fingerprint-based merge, both devices' samples should coexist.
+        let deviceA = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93")
+        let deviceB = Device(model: "Petrel", serialNumber: "B-5678", firmwareVersion: "93")
+        try diveService.saveDevice(deviceA)
+        try diveService.saveDevice(deviceB)
+
+        let sharedFingerprint = Data([0xDD, 0xEE])
+
+        let parsedA = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            fingerprint: sharedFingerprint,
+            samples: [
+                ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0),
+                ParsedSample(tSec: 60, depthM: 15.0, tempC: 20.0),
+                ParsedSample(tSec: 120, depthM: 25.0, tempC: 18.0),
+            ]
+        )
+        try importService.saveImportedDive(parsedA, deviceId: deviceA.id)
+
+        let parsedB = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            fingerprint: sharedFingerprint,
+            samples: [
+                ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.5),
+                ParsedSample(tSec: 60, depthM: 15.5, tempC: 20.5),
+            ]
+        )
+        try importService.saveImportedDive(parsedB, deviceId: deviceB.id)
+
+        let dives = try diveService.listDives()
+        XCTAssertEqual(dives.count, 1)
+
+        let samples = try diveService.getSamples(diveId: dives[0].id)
+        let deviceACount = samples.filter { $0.deviceId == deviceA.id }.count
+        let deviceBCount = samples.filter { $0.deviceId == deviceB.id }.count
+        XCTAssertEqual(deviceACount, 3, "Device A should have 3 samples")
+        XCTAssertEqual(deviceBCount, 2, "Device B should have 2 samples")
+        XCTAssertEqual(samples.count, 5, "Total samples should be 5")
+    }
+
+    func testFingerprintMatchBuddyDeviceCreatesNewDive() throws {
+        // Buddy device (ownership: .other) with shared fingerprint should NOT merge —
+        // it should fall through and create a separate dive.
+        let myDevice = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93", ownership: .mine)
+        let buddyDevice = Device(model: "Petrel", serialNumber: "B-5678", firmwareVersion: "93", ownership: .other)
+        try diveService.saveDevice(myDevice)
+        try diveService.saveDevice(buddyDevice)
+
+        let sharedFingerprint = Data([0xFF, 0xEE])
+
+        let myParsed = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            fingerprint: sharedFingerprint,
+            samples: [ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0)]
+        )
+        let first = try importService.saveImportedDive(myParsed, deviceId: myDevice.id)
+        XCTAssertEqual(first, .saved)
+
+        let buddyParsed = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 28.0,
+            avgDepthM: 17.0,
+            bottomTimeSec: 2900,
+            fingerprint: sharedFingerprint,
+            samples: [ParsedSample(tSec: 0, depthM: 0.0, tempC: 23.0)]
+        )
+        let second = try importService.saveImportedDive(buddyParsed, deviceId: buddyDevice.id)
+        XCTAssertEqual(second, .saved, "Buddy device should create a new dive, not merge")
+
+        let dives = try diveService.listDives()
+        XCTAssertEqual(dives.count, 2, "Should have 2 separate dives")
+    }
+
     // MARK: - Public Helper Coverage
 
     func testFindExistingDiveByTimePublicWrapper() throws {

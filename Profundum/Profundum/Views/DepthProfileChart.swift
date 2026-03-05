@@ -355,7 +355,12 @@ struct DepthProfileChartData {
             guard let idx = s.gasmixIndex else { continue }
             if let prev = prevGasmixIdx, idx != prev {
                 let mix = gasMixes.first(where: { $0.mixIndex == idx })
-                let label = Self.gasLabel(o2: mix?.o2Fraction ?? 0.21, he: mix?.heFraction ?? 0)
+                let label: String
+                if let mix = mix {
+                    label = Self.gasLabel(o2: mix.o2Fraction, he: mix.heFraction)
+                } else {
+                    label = "Gas \(idx + 1)"
+                }
                 gasSwitchMarkersLocal.append(GasSwitchMarker(
                     id: gasSwitchMarkersLocal.count,
                     timeMinutes: Float(s.tSec) / 60.0,
@@ -596,7 +601,10 @@ struct DepthProfileChartData {
         guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
         guard let mixIdx = samples[idx].gasmixIndex else { return nil }
         let mix = gasMixes.first(where: { $0.mixIndex == mixIdx })
-        return Self.gasLabel(o2: mix?.o2Fraction ?? 0.21, he: mix?.heFraction ?? 0)
+        if let mix = mix {
+            return Self.gasLabel(o2: mix.o2Fraction, he: mix.heFraction)
+        }
+        return "Gas \(mixIdx + 1)"
     }
 
     /// Denormalize a negative Y chart value back to display temperature.
