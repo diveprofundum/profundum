@@ -131,7 +131,9 @@ public final class DiveComputerImportService: Sendable {
                 try linkFingerprint(fp, deviceId: deviceId, toDiveId: existingDiveId)
                 return .skipped
             }
-            // Fall through — this device hasn't contributed samples; needs merge
+            // Fall through — this device hasn't contributed samples.
+            // Buddy devices will also fall through here and be handled by
+            // shouldMergeDevices in the write transaction (creating a new dive).
         }
 
         // Prepare domain objects outside the write lock (pure mapping)

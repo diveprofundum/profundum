@@ -636,6 +636,44 @@ final class BLEMergeTests: XCTestCase {
         XCTAssertEqual(samples.count, 5, "Total samples should be 5")
     }
 
+    func testFingerprintMatchBuddyDeviceCreatesNewDive() throws {
+        // Buddy device (ownership: .other) with shared fingerprint should NOT merge —
+        // it should fall through and create a separate dive.
+        let myDevice = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93", ownership: .mine)
+        let buddyDevice = Device(model: "Petrel", serialNumber: "B-5678", firmwareVersion: "93", ownership: .other)
+        try diveService.saveDevice(myDevice)
+        try diveService.saveDevice(buddyDevice)
+
+        let sharedFingerprint = Data([0xFF, 0xEE])
+
+        let myParsed = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            fingerprint: sharedFingerprint,
+            samples: [ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0)]
+        )
+        let first = try importService.saveImportedDive(myParsed, deviceId: myDevice.id)
+        XCTAssertEqual(first, .saved)
+
+        let buddyParsed = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 28.0,
+            avgDepthM: 17.0,
+            bottomTimeSec: 2900,
+            fingerprint: sharedFingerprint,
+            samples: [ParsedSample(tSec: 0, depthM: 0.0, tempC: 23.0)]
+        )
+        let second = try importService.saveImportedDive(buddyParsed, deviceId: buddyDevice.id)
+        XCTAssertEqual(second, .saved, "Buddy device should create a new dive, not merge")
+
+        let dives = try diveService.listDives()
+        XCTAssertEqual(dives.count, 2, "Should have 2 separate dives")
+    }
+
     // MARK: - Public Helper Coverage
 
     func testFindExistingDiveByTimePublicWrapper() throws {
