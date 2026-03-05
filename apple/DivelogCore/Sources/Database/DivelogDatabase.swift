@@ -393,6 +393,11 @@ public final class DivelogDatabase: Sendable {
             """)
         }
 
+        // Migration 15: Add timezone offset for real-UTC timestamps
+        migrator.registerMigration("015_timezone_offset") { db in
+            try db.execute(sql: "ALTER TABLE dives ADD COLUMN timezone_offset_sec INTEGER")
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

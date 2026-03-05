@@ -106,12 +106,16 @@ struct NewDiveSheet: View {
             .onAppear {
                 if let dive = editingDive {
                     selectedDeviceId = dive.deviceId
-                    // Timestamps are stored as local time in UTC epoch seconds.
-                    // Shift so the DatePicker (which uses device timezone) shows the correct local time.
-                    // Use the offset at the dive's time (not now) so DST transitions don't shift by 1h.
-                    let approxDate = Date(timeIntervalSince1970: TimeInterval(dive.startTimeUnix))
-                    let tzOffset = TimeInterval(TimeZone.current.secondsFromGMT(for: approxDate))
-                    startDate = Date(timeIntervalSince1970: TimeInterval(dive.startTimeUnix) - tzOffset)
+                    if dive.timezoneOffsetSec != nil {
+                        // Real UTC — DatePicker handles timezone natively
+                        startDate = Date(timeIntervalSince1970: TimeInterval(dive.startTimeUnix))
+                    } else {
+                        // Legacy local-as-UTC — shift so DatePicker shows correct local time.
+                        // Use the offset at the dive's time (not now) so DST transitions don't shift by 1h.
+                        let approxDate = Date(timeIntervalSince1970: TimeInterval(dive.startTimeUnix))
+                        let tzOffset = TimeInterval(TimeZone.current.secondsFromGMT(for: approxDate))
+                        startDate = Date(timeIntervalSince1970: TimeInterval(dive.startTimeUnix) - tzOffset)
+                    }
                     let totalSeconds = dive.endTimeUnix - dive.startTimeUnix
                     durationMinutes = Int(totalSeconds / 60)
                     let displayMaxDepth = UnitFormatter.depth(dive.maxDepthM, unit: appState.depthUnit)
@@ -659,10 +663,22 @@ struct NewDiveSheet: View {
     private func saveDive() {
         guard let deviceId = selectedDeviceId else { return }
 
-        // Convert DatePicker's real-UTC Date back to our local-time-as-UTC convention.
-        let tzOffset = Int64(TimeZone.current.secondsFromGMT(for: startDate))
-        let startUnix = Int64(startDate.timeIntervalSince1970) + tzOffset
-        let endUnix = startUnix + Int64(durationMinutes * 60)
+        let startUnix: Int64
+        let endUnix: Int64
+        let savedTimezoneOffset: Int32?
+
+        if editingDive?.timezoneOffsetSec != nil {
+            // Real UTC — DatePicker Date is already correct UTC
+            startUnix = Int64(startDate.timeIntervalSince1970)
+            endUnix = startUnix + Int64(durationMinutes * 60)
+            savedTimezoneOffset = Int32(TimeZone.current.secondsFromGMT(for: startDate))
+        } else {
+            // Legacy local-as-UTC — convert DatePicker's real-UTC back to local-as-UTC
+            let tzOffset = Int64(TimeZone.current.secondsFromGMT(for: startDate))
+            startUnix = Int64(startDate.timeIntervalSince1970) + tzOffset
+            endUnix = startUnix + Int64(durationMinutes * 60)
+            savedTimezoneOffset = nil
+        }
 
         let maxDepthInput = Float(Double(maxDepthText) ?? 0)
         let avgDepthInput = Float(Double(avgDepthText) ?? 0)
@@ -681,7 +697,8 @@ struct NewDiveSheet: View {
             otu: Float(Double(otuText) ?? 0),
             siteId: selectedSiteId,
             computerDiveNumber: editingDive?.computerDiveNumber,
-            fingerprint: editingDive?.fingerprint
+            fingerprint: editingDive?.fingerprint,
+            timezoneOffsetSec: savedTimezoneOffset
         )
 
         var allTags = [selectedDiveTypeTag.rawValue]

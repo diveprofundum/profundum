@@ -42,6 +42,10 @@ public struct Dive: Identifiable, Equatable, Hashable, Sendable {
     public var maxCeilingM: Float?
     public var visibility: String?
     public var weather: String?
+    /// Timezone offset in seconds from UTC at dive time.
+    /// Non-nil means `startTimeUnix`/`endTimeUnix` are real UTC; offset enables local display.
+    /// Nil means legacy local-as-UTC convention (all pre-migration-015 dives).
+    public var timezoneOffsetSec: Int32?
 
     public init(
         id: String = UUID().uuidString,
@@ -79,7 +83,8 @@ public struct Dive: Identifiable, Equatable, Hashable, Sendable {
         maxCeilingM: Float? = nil,
         environment: String? = nil,
         visibility: String? = nil,
-        weather: String? = nil
+        weather: String? = nil,
+        timezoneOffsetSec: Int32? = nil
     ) {
         self.id = id
         self.deviceId = deviceId
@@ -117,6 +122,25 @@ public struct Dive: Identifiable, Equatable, Hashable, Sendable {
         self.environment = environment
         self.visibility = visibility
         self.weather = weather
+        self.timezoneOffsetSec = timezoneOffsetSec
+    }
+
+    /// Date suitable for display with UTC-based DateFormatters.
+    /// For real-UTC dives (non-nil offset), shifts to local time.
+    /// For legacy dives (nil offset), returns local-as-UTC as-is.
+    public var displayStartDate: Date {
+        if let offset = timezoneOffsetSec {
+            return Date(timeIntervalSince1970: TimeInterval(startTimeUnix) + TimeInterval(offset))
+        }
+        return Date(timeIntervalSince1970: TimeInterval(startTimeUnix))
+    }
+
+    /// End date suitable for display with UTC-based DateFormatters.
+    public var displayEndDate: Date {
+        if let offset = timezoneOffsetSec {
+            return Date(timeIntervalSince1970: TimeInterval(endTimeUnix) + TimeInterval(offset))
+        }
+        return Date(timeIntervalSince1970: TimeInterval(endTimeUnix))
     }
 }
 
@@ -162,6 +186,7 @@ extension Dive: Codable, FetchableRecord, PersistableRecord {
         case environment
         case visibility
         case weather
+        case timezoneOffsetSec = "timezone_offset_sec"
     }
 }
 

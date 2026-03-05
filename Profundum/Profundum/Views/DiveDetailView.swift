@@ -152,7 +152,7 @@ struct DiveDetailView: View {
             }
             .padding()
         }
-        .navigationTitle(formatDate(dive.startTimeUnix))
+        .navigationTitle(formatDate(dive.displayStartDate))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -251,7 +251,7 @@ struct DiveDetailView: View {
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(formatDate(dive.startTimeUnix))
+            Text(formatDate(dive.displayStartDate))
                 .font(.title2)
 
             if let siteName = diveWithSite.siteName {
@@ -744,9 +744,8 @@ struct DiveDetailView: View {
         }
     }
 
-    private func formatDate(_ unix: Int64) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(unix))
-        return DateFormatters.fullDateTime(clock: appState.settings.clockFormat).string(from: date)
+    private func formatDate(_ date: Date) -> String {
+        DateFormatters.fullDateTime(clock: appState.settings.clockFormat).string(from: date)
     }
 
     private func formatTotalTime() -> String {
@@ -772,7 +771,7 @@ struct DiveDetailView: View {
         do {
             let exportService = ExportService(database: appState.database)
             let data = try exportService.exportDives(ids: [dive.id])
-            let dateStr = formatDate(dive.startTimeUnix)
+            let dateStr = formatDate(dive.displayStartDate)
                 .replacingOccurrences(of: "/", with: "-")
                 .replacingOccurrences(of: ":", with: "-")
                 .replacingOccurrences(of: " ", with: "_")

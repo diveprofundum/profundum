@@ -502,7 +502,8 @@ public final class DiveComputerImportService: Sendable {
                 maxCeilingM: splitStats.maxCeilingM,
                 environment: originalDive.environment,
                 visibility: originalDive.visibility,
-                weather: originalDive.weather
+                weather: originalDive.weather,
+                timezoneOffsetSec: originalDive.timezoneOffsetSec
             )
             try newDive.insert(db)
 
