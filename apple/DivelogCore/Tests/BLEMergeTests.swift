@@ -752,6 +752,103 @@ final class BLEMergeTests: XCTestCase {
         XCTAssertEqual(dives.count, 2, "Should have 2 separate dives")
     }
 
+    func testOverlapExactBoundaryDoesNotMerge() throws {
+        // When one dive ends exactly as another starts (touching, not overlapping)
+        // they should NOT merge.
+        let deviceA = Device(model: "Perdix 2", serialNumber: "A-1234", firmwareVersion: "93")
+        let deviceB = Device(model: "Petrel 3", serialNumber: "B-5678", firmwareVersion: "93")
+        try diveService.saveDevice(deviceA)
+        try diveService.saveDevice(deviceB)
+
+        let parsedA = ParsedDive(
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 20.0,
+            avgDepthM: 12.0,
+            bottomTimeSec: 3000,
+            fingerprint: Data([0xAA, 0x01]),
+            samples: [ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0)]
+        )
+        try importService.saveImportedDive(parsedA, deviceId: deviceA.id)
+
+        // Dive B starts exactly when A ends — strict < means no overlap
+        let parsedB = ParsedDive(
+            startTimeUnix: 1700003600,  // == parsedA.endTimeUnix
+            endTimeUnix: 1700007200,
+            maxDepthM: 18.0,
+            avgDepthM: 10.0,
+            bottomTimeSec: 2400,
+            fingerprint: Data([0xBB, 0x02]),
+            samples: [ParsedSample(tSec: 0, depthM: 0.0, tempC: 21.0)]
+        )
+        let outcome = try importService.saveImportedDive(parsedB, deviceId: deviceB.id)
+        XCTAssertEqual(outcome, .saved, "Touching dives (end == start) should not merge")
+
+        XCTAssertEqual(try diveService.listDives().count, 2)
+    }
+
+    func testOverlapPrefersOwnedDeviceOverBuddy() throws {
+        // When both an owned dive and a buddy dive overlap the incoming dive,
+        // the merge should target the owned dive (not the buddy's).
+        let myDevice = Device(model: "Perdix 2", serialNumber: "MY-1234", firmwareVersion: "93")
+        let buddyDevice = Device(
+            model: "Petrel 3", serialNumber: "BUDDY-5678", firmwareVersion: "93",
+            ownership: .other
+        )
+        let importingDevice = Device(model: "Perdix BLE", serialNumber: "IMP-9999", firmwareVersion: "93")
+        try diveService.saveDevice(myDevice)
+        try diveService.saveDevice(buddyDevice)
+        try diveService.saveDevice(importingDevice)
+
+        // My dive
+        let myDive = Dive(
+            deviceId: myDevice.id,
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 26.0,
+            avgDepthM: 15.0,
+            bottomTimeSec: 3000
+        )
+        try diveService.saveDive(myDive)
+
+        // Buddy's dive — same time range (we dived together)
+        let buddyDive = Dive(
+            deviceId: buddyDevice.id,
+            startTimeUnix: 1700000050,
+            endTimeUnix: 1700003650,
+            maxDepthM: 26.0,
+            avgDepthM: 15.0,
+            bottomTimeSec: 3000
+        )
+        try diveService.saveDive(buddyDive)
+
+        // Import from my third device — should merge with myDive, not buddyDive
+        let parsed = ParsedDive(
+            startTimeUnix: 1700000200,
+            endTimeUnix: 1700003800,
+            maxDepthM: 26.0,
+            avgDepthM: 15.0,
+            bottomTimeSec: 3000,
+            fingerprint: Data([0xCC, 0xDD]),
+            samples: [ParsedSample(tSec: 0, depthM: 0.0, tempC: 22.0)]
+        )
+        let outcome = try importService.saveImportedDive(parsed, deviceId: importingDevice.id)
+        XCTAssertEqual(outcome, .merged, "Should merge with owned dive")
+
+        // Should still have exactly 2 dives: my merged dive + buddy's separate dive
+        let dives = try diveService.listDives()
+        XCTAssertEqual(dives.count, 2, "Owned dive merged, buddy dive untouched")
+
+        // Verify samples went to my dive, not buddy's
+        let mySamples = try diveService.getSamples(diveId: myDive.id)
+        XCTAssertTrue(mySamples.contains(where: { $0.deviceId == importingDevice.id }),
+                      "Importing device's samples should be on my dive")
+
+        let buddySamples = try diveService.getSamples(diveId: buddyDive.id)
+        XCTAssertFalse(buddySamples.contains(where: { $0.deviceId == importingDevice.id }),
+                       "Importing device's samples should NOT be on buddy's dive")
+    }
+
     // MARK: - Public Helper Coverage
 
     func testFindExistingDiveByOverlapPublicWrapper() throws {

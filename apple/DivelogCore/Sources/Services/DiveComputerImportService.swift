@@ -118,8 +118,8 @@ public final class DiveComputerImportService: Sendable {
     ///    - If the importing device already has samples → `.skipped`
     ///    - If both devices are owned (`.mine`) → merge samples → `.merged`
     ///    - Otherwise (buddy device) → fall through to new dive
-    /// 2. **Time-based cross-source match** — if a dive with the same
-    ///    `start_time_unix` (±300s) exists from a different device:
+    /// 2. **Time-overlap cross-source match** — if an owned dive from a
+    ///    different device overlaps the incoming dive's time range:
     ///    - If the existing dive already has samples from this device → `.skipped`
     ///    - If both devices are owned → merge samples → `.merged`
     ///    - Otherwise → fall through to new dive
@@ -385,20 +385,29 @@ public final class DiveComputerImportService: Sendable {
         return nil
     }
 
-    /// Finds an existing dive from a different device whose time range overlaps
-    /// the incoming dive.  Two dives overlap when each one starts before the
-    /// other ends: `start_a < end_b AND start_b < end_a`.  This is far more
-    /// robust than a fixed start-time tolerance because different dive computers
-    /// detect dive-start at different depths/times (observed >6 min skew between
-    /// Shearwater Perdix 2 and Petrel 3 on the same dive).
+    /// Finds an existing dive from a different **owned** device whose time range
+    /// overlaps the incoming dive.  Two dives overlap when each one starts before
+    /// the other ends: `start_a < end_b AND start_b < end_a`.
+    ///
+    /// Only dives belonging to devices with `ownership = 'mine'` (or no device
+    /// record, which defaults to owned) are considered.  This prevents a
+    /// nondeterministic `LIMIT 1` from picking a buddy's dive when an owned dive
+    /// also overlaps.
+    ///
+    /// Overlap matching is far more robust than a fixed start-time tolerance
+    /// because different dive computers detect dive-start at different
+    /// depths/times (observed >6 min skew between Shearwater Perdix 2 and
+    /// Petrel 3 on the same dive).
     private static func findExistingDiveByOverlap(
         startTimeUnix: Int64, endTimeUnix: Int64, deviceId: String, db: Database
     ) throws -> String? {
         let row = try Row.fetchOne(db, sql: """
-            SELECT id FROM dives
-            WHERE start_time_unix < ?
-              AND end_time_unix > ?
-              AND device_id != ?
+            SELECT dives.id FROM dives
+            LEFT JOIN devices ON devices.id = dives.device_id
+            WHERE dives.start_time_unix < ?
+              AND dives.end_time_unix > ?
+              AND dives.device_id != ?
+              AND COALESCE(devices.ownership, 'mine') = 'mine'
             LIMIT 1
             """, arguments: [endTimeUnix, startTimeUnix, deviceId])
         return row?["id"] as String?
