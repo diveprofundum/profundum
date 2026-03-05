@@ -109,12 +109,15 @@ public final class DiveComputerImportService: Sendable {
     ///
     /// Dedup strategy (in order):
     /// 1. **Fingerprint dedup** — checks both legacy `dives.fingerprint` and
-    ///    `dive_source_fingerprints`. If matched, links the BLE fingerprint to
-    ///    the existing dive and returns `.skipped`.
+    ///    `dive_source_fingerprints`. If matched:
+    ///    - If the importing device already has samples → `.skipped`
+    ///    - If both devices are owned (`.mine`) → merge samples → `.merged`
+    ///    - Otherwise (buddy device) → fall through to new dive
     /// 2. **Time-based cross-source match** — if a dive with the same
     ///    `start_time_unix` (±300s) exists from a different device:
     ///    - If the existing dive already has samples from this device → `.skipped`
-    ///    - Otherwise → merge samples + gas mixes into existing dive → `.merged`
+    ///    - If both devices are owned → merge samples → `.merged`
+    ///    - Otherwise → fall through to new dive
     /// 3. **New dive** — inserts dive, tags, samples, gas mixes, and a
     ///    `DiveSourceFingerprint` record → `.saved`.
     ///
