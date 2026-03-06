@@ -319,21 +319,38 @@ private func parseDiveData(
     // Extract datetime
     var datetime = dc_datetime_t()
     let dtStatus = dc_parser_get_datetime(p, &datetime)
-    let startTimeUnix: Int64 = {
-        guard dtStatus == DC_STATUS_SUCCESS else {
-            return Int64(Date().timeIntervalSince1970)
+
+    let startTimeUnix: Int64
+    let timezoneOffsetSec: Int32?
+
+    if dtStatus == DC_STATUS_SUCCESS {
+        if datetime.timezone != Int32.min {
+            // Parser provides timezone — use dc_datetime_mktime for real UTC.
+            var dtCopy = datetime
+            let utcEpoch = dc_datetime_mktime(&dtCopy)
+            startTimeUnix = Int64(utcEpoch)
+            // Store the device's timezone for local display (reflects dive location)
+            timezoneOffsetSec = datetime.timezone
+        } else {
+            // No timezone info — store as local-as-UTC (existing convention)
+            var cal = Calendar(identifier: .gregorian)
+            cal.timeZone = TimeZone(identifier: "UTC")!
+            var components = DateComponents()
+            components.year = Int(datetime.year)
+            components.month = Int(datetime.month)
+            components.day = Int(datetime.day)
+            components.hour = Int(datetime.hour)
+            components.minute = Int(datetime.minute)
+            components.second = Int(datetime.second)
+            startTimeUnix = Int64(
+                cal.date(from: components)?.timeIntervalSince1970 ?? Date().timeIntervalSince1970
+            )
+            timezoneOffsetSec = nil
         }
-        var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(identifier: "UTC")!
-        var components = DateComponents()
-        components.year = Int(datetime.year)
-        components.month = Int(datetime.month)
-        components.day = Int(datetime.day)
-        components.hour = Int(datetime.hour)
-        components.minute = Int(datetime.minute)
-        components.second = Int(datetime.second)
-        return Int64(cal.date(from: components)?.timeIntervalSince1970 ?? Date().timeIntervalSince1970)
-    }()
+    } else {
+        startTimeUnix = Int64(Date().timeIntervalSince1970)
+        timezoneOffsetSec = nil
+    }
 
     // Extract max depth
     var maxDepth: Double = 0
@@ -475,7 +492,8 @@ private func parseDiveData(
         decoModel: decoModelStr,
         salinity: salinityStr,
         surfacePressureBar: atmStatus == DC_STATUS_SUCCESS ? Float(atmospheric) : nil,
-        gasMixes: parsedGasMixes
+        gasMixes: parsedGasMixes,
+        timezoneOffsetSec: timezoneOffsetSec
     ))
 }
 

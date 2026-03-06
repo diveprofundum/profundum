@@ -115,7 +115,7 @@ public final class ExportService: Sendable {
 
         for row in rows {
             let dive = row.dive
-            let date = dateFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(dive.startTimeUnix)))
+            let date = dateFormatter.string(from: dive.displayStartDate)
             let site = csvEscape(row.siteName ?? "")
             let maxDepth = String(format: "%.1f", dive.maxDepthM)
             let duration = String((dive.endTimeUnix - dive.startTimeUnix) / 60)

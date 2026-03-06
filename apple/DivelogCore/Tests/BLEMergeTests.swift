@@ -867,15 +867,15 @@ final class BLEMergeTests: XCTestCase {
         )
         try diveService.saveDive(dive)
 
-        // Different device, overlapping time range
+        // Different device, overlapping time range (legacy dives: local = raw)
         let found = try importService.findExistingDiveByOverlap(
-            startTimeUnix: 1700000100, endTimeUnix: 1700003700, deviceId: deviceB.id
+            localStartTime: 1700000100, localEndTime: 1700003700, deviceId: deviceB.id
         )
         XCTAssertEqual(found, dive.id)
 
         // Same device — should NOT match
         let notFound = try importService.findExistingDiveByOverlap(
-            startTimeUnix: 1700000100, endTimeUnix: 1700003700, deviceId: deviceA.id
+            localStartTime: 1700000100, localEndTime: 1700003700, deviceId: deviceA.id
         )
         XCTAssertNil(notFound)
     }

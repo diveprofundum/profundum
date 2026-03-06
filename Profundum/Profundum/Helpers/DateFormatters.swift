@@ -3,10 +3,12 @@ import Foundation
 
 /// Cached DateFormatter instances for dive time display.
 ///
-/// Dive timestamps are stored as local time encoded in UTC epoch seconds
-/// (both Shearwater Cloud and BLE imports record the dive computer's local
-/// clock without timezone conversion). Using UTC here avoids a double-offset
-/// that would otherwise shift displayed times by the device's timezone.
+/// Two timestamp conventions coexist:
+/// - **Legacy (nil offset)**: local time encoded as UTC epoch seconds. Formatters
+///   use UTC timezone to avoid double-offset.
+/// - **Real UTC (non-nil offset)**: `Dive.displayStartDate` adds the offset,
+///   converting back to local-as-UTC so these same UTC formatters produce
+///   correct local times.
 enum DateFormatters {
 
     // MARK: - Locale helpers

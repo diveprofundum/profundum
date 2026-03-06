@@ -501,7 +501,7 @@ struct DiveRowView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(formatDate(dive.startTimeUnix))
+                    Text(formatDate(dive.displayStartDate))
                         .font(.headline)
 
                     if let siteName = diveWithSite.siteName {
@@ -551,7 +551,7 @@ struct DiveRowView: View {
     }
 
     private var rowAccessibilityLabel: String {
-        let dateStr = formatDate(dive.startTimeUnix)
+        let dateStr = formatDate(dive.displayStartDate)
         let depthStr = UnitFormatter.formatDepthCompact(dive.maxDepthM, unit: appState.depthUnit)
         let durationStr = formatDuration(dive.bottomTimeSec)
         var label = "Dive on \(dateStr), \(depthStr), \(durationStr)"
@@ -564,9 +564,8 @@ struct DiveRowView: View {
         return label
     }
 
-    private func formatDate(_ unix: Int64) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(unix))
-        return DateFormatters.mediumDateTime(clock: appState.settings.clockFormat).string(from: date)
+    private func formatDate(_ date: Date) -> String {
+        DateFormatters.mediumDateTime(clock: appState.settings.clockFormat).string(from: date)
     }
 
     private func formatDuration(_ seconds: Int32) -> String {

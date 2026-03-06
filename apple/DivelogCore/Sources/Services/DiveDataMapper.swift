@@ -59,6 +59,8 @@ public struct ParsedDive: Sendable {
     public var lon: Double?
     public var gasMixes: [ParsedGasMix]
     public var tanks: [ParsedTank]
+    /// Timezone offset in seconds from UTC. Non-nil when the parser provides timezone info.
+    public var timezoneOffsetSec: Int32?
 
     public init(
         startTimeUnix: Int64,
@@ -84,7 +86,8 @@ public struct ParsedDive: Sendable {
         lat: Double? = nil,
         lon: Double? = nil,
         gasMixes: [ParsedGasMix] = [],
-        tanks: [ParsedTank] = []
+        tanks: [ParsedTank] = [],
+        timezoneOffsetSec: Int32? = nil
     ) {
         self.startTimeUnix = startTimeUnix
         self.endTimeUnix = endTimeUnix
@@ -110,6 +113,7 @@ public struct ParsedDive: Sendable {
         self.lon = lon
         self.gasMixes = gasMixes
         self.tanks = tanks
+        self.timezoneOffsetSec = timezoneOffsetSec
     }
 }
 
@@ -260,7 +264,8 @@ public enum DiveDataMapper {
             surfacePressureBar: parsed.surfacePressureBar,
             lat: parsed.lat,
             lon: parsed.lon,
-            maxCeilingM: maxCeiling
+            maxCeilingM: maxCeiling,
+            timezoneOffsetSec: parsed.timezoneOffsetSec
         )
 
         let samples = parsed.samples.map { s in
