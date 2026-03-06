@@ -78,17 +78,20 @@ public final class DiveComputerImportService: Sendable {
     }
 
     /// Finds an existing dive from a different device whose time range overlaps.
+    ///
+    /// Times are compared in display-local space (raw + COALESCE(offset, 0)) so
+    /// legacy local-as-UTC and real-UTC dives can match each other.
     /// - Parameters:
-    ///   - startTimeUnix: The start time of the incoming dive.
-    ///   - endTimeUnix: The end time of the incoming dive.
+    ///   - localStartTime: The incoming dive's start in display-local time.
+    ///   - localEndTime: The incoming dive's end in display-local time.
     ///   - deviceId: The device ID of the incoming dive (excluded from results).
     /// - Returns: The existing dive's ID if an overlapping dive from another device exists, or `nil`.
     public func findExistingDiveByOverlap(
-        startTimeUnix: Int64, endTimeUnix: Int64, deviceId: String
+        localStartTime: Int64, localEndTime: Int64, deviceId: String
     ) throws -> String? {
         try database.dbQueue.read { db in
             try Self.findExistingDiveByOverlap(
-                startTimeUnix: startTimeUnix, endTimeUnix: endTimeUnix, deviceId: deviceId, db: db
+                localStartTime: localStartTime, localEndTime: localEndTime, deviceId: deviceId, db: db
             )
         }
     }
@@ -196,11 +199,14 @@ public final class DiveComputerImportService: Sendable {
                 }
             }
 
-            // Time-overlap cross-source match → merge or skip
+            // Time-overlap cross-source match → merge or skip.
+            // Normalize to display-local time so real-UTC and legacy dives can match.
+            let localStart = parsed.startTimeUnix + Int64(parsed.timezoneOffsetSec ?? 0)
+            let localEnd = parsed.endTimeUnix + Int64(parsed.timezoneOffsetSec ?? 0)
             if let fp = parsed.fingerprint,
                let existingDiveId = try Self.findExistingDiveByOverlap(
-                   startTimeUnix: parsed.startTimeUnix,
-                   endTimeUnix: parsed.endTimeUnix,
+                   localStartTime: localStart,
+                   localEndTime: localEnd,
                    deviceId: deviceId, db: db
                ) {
                 if try Self.shouldMergeDevices(
@@ -389,6 +395,10 @@ public final class DiveComputerImportService: Sendable {
     /// overlaps the incoming dive.  Two dives overlap when each one starts before
     /// the other ends: `start_a < end_b AND start_b < end_a`.
     ///
+    /// Times are compared in display-local space so that real-UTC dives
+    /// (non-nil `timezone_offset_sec`) and legacy local-as-UTC dives (nil offset)
+    /// can match each other.
+    ///
     /// Only dives belonging to devices with `ownership = 'mine'` (or no device
     /// record, which defaults to owned) are considered.  This prevents a
     /// nondeterministic `LIMIT 1` from picking a buddy's dive when an owned dive
@@ -399,17 +409,17 @@ public final class DiveComputerImportService: Sendable {
     /// depths/times (observed >6 min skew between Shearwater Perdix 2 and
     /// Petrel 3 on the same dive).
     private static func findExistingDiveByOverlap(
-        startTimeUnix: Int64, endTimeUnix: Int64, deviceId: String, db: Database
+        localStartTime: Int64, localEndTime: Int64, deviceId: String, db: Database
     ) throws -> String? {
         let row = try Row.fetchOne(db, sql: """
             SELECT dives.id FROM dives
             LEFT JOIN devices ON devices.id = dives.device_id
-            WHERE dives.start_time_unix < ?
-              AND dives.end_time_unix > ?
+            WHERE (dives.start_time_unix + COALESCE(dives.timezone_offset_sec, 0)) < ?
+              AND (dives.end_time_unix + COALESCE(dives.timezone_offset_sec, 0)) > ?
               AND dives.device_id != ?
               AND COALESCE(devices.ownership, 'mine') = 'mine'
             LIMIT 1
-            """, arguments: [endTimeUnix, startTimeUnix, deviceId])
+            """, arguments: [localEndTime, localStartTime, deviceId])
         return row?["id"] as String?
     }
 

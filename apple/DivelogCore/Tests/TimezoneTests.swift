@@ -213,6 +213,78 @@ final class TimezoneTests: XCTestCase {
         XCTAssertEqual(newDive?.timezoneOffsetSec, -28800)
     }
 
+    // MARK: - Cross-Convention Merge Tests
+
+    func testCrossConventionOverlapMerge() throws {
+        // Scenario: Shearwater Cloud import (legacy local-as-UTC) then
+        // Halcyon BLE import (real UTC) of the same dive.
+        // PST user: local 10:00 AM = UTC 18:00.
+        let shearwaterDevice = Device(model: "Perdix", serialNumber: "SW-1234", firmwareVersion: "93")
+        let halcyonDevice = Device(model: "Symbios", serialNumber: "HL-5678", firmwareVersion: "1.9")
+        try diveService.saveDevice(shearwaterDevice)
+        try diveService.saveDevice(halcyonDevice)
+
+        // Shearwater Cloud: local-as-UTC → stores 10:00 AM as epoch for "10:00 UTC"
+        let localAsUtcStart: Int64 = 1_705_312_800 // 2024-01-15 10:00:00 UTC
+        let shearwaterParsed = ParsedDive(
+            startTimeUnix: localAsUtcStart,
+            endTimeUnix: localAsUtcStart + 3600,
+            maxDepthM: 30, avgDepthM: 20, bottomTimeSec: 3000,
+            fingerprint: Data([0xAA]),
+            samples: [ParsedSample(tSec: 0, depthM: 0, tempC: 20)],
+            timezoneOffsetSec: nil  // legacy
+        )
+        try importService.saveImportedDive(shearwaterParsed, deviceId: shearwaterDevice.id)
+
+        // Halcyon BLE: real UTC → stores 18:00 UTC with offset -28800
+        let realUtcStart: Int64 = 1_705_341_600 // 2024-01-15 18:00:00 UTC
+        let halcyonParsed = ParsedDive(
+            startTimeUnix: realUtcStart,
+            endTimeUnix: realUtcStart + 3600,
+            maxDepthM: 31, avgDepthM: 21, bottomTimeSec: 3000,
+            fingerprint: Data([0xBB]),
+            samples: [ParsedSample(tSec: 0, depthM: 0, tempC: 20)],
+            timezoneOffsetSec: -28800  // PST
+        )
+        let outcome = try importService.saveImportedDive(halcyonParsed, deviceId: halcyonDevice.id)
+
+        // Both represent 10:00 AM PST — should merge
+        XCTAssertEqual(outcome, .merged, "Cross-convention dives at the same local time should merge")
+        XCTAssertEqual(try diveService.listDives().count, 1)
+    }
+
+    func testCrossConventionNonOverlapStaysSeparate() throws {
+        // Two dives that don't overlap even after normalization should remain separate.
+        let deviceA = Device(model: "Perdix", serialNumber: "SW-1234", firmwareVersion: "93")
+        let deviceB = Device(model: "Symbios", serialNumber: "HL-5678", firmwareVersion: "1.9")
+        try diveService.saveDevice(deviceA)
+        try diveService.saveDevice(deviceB)
+
+        // Legacy dive at local 10:00
+        let legacyParsed = ParsedDive(
+            startTimeUnix: 1_705_312_800,
+            endTimeUnix: 1_705_312_800 + 3600,
+            maxDepthM: 30, avgDepthM: 20, bottomTimeSec: 3000,
+            fingerprint: Data([0x01]),
+            samples: [ParsedSample(tSec: 0, depthM: 0, tempC: 20)],
+            timezoneOffsetSec: nil
+        )
+        try importService.saveImportedDive(legacyParsed, deviceId: deviceA.id)
+
+        // Real UTC dive at a completely different time (next day)
+        let realUtcParsed = ParsedDive(
+            startTimeUnix: 1_705_428_000, // next day 18:00 UTC = 10:00 PST+1day
+            endTimeUnix: 1_705_428_000 + 3600,
+            maxDepthM: 25, avgDepthM: 15, bottomTimeSec: 2400,
+            fingerprint: Data([0x02]),
+            samples: [ParsedSample(tSec: 0, depthM: 0, tempC: 19)],
+            timezoneOffsetSec: -28800
+        )
+        let outcome = try importService.saveImportedDive(realUtcParsed, deviceId: deviceB.id)
+        XCTAssertEqual(outcome, .saved)
+        XCTAssertEqual(try diveService.listDives().count, 2)
+    }
+
     // MARK: - Helpers
 
     private func findDiveId(deviceId: String) throws -> String {

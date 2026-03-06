@@ -329,11 +329,8 @@ private func parseDiveData(
             var dtCopy = datetime
             let utcEpoch = dc_datetime_mktime(&dtCopy)
             startTimeUnix = Int64(utcEpoch)
-            // Store phone's timezone at dive time for local display
-            let phoneOffset = TimeZone.current.secondsFromGMT(
-                for: Date(timeIntervalSince1970: TimeInterval(utcEpoch))
-            )
-            timezoneOffsetSec = Int32(phoneOffset)
+            // Store the device's timezone for local display (reflects dive location)
+            timezoneOffsetSec = datetime.timezone
         } else {
             // No timezone info — store as local-as-UTC (existing convention)
             var cal = Calendar(identifier: .gregorian)

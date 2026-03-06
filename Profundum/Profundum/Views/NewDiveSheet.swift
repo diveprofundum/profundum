@@ -667,11 +667,12 @@ struct NewDiveSheet: View {
         let endUnix: Int64
         let savedTimezoneOffset: Int32?
 
-        if editingDive?.timezoneOffsetSec != nil {
-            // Real UTC — DatePicker Date is already correct UTC
+        if let existingOffset = editingDive?.timezoneOffsetSec {
+            // Real UTC — DatePicker Date is already correct UTC.
+            // Preserve the device's original timezone offset.
             startUnix = Int64(startDate.timeIntervalSince1970)
             endUnix = startUnix + Int64(durationMinutes * 60)
-            savedTimezoneOffset = Int32(TimeZone.current.secondsFromGMT(for: startDate))
+            savedTimezoneOffset = existingOffset
         } else {
             // Legacy local-as-UTC — convert DatePicker's real-UTC back to local-as-UTC
             let tzOffset = Int64(TimeZone.current.secondsFromGMT(for: startDate))
