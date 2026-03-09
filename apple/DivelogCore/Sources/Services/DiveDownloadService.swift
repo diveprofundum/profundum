@@ -329,7 +329,9 @@ private func parseDiveData(
             var dtCopy = datetime
             let utcEpoch = dc_datetime_mktime(&dtCopy)
             startTimeUnix = Int64(utcEpoch)
-            // Store the device's timezone for local display (reflects dive location)
+            // Store the device's configured timezone for local display.
+            // The user is responsible for setting the correct UTC offset
+            // on their dive computer (e.g. Halcyon Symbios timezone setting).
             timezoneOffsetSec = datetime.timezone
         } else {
             // No timezone info — store as local-as-UTC (existing convention)
