@@ -69,6 +69,14 @@ pub struct SampleInput {
     pub gasmix_index: Option<i32>,
     /// Actual measured PPO2 (for CCR); None = OC, use gas fractions
     pub ppo2: Option<f32>,
+    /// Time to surface in seconds (from dive computer)
+    pub tts_sec: Option<i32>,
+    /// No-decompression limit in seconds (from dive computer)
+    pub ndl_sec: Option<i32>,
+    /// Required deco stop depth in meters (from dive computer)
+    pub deco_stop_depth_m: Option<f32>,
+    /// Projected TTS in minutes if diver stays 5 more minutes at current depth
+    pub at_plus_five_tts_min: Option<i32>,
 }
 
 /// Computed statistics for a dive.
@@ -78,8 +86,12 @@ pub struct DiveStats {
     pub total_time_sec: i32,
     /// Bottom time in seconds (deco dives: descent + time at working depth; non-deco: 0)
     pub bottom_time_sec: i32,
-    /// Deco time in seconds (time with ceiling > 0)
+    /// Deco time in seconds (ascent-phase only: ceiling > 0 after leaving working depth)
     pub deco_time_sec: i32,
+    /// Total time with deco obligation in seconds (all time with ceiling > 0, including at depth)
+    pub deco_obligation_sec: i32,
+    /// Peak time-to-surface in seconds during the dive
+    pub max_tts_sec: i32,
     /// Maximum depth reached
     pub max_depth_m: f32,
     /// Average depth across all samples
@@ -115,8 +127,33 @@ impl DiveStats {
 
         let total_time_sec = dive.end_time_unix - dive.start_time_unix;
 
-        // Calculate depths and temperatures
+        // ── Pass 1: pre-scan for max depth, deco detection, bottom_end_t ──
         let mut max_depth_m: f32 = 0.0;
+        let mut has_deco = false;
+
+        for sample in samples {
+            if sample.depth_m > max_depth_m {
+                max_depth_m = sample.depth_m;
+            }
+            if let Some(ceiling) = sample.ceiling_m {
+                if ceiling > 0.0 {
+                    has_deco = true;
+                }
+            }
+        }
+
+        // bottom_end_t: last sample within 1m of max depth (end of working depth phase)
+        let bottom_end_t: i32 = if has_deco && max_depth_m > 0.0 {
+            let threshold = (max_depth_m - 1.0).max(0.0);
+            samples
+                .iter()
+                .rposition(|s| s.depth_m >= threshold)
+                .map_or(0, |idx| samples[idx].t_sec)
+        } else {
+            0
+        };
+
+        // ── Pass 2: main loop ──
         let mut depth_sum: f64 = 0.0;
         let mut weighted_depth_sum: f64 = 0.0;
         let mut weight_sum: f64 = 0.0;
@@ -124,24 +161,19 @@ impl DiveStats {
         let mut max_temp_c = f32::MIN;
         let mut temp_sum: f64 = 0.0;
 
-        // Deco and ceiling tracking
+        // Deco tracking (split into ascent-phase and total obligation)
         let mut deco_time_sec: i32 = 0;
+        let mut deco_obligation_sec: i32 = 0;
         let mut max_ceiling_m: f32 = 0.0;
         let mut max_gf99: f32 = 0.0;
+        let mut max_tts_sec: i32 = 0;
 
         // Gas switch detection (by gasmix_index changes)
         let mut gas_switch_count: u32 = 0;
         let mut prev_gasmix_index: Option<i32> = None;
 
-        // Deco detection
-        let mut has_deco = false;
-
         for (i, sample) in samples.iter().enumerate() {
             // Depth stats
-            if sample.depth_m > max_depth_m {
-                // Note: >= is equivalent (idempotent assignment, excluded in mutants.toml)
-                max_depth_m = sample.depth_m;
-            }
             depth_sum += sample.depth_m as f64;
 
             // Weighted average: weight by time interval
@@ -164,10 +196,9 @@ impl DiveStats {
             }
             temp_sum += sample.temp_c as f64;
 
-            // Deco time: when ceiling > 0
+            // Deco time: split into total obligation and ascent-phase only
             if let Some(ceiling) = sample.ceiling_m {
                 if ceiling > 0.0 {
-                    has_deco = true;
                     let deco_dt = if i + 1 < samples.len() {
                         samples[i + 1].t_sec - sample.t_sec
                     } else if i > 0 {
@@ -175,7 +206,10 @@ impl DiveStats {
                     } else {
                         1
                     };
-                    deco_time_sec += deco_dt;
+                    deco_obligation_sec += deco_dt;
+                    if sample.t_sec > bottom_end_t {
+                        deco_time_sec += deco_dt;
+                    }
                 }
                 if ceiling > max_ceiling_m {
                     max_ceiling_m = ceiling;
@@ -186,6 +220,13 @@ impl DiveStats {
             if let Some(gf99) = sample.gf99 {
                 if gf99 > max_gf99 {
                     max_gf99 = gf99;
+                }
+            }
+
+            // Max TTS
+            if let Some(tts) = sample.tts_sec {
+                if tts > max_tts_sec {
+                    max_tts_sec = tts;
                 }
             }
 
@@ -201,18 +242,7 @@ impl DiveStats {
         }
 
         // Bottom time: only meaningful for deco dives.
-        // Defined as descent + time at working depth, ending when the sustained
-        // ascent to the first deco stop begins.  We approximate this as the time
-        // of the last sample within 1m of max depth.
-        let bottom_time_sec: i32 = if has_deco && max_depth_m > 0.0 {
-            let threshold = (max_depth_m - 1.0).max(0.0);
-            samples
-                .iter()
-                .rposition(|s| s.depth_m >= threshold)
-                .map_or(0, |idx| samples[idx].t_sec)
-        } else {
-            0
-        };
+        let bottom_time_sec: i32 = if has_deco { bottom_end_t } else { 0 };
 
         let avg_depth_m = if !samples.is_empty() {
             (depth_sum / samples.len() as f64) as f32
@@ -247,6 +277,8 @@ impl DiveStats {
             total_time_sec: total_time_sec as i32,
             bottom_time_sec,
             deco_time_sec,
+            deco_obligation_sec,
+            max_tts_sec,
             max_depth_m,
             avg_depth_m,
             weighted_avg_depth_m,
@@ -267,6 +299,8 @@ impl DiveStats {
             total_time_sec: (dive.end_time_unix - dive.start_time_unix) as i32,
             bottom_time_sec: dive.bottom_time_sec,
             deco_time_sec: 0,
+            deco_obligation_sec: 0,
+            max_tts_sec: 0,
             max_depth_m: 0.0,
             avg_depth_m: 0.0,
             weighted_avg_depth_m: 0.0,
@@ -352,15 +386,29 @@ pub struct SegmentStats {
     pub min_temp_c: f32,
     /// Maximum temperature in segment
     pub max_temp_c: f32,
-    /// Deco time within segment
+    /// Deco time within segment (ascent-phase only, using dive-level bottom_end_t)
     pub deco_time_sec: i32,
+    /// Total time with deco obligation in segment (all time with ceiling > 0)
+    pub deco_obligation_sec: i32,
+    /// Peak TTS in segment
+    pub max_tts_sec: i32,
     /// Number of samples in segment
     pub sample_count: u64,
 }
 
 impl SegmentStats {
     /// Compute statistics for a segment from samples within its time range.
-    pub fn compute(start_t_sec: i32, end_t_sec: i32, all_samples: &[SampleInput]) -> Self {
+    ///
+    /// `dive_bottom_end_t` is the dive-level bottom-end time (last sample within
+    /// 1m of max depth). Samples with `t_sec > dive_bottom_end_t` and `ceiling > 0`
+    /// count as ascent-phase deco (`deco_time_sec`); all ceiling > 0 samples count
+    /// toward `deco_obligation_sec`.
+    pub fn compute(
+        start_t_sec: i32,
+        end_t_sec: i32,
+        all_samples: &[SampleInput],
+        dive_bottom_end_t: i32,
+    ) -> Self {
         let samples: Vec<_> = all_samples
             .iter()
             .filter(|s| s.t_sec >= start_t_sec && s.t_sec <= end_t_sec)
@@ -374,6 +422,8 @@ impl SegmentStats {
                 min_temp_c: 0.0,
                 max_temp_c: 0.0,
                 deco_time_sec: 0,
+                deco_obligation_sec: 0,
+                max_tts_sec: 0,
                 sample_count: 0,
             };
         }
@@ -383,6 +433,8 @@ impl SegmentStats {
         let mut min_temp_c = f32::MAX;
         let mut max_temp_c = f32::MIN;
         let mut deco_time_sec: i32 = 0;
+        let mut deco_obligation_sec: i32 = 0;
+        let mut max_tts_sec: i32 = 0;
 
         for (i, sample) in samples.iter().enumerate() {
             if sample.depth_m > max_depth_m {
@@ -406,7 +458,16 @@ impl SegmentStats {
                     } else {
                         1
                     };
-                    deco_time_sec += dt;
+                    deco_obligation_sec += dt;
+                    if sample.t_sec > dive_bottom_end_t {
+                        deco_time_sec += dt;
+                    }
+                }
+            }
+
+            if let Some(tts) = sample.tts_sec {
+                if tts > max_tts_sec {
+                    max_tts_sec = tts;
                 }
             }
         }
@@ -425,6 +486,8 @@ impl SegmentStats {
             min_temp_c,
             max_temp_c,
             deco_time_sec,
+            deco_obligation_sec,
+            max_tts_sec,
             sample_count: samples.len() as u64,
         }
     }
@@ -453,6 +516,10 @@ mod tests {
                 gf99: Some(0.0),
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 60,
@@ -463,6 +530,10 @@ mod tests {
                 gf99: Some(20.0),
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 120,
@@ -473,6 +544,10 @@ mod tests {
                 gf99: Some(40.0),
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 300,
@@ -483,6 +558,10 @@ mod tests {
                 gf99: Some(60.0),
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 600,
@@ -493,6 +572,10 @@ mod tests {
                 gf99: Some(80.0),
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 900,
@@ -503,6 +586,10 @@ mod tests {
                 gf99: Some(70.0),
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 1200,
@@ -513,6 +600,10 @@ mod tests {
                 gf99: Some(50.0),
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 1500,
@@ -523,6 +614,10 @@ mod tests {
                 gf99: Some(30.0),
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ]
     }
@@ -573,7 +668,7 @@ mod tests {
     fn test_segment_stats() {
         let samples = create_test_samples();
 
-        let stats = SegmentStats::compute(300, 600, &samples);
+        let stats = SegmentStats::compute(300, 600, &samples, 0);
 
         assert_eq!(stats.duration_sec, 300);
         assert_eq!(stats.max_depth_m, 30.0);
@@ -584,7 +679,7 @@ mod tests {
 
     #[test]
     fn test_segment_stats_empty() {
-        let stats = SegmentStats::compute(5000, 6000, &[]);
+        let stats = SegmentStats::compute(5000, 6000, &[], 0);
 
         assert_eq!(stats.duration_sec, 1000);
         assert_eq!(stats.sample_count, 0);
@@ -604,6 +699,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 60,
@@ -614,6 +713,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 120,
@@ -624,6 +727,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(1),
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             }, // switch 1
             SampleInput {
                 t_sec: 300,
@@ -634,6 +741,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(1),
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 600,
@@ -644,6 +755,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             }, // switch 2
             SampleInput {
                 t_sec: 900,
@@ -654,6 +769,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
         let stats = DiveStats::compute(&dive, &samples);
@@ -671,6 +790,10 @@ mod tests {
             gf99: None,
             gasmix_index: None,
             ppo2: None,
+            tts_sec: None,
+            ndl_sec: None,
+            deco_stop_depth_m: None,
+            at_plus_five_tts_min: None,
         }];
         let (descent, ascent) = DiveStats::compute_rates(&samples);
         assert_eq!(descent, 0.0);
@@ -690,6 +813,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 300,
@@ -700,6 +827,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 900,
@@ -710,6 +841,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
         let (descent, ascent) = DiveStats::compute_rates(&samples);
@@ -732,6 +867,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 600,
@@ -742,6 +881,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
         let (descent, ascent) = DiveStats::compute_rates(&samples);
@@ -763,6 +906,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 600,
@@ -773,6 +920,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
         let (descent, ascent) = DiveStats::compute_rates(&samples);
@@ -794,6 +945,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 120,
@@ -804,6 +959,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 300,
@@ -814,6 +973,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 600,
@@ -824,6 +987,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 1200,
@@ -834,6 +1001,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
         let (descent, ascent) = DiveStats::compute_rates(&samples);
@@ -868,8 +1039,10 @@ mod tests {
         // bottom_time (deco dive): last sample at max depth 30m is at t=600
         assert_eq!(stats.bottom_time_sec, 600);
 
-        // deco_time (ceiling > 0): samples 3,4,5 with dt=[300,300,300] = 900
-        assert_eq!(stats.deco_time_sec, 900);
+        // deco_obligation (all ceiling > 0): samples 3,4,5 with dt=[300,300,300] = 900
+        assert_eq!(stats.deco_obligation_sec, 900);
+        // deco_time (ascent-phase only, t > bottom_end_t=600): sample 5 dt=300
+        assert_eq!(stats.deco_time_sec, 300);
 
         assert_eq!(stats.max_ceiling_m, 6.0);
         assert_eq!(stats.max_gf99, 80.0);
@@ -886,7 +1059,7 @@ mod tests {
     fn test_segment_stats_exact_values() {
         let samples = create_test_samples();
         // Segment from t=300 to t=900 captures samples 3,4,5
-        let stats = SegmentStats::compute(300, 900, &samples);
+        let stats = SegmentStats::compute(300, 900, &samples, 0);
 
         assert_eq!(stats.duration_sec, 600);
         assert_eq!(stats.max_depth_m, 30.0);
@@ -897,7 +1070,9 @@ mod tests {
         assert_eq!(stats.max_temp_c, 17.0);
         assert_eq!(stats.sample_count, 3);
         // deco: all 3 samples have ceiling > 0. dt=[300,300,300] = 900
+        // With dive_bottom_end_t=0, all are in ascent phase
         assert_eq!(stats.deco_time_sec, 900);
+        assert_eq!(stats.deco_obligation_sec, 900);
     }
 
     #[test]
@@ -913,6 +1088,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 60,
@@ -923,9 +1102,13 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
-        let stats = SegmentStats::compute(0, 60, &samples);
+        let stats = SegmentStats::compute(0, 60, &samples, 0);
         assert_eq!(stats.deco_time_sec, 0);
     }
 
@@ -941,8 +1124,12 @@ mod tests {
             gf99: None,
             gasmix_index: None,
             ppo2: None,
+            tts_sec: None,
+            ndl_sec: None,
+            deco_stop_depth_m: None,
+            at_plus_five_tts_min: None,
         }];
-        let stats = SegmentStats::compute(100, 200, &samples);
+        let stats = SegmentStats::compute(100, 200, &samples, 0);
         assert_eq!(stats.duration_sec, 100);
         assert_eq!(stats.max_depth_m, 15.0);
         assert_eq!(stats.avg_depth_m, 15.0);
@@ -997,6 +1184,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 60,
@@ -1007,6 +1198,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
         let stats = DiveStats::compute(&dive, &samples);
@@ -1018,7 +1213,7 @@ mod tests {
     #[test]
     fn test_segment_duration_exact() {
         // duration = end - start (catches - → +)
-        let stats = SegmentStats::compute(100, 500, &[]);
+        let stats = SegmentStats::compute(100, 500, &[], 0);
         assert_eq!(stats.duration_sec, 400);
     }
 
@@ -1039,6 +1234,10 @@ mod tests {
             gf99: Some(50.0),
             gasmix_index: Some(0),
             ppo2: None,
+            tts_sec: None,
+            ndl_sec: None,
+            deco_stop_depth_m: None,
+            at_plus_five_tts_min: None,
         }];
         let stats = DiveStats::compute(&dive, &samples);
         // Single sample: weighted_avg = depth (weight=1, sum=10*1=10, 10/1=10)
@@ -1046,8 +1245,9 @@ mod tests {
         assert_eq!(stats.avg_depth_m, 10.0);
         // Deco dive (ceiling=2>0), single sample at max depth 10m → bottom_time = t_sec = 0
         assert_eq!(stats.bottom_time_sec, 0);
-        // ceiling > 0, dt=1 fallback
-        assert_eq!(stats.deco_time_sec, 1);
+        // ceiling > 0, dt=1 fallback; t=0 <= bottom_end_t=0 → obligation only
+        assert_eq!(stats.deco_obligation_sec, 1);
+        assert_eq!(stats.deco_time_sec, 0);
         assert_eq!(stats.max_gf99, 50.0);
         assert_eq!(stats.max_ceiling_m, 2.0);
     }
@@ -1078,6 +1278,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 60,
@@ -1088,6 +1292,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 120,
@@ -1098,6 +1306,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 300,
@@ -1108,6 +1320,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 600,
@@ -1118,6 +1334,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 900,
@@ -1128,6 +1348,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
         let stats = DiveStats::compute(&dive, &samples);
@@ -1151,6 +1375,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 100,
@@ -1161,6 +1389,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 400,
@@ -1171,13 +1403,17 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
         let stats = DiveStats::compute(&dive, &samples);
-        // sample 1 (i=1): ceiling=3>0, i+1<3 → dt = 400-100 = 300
-        // sample 2 (i=2, last): ceiling=2>0, i+1=3 NOT < 3, i>0 → dt = 400-100 = 300
-        // total deco = 300 + 300 = 600
-        assert_eq!(stats.deco_time_sec, 600);
+        // sample 1 (i=1): ceiling=3>0, dt=300; t=100 <= bottom_end_t=100 → obligation only
+        // sample 2 (i=2): ceiling=2>0, dt=300; t=400 > bottom_end_t=100 → both
+        assert_eq!(stats.deco_obligation_sec, 600);
+        assert_eq!(stats.deco_time_sec, 300);
     }
 
     #[test]
@@ -1194,6 +1430,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 100,
@@ -1204,6 +1444,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 400,
@@ -1214,6 +1458,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
         let stats = DiveStats::compute(&dive, &samples);
@@ -1234,6 +1482,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 600,
@@ -1244,6 +1496,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
         let stats = DiveStats::compute(&dive, &samples);
@@ -1265,6 +1521,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 360,
@@ -1275,6 +1535,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 960,
@@ -1285,6 +1549,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
         let (descent, ascent) = DiveStats::compute_rates(&samples);
@@ -1309,6 +1577,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 300,
@@ -1319,6 +1591,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 900,
@@ -1329,6 +1605,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
         let (descent, ascent) = DiveStats::compute_rates(&samples);
@@ -1351,6 +1631,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 400,
@@ -1361,12 +1645,17 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
-        let stats = SegmentStats::compute(100, 400, &samples);
-        // sample 0 (i=0): ceiling=3>0, i+1<2 → dt=400-100=300
-        // sample 1 (i=1, last): ceiling=2>0, i+1=2 NOT <2, i>0 → dt=400-100=300
+        let stats = SegmentStats::compute(100, 400, &samples, 0);
+        // sample 0 (i=0): ceiling=3>0, dt=300; sample 1 (i=1): ceiling=2>0, dt=300
+        // dive_bottom_end_t=0, all t>0 → both are ascent-phase
         assert_eq!(stats.deco_time_sec, 600);
+        assert_eq!(stats.deco_obligation_sec, 600);
         assert_eq!(stats.sample_count, 2);
     }
 
@@ -1383,6 +1672,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 60,
@@ -1393,9 +1686,13 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
-        let stats = SegmentStats::compute(0, 60, &samples);
+        let stats = SegmentStats::compute(0, 60, &samples, 0);
         assert_eq!(stats.max_depth_m, 25.0);
         assert_eq!(stats.min_temp_c, 18.0);
         assert_eq!(stats.max_temp_c, 18.0);
@@ -1422,6 +1719,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 180,
@@ -1432,6 +1733,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 900,
@@ -1442,6 +1747,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 1200,
@@ -1452,6 +1761,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             // Ascent begins here — leaves working depth
             SampleInput {
@@ -1463,6 +1776,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 1800,
@@ -1473,6 +1790,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 2400,
@@ -1483,6 +1804,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 2700,
@@ -1493,13 +1818,19 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
         let stats = DiveStats::compute(&dive, &samples);
         // Last sample at ≥ 39m (max 40 - 1) is at t=1200
         assert_eq!(stats.bottom_time_sec, 1200);
-        // deco_time covers samples with ceiling > 0
-        assert!(stats.deco_time_sec > 0);
+        // deco_obligation: all ceiling>0 (t=900,1200,1500,1800) dt=[300,300,300,600] = 1500
+        assert_eq!(stats.deco_obligation_sec, 1500);
+        // deco_time: only t>1200 (t=1500,1800) dt=[300,600] = 900
+        assert_eq!(stats.deco_time_sec, 900);
     }
 
     #[test]
@@ -1521,6 +1852,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 120,
@@ -1531,6 +1866,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 300,
@@ -1541,6 +1880,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             // Return to max depth
             SampleInput {
@@ -1552,6 +1895,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             // Leave bottom for good
             SampleInput {
@@ -1563,6 +1910,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 1200,
@@ -1573,6 +1924,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 1500,
@@ -1583,6 +1938,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
         let stats = DiveStats::compute(&dive, &samples);
@@ -1608,6 +1967,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 120,
@@ -1618,6 +1981,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             // Slight shallowing due to surge — still in working depth band
             SampleInput {
@@ -1629,6 +1996,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 600,
@@ -1639,6 +2010,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             // Ascent begins
             SampleInput {
@@ -1650,6 +2025,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 1200,
@@ -1660,11 +2039,440 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
         let stats = DiveStats::compute(&dive, &samples);
         // max=30, threshold=29. All bottom samples (30, 29.5, 29.2) are >= 29.
         // Last at ≥ 29m is at t=600.
         assert_eq!(stats.bottom_time_sec, 600);
+    }
+
+    // ── Deco time rework tests ──────────────────────────────
+
+    #[test]
+    fn test_ascent_phase_deco_split() {
+        // Deep dive: ceiling > 0 both at depth and during ascent
+        // Verify deco_obligation vs deco_time split
+        let dive = DiveInput {
+            start_time_unix: 0,
+            end_time_unix: 3600,
+            bottom_time_sec: 0,
+        };
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(0.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
+            },
+            // Descend to 50m
+            SampleInput {
+                t_sec: 180,
+                depth_m: 50.0,
+                temp_c: 14.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(0.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: Some(0),
+                ndl_sec: Some(300),
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
+            },
+            // At depth — ceiling builds (accumulating deco at bottom)
+            SampleInput {
+                t_sec: 600,
+                depth_m: 50.0,
+                temp_c: 14.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(3.0),
+                gf99: Some(70.0),
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: Some(300),
+                ndl_sec: None,
+                deco_stop_depth_m: Some(3.0),
+                at_plus_five_tts_min: None,
+            },
+            // Still at depth — more deco obligation
+            SampleInput {
+                t_sec: 1200,
+                depth_m: 50.0,
+                temp_c: 14.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(6.0),
+                gf99: Some(85.0),
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: Some(600),
+                ndl_sec: None,
+                deco_stop_depth_m: Some(6.0),
+                at_plus_five_tts_min: None,
+            },
+            // Begin ascent — still has ceiling
+            SampleInput {
+                t_sec: 1500,
+                depth_m: 21.0,
+                temp_c: 16.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(6.0),
+                gf99: Some(80.0),
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: Some(480),
+                ndl_sec: None,
+                deco_stop_depth_m: Some(6.0),
+                at_plus_five_tts_min: None,
+            },
+            // Deco stop at 6m
+            SampleInput {
+                t_sec: 1800,
+                depth_m: 6.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(3.0),
+                gf99: Some(75.0),
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: Some(180),
+                ndl_sec: None,
+                deco_stop_depth_m: Some(3.0),
+                at_plus_five_tts_min: None,
+            },
+            // Deco stop at 3m
+            SampleInput {
+                t_sec: 2400,
+                depth_m: 3.0,
+                temp_c: 19.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(1.0),
+                gf99: Some(60.0),
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: Some(60),
+                ndl_sec: None,
+                deco_stop_depth_m: Some(3.0),
+                at_plus_five_tts_min: None,
+            },
+            // Surface
+            SampleInput {
+                t_sec: 2700,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(0.0),
+                gf99: Some(40.0),
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: Some(0),
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
+            },
+        ];
+
+        let stats = DiveStats::compute(&dive, &samples);
+
+        // max_depth=50, threshold=49. Last sample at >=49m is t=1200
+        assert_eq!(stats.bottom_time_sec, 1200);
+        assert_eq!(stats.max_tts_sec, 600);
+
+        // deco_obligation: ceiling > 0 at t=600,1200,1500,1800,2400
+        // dt: 600,300,300,600,300 = 2100
+        assert_eq!(stats.deco_obligation_sec, 2100);
+
+        // deco_time: only t > 1200: t=1500,1800,2400
+        // dt: 300,600,300 = 1200
+        assert_eq!(stats.deco_time_sec, 1200);
+    }
+
+    #[test]
+    fn test_tts_tracking() {
+        // Verify max_tts_sec is correctly tracked
+        let dive = DiveInput {
+            start_time_unix: 0,
+            end_time_unix: 1200,
+            bottom_time_sec: 0,
+        };
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: Some(0),
+                ndl_sec: Some(600),
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
+            },
+            SampleInput {
+                t_sec: 300,
+                depth_m: 30.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(3.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: Some(120),
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: Some(5),
+            },
+            SampleInput {
+                t_sec: 600,
+                depth_m: 30.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(6.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: Some(480),
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: Some(12),
+            },
+            SampleInput {
+                t_sec: 900,
+                depth_m: 5.0,
+                temp_c: 19.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(0.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: Some(60),
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
+            },
+        ];
+
+        let stats = DiveStats::compute(&dive, &samples);
+        // Peak TTS is 480 at t=600
+        assert_eq!(stats.max_tts_sec, 480);
+    }
+
+    #[test]
+    fn test_all_ceiling_at_depth_no_ascent() {
+        // Ceiling > 0 only at depth, never ascends — deco_time=0, deco_obligation>0
+        let dive = DiveInput {
+            start_time_unix: 0,
+            end_time_unix: 1200,
+            bottom_time_sec: 0,
+        };
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 0.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(0.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
+            },
+            SampleInput {
+                t_sec: 120,
+                depth_m: 40.0,
+                temp_c: 14.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(0.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
+            },
+            // At depth with ceiling, still at max depth
+            SampleInput {
+                t_sec: 600,
+                depth_m: 40.0,
+                temp_c: 14.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(3.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: Some(120),
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
+            },
+            SampleInput {
+                t_sec: 900,
+                depth_m: 40.0,
+                temp_c: 14.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(6.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: Some(300),
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
+            },
+        ];
+
+        let stats = DiveStats::compute(&dive, &samples);
+        // max_depth=40, threshold=39. Last sample at >=39 is t=900
+        assert_eq!(stats.bottom_time_sec, 900);
+        // All ceiling > 0 samples at depth (t=600, t=900), both <= bottom_end_t
+        // dt: 300, 300 = 600
+        assert_eq!(stats.deco_obligation_sec, 600);
+        assert_eq!(stats.deco_time_sec, 0);
+        assert_eq!(stats.max_tts_sec, 300);
+    }
+
+    #[test]
+    fn test_no_tts_data_returns_zero() {
+        // Dive with no TTS data (all None) → max_tts_sec = 0
+        let dive = create_test_dive();
+        let samples = create_test_samples();
+        let stats = DiveStats::compute(&dive, &samples);
+        assert_eq!(stats.max_tts_sec, 0);
+    }
+
+    #[test]
+    fn test_segment_stats_with_bottom_end_t() {
+        // Segment spanning bottom and ascent phases — verify deco split
+        let samples = vec![
+            SampleInput {
+                t_sec: 300,
+                depth_m: 40.0,
+                temp_c: 14.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(3.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: Some(120),
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
+            },
+            SampleInput {
+                t_sec: 600,
+                depth_m: 40.0,
+                temp_c: 14.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(6.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: Some(300),
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
+            },
+            SampleInput {
+                t_sec: 900,
+                depth_m: 10.0,
+                temp_c: 18.0,
+                setpoint_ppo2: None,
+                ceiling_m: Some(3.0),
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: Some(60),
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
+            },
+        ];
+
+        // dive_bottom_end_t=600 (last sample at working depth)
+        let stats = SegmentStats::compute(300, 900, &samples, 600);
+
+        // deco_obligation: all 3 samples have ceiling>0, dt=[300,300,300]=900
+        assert_eq!(stats.deco_obligation_sec, 900);
+        // deco_time: only t>600 (t=900), dt=300
+        assert_eq!(stats.deco_time_sec, 300);
+        assert_eq!(stats.max_tts_sec, 300);
+    }
+
+    #[test]
+    fn test_rec_dive_no_deco_metrics() {
+        // Recreational dive with no ceiling data: both deco metrics = 0
+        let dive = DiveInput {
+            start_time_unix: 0,
+            end_time_unix: 2400,
+            bottom_time_sec: 0,
+        };
+        let samples = vec![
+            SampleInput {
+                t_sec: 0,
+                depth_m: 0.0,
+                temp_c: 22.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: None,
+                ndl_sec: Some(600),
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
+            },
+            SampleInput {
+                t_sec: 600,
+                depth_m: 18.0,
+                temp_c: 20.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: None,
+                ndl_sec: Some(300),
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
+            },
+            SampleInput {
+                t_sec: 1200,
+                depth_m: 0.0,
+                temp_c: 22.0,
+                setpoint_ppo2: None,
+                ceiling_m: None,
+                gf99: None,
+                gasmix_index: None,
+                ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
+            },
+        ];
+
+        let stats = DiveStats::compute(&dive, &samples);
+        assert_eq!(stats.deco_time_sec, 0);
+        assert_eq!(stats.deco_obligation_sec, 0);
+        assert_eq!(stats.max_tts_sec, 0);
+        assert_eq!(stats.bottom_time_sec, 0);
     }
 }

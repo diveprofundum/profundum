@@ -130,6 +130,25 @@ public final class FormulaService: Sendable {
 
     // MARK: - Private Helpers
 
+    private func makeSampleInputs(from samples: [DiveSample]) -> [SampleInput] {
+        samples.map { sample in
+            SampleInput(
+                tSec: sample.tSec,
+                depthM: sample.depthM,
+                tempC: sample.tempC,
+                setpointPpo2: sample.setpointPpo2,
+                ceilingM: sample.ceilingM,
+                gf99: sample.gf99,
+                gasmixIndex: sample.gasmixIndex.map { Int32($0) },
+                ppo2: sample.ppo2_1 ?? sample.setpointPpo2,
+                ttsSec: sample.ttsSec.map { Int32($0) },
+                ndlSec: sample.ndlSec.map { Int32($0) },
+                decoStopDepthM: sample.decoStopDepthM,
+                atPlusFiveTtsMin: sample.atPlusFiveTtsMin.map { Int32($0) }
+            )
+        }
+    }
+
     private func computeDiveStats(dive: Dive, samples: [DiveSample]) -> DiveStats {
         let diveInput = DiveInput(
             startTimeUnix: dive.startTimeUnix,
@@ -137,41 +156,35 @@ public final class FormulaService: Sendable {
             bottomTimeSec: dive.bottomTimeSec
         )
 
-        let sampleInputs = samples.map { sample in
-            SampleInput(
-                tSec: sample.tSec,
-                depthM: sample.depthM,
-                tempC: sample.tempC,
-                setpointPpo2: sample.setpointPpo2,
-                ceilingM: sample.ceilingM,
-                gf99: sample.gf99,
-                gasmixIndex: sample.gasmixIndex.map { Int32($0) },
-                ppo2: sample.ppo2_1 ?? sample.setpointPpo2
-            )
-        }
-
-        return DivelogCompute.computeDiveStats(dive: diveInput, samples: sampleInputs)
+        return DivelogCompute.computeDiveStats(dive: diveInput, samples: makeSampleInputs(from: samples))
     }
 
     private func computeSegmentStats(segment: Segment, samples: [DiveSample]) -> SegmentStats {
-        let sampleInputs = samples.map { sample in
-            SampleInput(
-                tSec: sample.tSec,
-                depthM: sample.depthM,
-                tempC: sample.tempC,
-                setpointPpo2: sample.setpointPpo2,
-                ceilingM: sample.ceilingM,
-                gf99: sample.gf99,
-                gasmixIndex: sample.gasmixIndex.map { Int32($0) },
-                ppo2: sample.ppo2_1 ?? sample.setpointPpo2
-            )
-        }
+        let sampleInputs = makeSampleInputs(from: samples)
+
+        // Compute dive-level bottom_end_t for the deco time split.
+        // We need the full dive's stats to get the bottom_end_t context.
+        let diveBottomEndT = Self.computeBottomEndT(samples: sampleInputs)
 
         return DivelogCompute.computeSegmentStats(
             startTSec: segment.startTSec,
             endTSec: segment.endTSec,
-            samples: sampleInputs
+            samples: sampleInputs,
+            diveBottomEndT: diveBottomEndT
         )
+    }
+
+    /// Compute the dive-level bottom_end_t: last sample within 1m of max depth (if deco dive).
+    /// Mirrors the Rust pre-scan logic so segments use the same boundary.
+    private static func computeBottomEndT(samples: [SampleInput]) -> Int32 {
+        let maxDepth = samples.map(\.depthM).max() ?? 0
+        let hasDeco = samples.contains { s in
+            if let c = s.ceilingM { return c > 0 }
+            return false
+        }
+        guard hasDeco, maxDepth > 0 else { return 0 }
+        let threshold = max(maxDepth - 1.0, 0)
+        return samples.last(where: { $0.depthM >= threshold })?.tSec ?? 0
     }
 }
 
@@ -209,6 +222,10 @@ public enum FormulaVariables {
         "total_time_min",
         "deco_time_sec",
         "deco_time_min",
+        "deco_obligation_sec",
+        "deco_obligation_min",
+        "max_tts_sec",
+        "max_tts_min",
         "min_temp_c",
         "max_temp_c",
         "avg_temp_c",
@@ -239,6 +256,10 @@ public enum FormulaVariables {
         "max_temp_f",
         "deco_time_sec",
         "deco_time_min",
+        "deco_obligation_sec",
+        "deco_obligation_min",
+        "max_tts_sec",
+        "max_tts_min",
         "sample_count",
     ]
 
@@ -267,6 +288,10 @@ public enum FormulaVariables {
         vars["total_time_min"] = Double(stats.totalTimeSec) / 60.0
         vars["deco_time_sec"] = Double(stats.decoTimeSec)
         vars["deco_time_min"] = Double(stats.decoTimeSec) / 60.0
+        vars["deco_obligation_sec"] = Double(stats.decoObligationSec)
+        vars["deco_obligation_min"] = Double(stats.decoObligationSec) / 60.0
+        vars["max_tts_sec"] = Double(stats.maxTtsSec)
+        vars["max_tts_min"] = Double(stats.maxTtsSec) / 60.0
         vars["weighted_avg_depth_m"] = Double(stats.weightedAvgDepthM)
         vars["min_temp_c"] = Double(stats.minTempC)
         vars["max_temp_c"] = Double(stats.maxTempC)
@@ -299,6 +324,10 @@ public enum FormulaVariables {
         vars["max_temp_c"] = Double(stats.maxTempC)
         vars["deco_time_sec"] = Double(stats.decoTimeSec)
         vars["deco_time_min"] = Double(stats.decoTimeSec) / 60.0
+        vars["deco_obligation_sec"] = Double(stats.decoObligationSec)
+        vars["deco_obligation_min"] = Double(stats.decoObligationSec) / 60.0
+        vars["max_tts_sec"] = Double(stats.maxTtsSec)
+        vars["max_tts_min"] = Double(stats.maxTtsSec) / 60.0
         vars["sample_count"] = Double(stats.sampleCount)
 
         UnitFormatter.addImperialVariables(to: &vars)

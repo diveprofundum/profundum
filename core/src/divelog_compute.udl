@@ -14,7 +14,7 @@ namespace divelog_compute {
 
     // Metrics computation - pure functions
     DiveStats compute_dive_stats(DiveInput dive, sequence<SampleInput> samples);
-    SegmentStats compute_segment_stats(i32 start_t_sec, i32 end_t_sec, sequence<SampleInput> samples);
+    SegmentStats compute_segment_stats(i32 start_t_sec, i32 end_t_sec, sequence<SampleInput> samples, i32 dive_bottom_end_t);
 
     // Function info for UI
     sequence<FunctionInfo> supported_functions();
@@ -72,6 +72,10 @@ dictionary SampleInput {
     f32? gf99;
     i32? gasmix_index;
     f32? ppo2;
+    i32? tts_sec;
+    i32? ndl_sec;
+    f32? deco_stop_depth_m;
+    i32? at_plus_five_tts_min;
 };
 
 // ============================================================================
@@ -82,6 +86,8 @@ dictionary DiveStats {
     i32 total_time_sec;
     i32 bottom_time_sec;
     i32 deco_time_sec;
+    i32 deco_obligation_sec;
+    i32 max_tts_sec;
     f32 max_depth_m;
     f32 avg_depth_m;
     f32 weighted_avg_depth_m;
@@ -103,6 +109,8 @@ dictionary SegmentStats {
     f32 min_temp_c;
     f32 max_temp_c;
     i32 deco_time_sec;
+    i32 deco_obligation_sec;
+    i32 max_tts_sec;
     u64 sample_count;
 };
 

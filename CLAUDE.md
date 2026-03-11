@@ -124,7 +124,7 @@ namespace divelog_compute {
     string? validate_formula_with_variables(string expression, sequence<string> available);
     f64 evaluate_formula(string expression, record<string, f64> variables);
     DiveStats compute_dive_stats(DiveInput dive, sequence<SampleInput> samples);
-    SegmentStats compute_segment_stats(i32 start_t_sec, i32 end_t_sec, sequence<SampleInput> samples);
+    SegmentStats compute_segment_stats(i32 start_t_sec, i32 end_t_sec, sequence<SampleInput> samples, i32 dive_bottom_end_t);
     sequence<FunctionInfo> supported_functions();
 }
 ```
@@ -150,7 +150,9 @@ Variables available for dive formulas:
 - `max_depth_m`, `avg_depth_m`, `weighted_avg_depth_m`
 - `max_depth_ft`, `avg_depth_ft`, `weighted_avg_depth_ft` (imperial equivalents)
 - `bottom_time_sec`, `bottom_time_min`, `total_time_sec`, `total_time_min`
-- `deco_time_sec`, `deco_time_min`
+- `deco_time_sec`, `deco_time_min` (ascent-phase only: ceiling > 0 after leaving working depth)
+- `deco_obligation_sec`, `deco_obligation_min` (total time with ceiling > 0, including at depth)
+- `max_tts_sec`, `max_tts_min` (peak time-to-surface during dive)
 - `cns_percent`, `otu`, `is_ccr`, `deco_required`
 - `min_temp_c`, `max_temp_c`, `avg_temp_c`
 - `min_temp_f`, `max_temp_f`, `avg_temp_f` (imperial equivalents)
@@ -164,7 +166,10 @@ Variables available for segment formulas:
 - `max_depth_ft`, `avg_depth_ft` (imperial equivalents)
 - `min_temp_c`, `max_temp_c`
 - `min_temp_f`, `max_temp_f` (imperial equivalents)
-- `deco_time_sec`, `deco_time_min`, `sample_count`
+- `deco_time_sec`, `deco_time_min` (ascent-phase only)
+- `deco_obligation_sec`, `deco_obligation_min` (total time with ceiling > 0)
+- `max_tts_sec`, `max_tts_min` (peak TTS in segment)
+- `sample_count`
 
 ## Key Constraints
 
