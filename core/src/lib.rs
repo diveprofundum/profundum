@@ -66,8 +66,15 @@ fn compute_segment_stats(
     end_t_sec: i32,
     samples: Vec<SampleInput>,
     dive_bottom_end_t: i32,
+    dive_deco_start_t: i32,
 ) -> SegmentStats {
-    SegmentStats::compute(start_t_sec, end_t_sec, &samples, dive_bottom_end_t)
+    SegmentStats::compute(
+        start_t_sec,
+        end_t_sec,
+        &samples,
+        dive_bottom_end_t,
+        dive_deco_start_t,
+    )
 }
 
 /// Get list of supported functions for UI display.
@@ -126,6 +133,8 @@ mod tests {
             start_time_unix: 1700000000,
             end_time_unix: 1700003600,
             bottom_time_sec: 3000,
+            is_ccr: false,
+            bottom_end_t_override_sec: None,
         };
 
         let samples = vec![
@@ -225,7 +234,7 @@ mod tests {
             },
         ];
 
-        let stats = compute_segment_stats(100, 300, samples, 0);
+        let stats = compute_segment_stats(100, 300, samples, 0, 0);
         assert_eq!(stats.duration_sec, 200);
         assert_eq!(stats.max_depth_m, 25.0);
         assert_eq!(stats.sample_count, 3);

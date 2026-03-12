@@ -39,14 +39,16 @@ public enum DivelogCompute {
         startTSec: Int32,
         endTSec: Int32,
         samples: [SampleInput],
-        diveBottomEndT: Int32
+        diveBottomEndT: Int32,
+        diveDecoStartT: Int32
     ) -> SegmentStats {
         // Call the UniFFI-generated free function
         DivelogCore.computeSegmentStats(
             startTSec: startTSec,
             endTSec: endTSec,
             samples: samples,
-            diveBottomEndT: diveBottomEndT
+            diveBottomEndT: diveBottomEndT,
+            diveDecoStartT: diveDecoStartT
         )
     }
 

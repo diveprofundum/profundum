@@ -815,7 +815,9 @@ struct DiveDetailView: View {
             let diveInput = DiveInput(
                 startTimeUnix: dive.startTimeUnix,
                 endTimeUnix: dive.endTimeUnix,
-                bottomTimeSec: dive.bottomTimeSec
+                bottomTimeSec: dive.bottomTimeSec,
+                isCcr: dive.isCcr,
+                bottomEndTOverrideSec: dive.bottomEndTOverrideSec
             )
 
             let sampleInputs = detail.samples.map { sample in

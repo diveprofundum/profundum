@@ -207,7 +207,9 @@ final class DivelogCoreTests: XCTestCase {
         let diveInput = DiveInput(
             startTimeUnix: 1700000000,
             endTimeUnix: 1700003600,
-            bottomTimeSec: 3000
+            bottomTimeSec: 3000,
+            isCcr: false,
+            bottomEndTOverrideSec: nil
         )
 
         let samples = [
@@ -234,7 +236,7 @@ final class DivelogCoreTests: XCTestCase {
             SampleInput(tSec: 400, depthM: 5.0, tempC: 21.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil, ppo2: nil, ttsSec: nil, ndlSec: nil, decoStopDepthM: nil, atPlusFiveTtsMin: nil),
         ]
 
-        let stats = DivelogCompute.computeSegmentStats(startTSec: 100, endTSec: 300, samples: samples, diveBottomEndT: 0)
+        let stats = DivelogCompute.computeSegmentStats(startTSec: 100, endTSec: 300, samples: samples, diveBottomEndT: 0, diveDecoStartT: 0)
 
         XCTAssertEqual(stats.durationSec, 200)
         XCTAssertEqual(stats.maxDepthM, 25.0)

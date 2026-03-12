@@ -124,14 +124,14 @@ namespace divelog_compute {
     string? validate_formula_with_variables(string expression, sequence<string> available);
     f64 evaluate_formula(string expression, record<string, f64> variables);
     DiveStats compute_dive_stats(DiveInput dive, sequence<SampleInput> samples);
-    SegmentStats compute_segment_stats(i32 start_t_sec, i32 end_t_sec, sequence<SampleInput> samples, i32 dive_bottom_end_t);
+    SegmentStats compute_segment_stats(i32 start_t_sec, i32 end_t_sec, sequence<SampleInput> samples, i32 dive_bottom_end_t, i32 dive_deco_start_t);
     sequence<FunctionInfo> supported_functions();
 }
 ```
 
 ### Data Model
 
-The schema (implemented in Swift GRDB migrations 001–009) models technical diving with CCR support:
+The schema (implemented in Swift GRDB migrations 001–016) models technical diving with CCR support:
 - Dives track CNS/OTU, setpoint, O2 consumption rates, deco status
 - Dive tags include breathing-system tags (oc, ccr) and activity tags (rec, deco, cave, etc.) plus user custom tags
 - Samples include depth, temp, setpoint_ppo2, ceiling_m, gf99
@@ -158,6 +158,8 @@ Variables available for dive formulas:
 - `min_temp_f`, `max_temp_f`, `avg_temp_f` (imperial equivalents)
 - `gas_switch_count`, `max_ceiling_m`, `max_ceiling_ft`, `max_gf99`
 - `descent_rate_m_min`, `ascent_rate_m_min`
+- `bottom_end_t`, `bottom_end_t_min` (time when diver leaves working depth)
+- `deco_start_t`, `ascent_time_sec`, `ascent_time_min` (three-phase boundaries)
 - `o2_consumed_psi`, `o2_consumed_bar`, `o2_rate_cuft_min`, `o2_rate_l_min`
 
 Variables available for segment formulas:

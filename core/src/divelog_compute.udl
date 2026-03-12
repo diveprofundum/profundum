@@ -14,7 +14,7 @@ namespace divelog_compute {
 
     // Metrics computation - pure functions
     DiveStats compute_dive_stats(DiveInput dive, sequence<SampleInput> samples);
-    SegmentStats compute_segment_stats(i32 start_t_sec, i32 end_t_sec, sequence<SampleInput> samples, i32 dive_bottom_end_t);
+    SegmentStats compute_segment_stats(i32 start_t_sec, i32 end_t_sec, sequence<SampleInput> samples, i32 dive_bottom_end_t, i32 dive_deco_start_t);
 
     // Function info for UI
     sequence<FunctionInfo> supported_functions();
@@ -61,6 +61,8 @@ dictionary DiveInput {
     i64 start_time_unix;
     i64 end_time_unix;
     i32 bottom_time_sec;
+    boolean is_ccr;
+    i32? bottom_end_t_override_sec;
 };
 
 dictionary SampleInput {
@@ -100,6 +102,9 @@ dictionary DiveStats {
     f32 max_gf99;
     f32 descent_rate_m_min;
     f32 ascent_rate_m_min;
+    i32 bottom_end_t;
+    i32 deco_start_t;
+    i32 ascent_time_sec;
 };
 
 dictionary SegmentStats {

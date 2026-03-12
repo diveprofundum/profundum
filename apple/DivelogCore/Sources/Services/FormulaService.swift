@@ -56,18 +56,21 @@ public final class FormulaService: Sendable {
 
     /// Evaluate a formula for a specific segment.
     public func evaluateFormulaForSegment(_ expression: String, segmentId: String) throws -> Double {
-        let (segment, samples) = try database.dbQueue.read { db in
+        let (segment, dive, samples) = try database.dbQueue.read { db in
             guard let segment = try Segment.fetchOne(db, key: segmentId) else {
                 throw FormulaServiceError.segmentNotFound(segmentId)
+            }
+            guard let dive = try Dive.fetchOne(db, key: segment.diveId) else {
+                throw FormulaServiceError.diveNotFound(segment.diveId)
             }
             let samples = try DiveSample
                 .filter(Column("dive_id") == segment.diveId)
                 .order(Column("t_sec"))
                 .fetchAll(db)
-            return (segment, samples)
+            return (segment, dive, samples)
         }
 
-        let stats = computeSegmentStats(segment: segment, samples: samples)
+        let stats = computeSegmentStats(segment: segment, dive: dive, samples: samples)
         let variables = FormulaVariables.fromSegment(segment, stats: stats)
 
         return try DivelogCompute.evaluateFormula(expression, variables: variables)
@@ -93,18 +96,21 @@ public final class FormulaService: Sendable {
 
     /// Compute statistics for a segment.
     public func computeSegmentStats(segmentId: String) throws -> SegmentStats {
-        let (segment, samples) = try database.dbQueue.read { db in
+        let (segment, dive, samples) = try database.dbQueue.read { db in
             guard let segment = try Segment.fetchOne(db, key: segmentId) else {
                 throw FormulaServiceError.segmentNotFound(segmentId)
+            }
+            guard let dive = try Dive.fetchOne(db, key: segment.diveId) else {
+                throw FormulaServiceError.diveNotFound(segment.diveId)
             }
             let samples = try DiveSample
                 .filter(Column("dive_id") == segment.diveId)
                 .order(Column("t_sec"))
                 .fetchAll(db)
-            return (segment, samples)
+            return (segment, dive, samples)
         }
 
-        return computeSegmentStats(segment: segment, samples: samples)
+        return computeSegmentStats(segment: segment, dive: dive, samples: samples)
     }
 
     // MARK: - Calculated Fields
@@ -153,38 +159,33 @@ public final class FormulaService: Sendable {
         let diveInput = DiveInput(
             startTimeUnix: dive.startTimeUnix,
             endTimeUnix: dive.endTimeUnix,
-            bottomTimeSec: dive.bottomTimeSec
+            bottomTimeSec: dive.bottomTimeSec,
+            isCcr: dive.isCcr,
+            bottomEndTOverrideSec: dive.bottomEndTOverrideSec
         )
 
         return DivelogCompute.computeDiveStats(dive: diveInput, samples: makeSampleInputs(from: samples))
     }
 
-    private func computeSegmentStats(segment: Segment, samples: [DiveSample]) -> SegmentStats {
+    private func computeSegmentStats(segment: Segment, dive: Dive, samples: [DiveSample]) -> SegmentStats {
         let sampleInputs = makeSampleInputs(from: samples)
 
-        // Compute dive-level bottom_end_t for the deco time split.
-        // We need the full dive's stats to get the bottom_end_t context.
-        let diveBottomEndT = Self.computeBottomEndT(samples: sampleInputs)
+        let diveInput = DiveInput(
+            startTimeUnix: dive.startTimeUnix,
+            endTimeUnix: dive.endTimeUnix,
+            bottomTimeSec: dive.bottomTimeSec,
+            isCcr: dive.isCcr,
+            bottomEndTOverrideSec: dive.bottomEndTOverrideSec
+        )
+        let diveStats = DivelogCompute.computeDiveStats(dive: diveInput, samples: sampleInputs)
 
         return DivelogCompute.computeSegmentStats(
             startTSec: segment.startTSec,
             endTSec: segment.endTSec,
             samples: sampleInputs,
-            diveBottomEndT: diveBottomEndT
+            diveBottomEndT: diveStats.bottomEndT,
+            diveDecoStartT: diveStats.decoStartT
         )
-    }
-
-    /// Compute the dive-level bottom_end_t: last sample within 1m of max depth (if deco dive).
-    /// Mirrors the Rust pre-scan logic so segments use the same boundary.
-    private static func computeBottomEndT(samples: [SampleInput]) -> Int32 {
-        let maxDepth = samples.map(\.depthM).max() ?? 0
-        let hasDeco = samples.contains { s in
-            if let c = s.ceilingM { return c > 0 }
-            return false
-        }
-        guard hasDeco, maxDepth > 0 else { return 0 }
-        let threshold = max(maxDepth - 1.0, 0)
-        return samples.last(where: { $0.depthM >= threshold })?.tSec ?? 0
     }
 }
 
@@ -238,6 +239,11 @@ public enum FormulaVariables {
         "max_gf99",
         "descent_rate_m_min",
         "ascent_rate_m_min",
+        "bottom_end_t",
+        "bottom_end_t_min",
+        "deco_start_t",
+        "ascent_time_sec",
+        "ascent_time_min",
     ]
 
     /// Available variables for segment formulas.
@@ -301,6 +307,11 @@ public enum FormulaVariables {
         vars["max_gf99"] = Double(stats.maxGf99)
         vars["descent_rate_m_min"] = Double(stats.descentRateMMin)
         vars["ascent_rate_m_min"] = Double(stats.ascentRateMMin)
+        vars["bottom_end_t"] = Double(stats.bottomEndT)
+        vars["bottom_end_t_min"] = Double(stats.bottomEndT) / 60.0
+        vars["deco_start_t"] = Double(stats.decoStartT)
+        vars["ascent_time_sec"] = Double(stats.ascentTimeSec)
+        vars["ascent_time_min"] = Double(stats.ascentTimeSec) / 60.0
 
         UnitFormatter.addImperialVariables(to: &vars)
 
