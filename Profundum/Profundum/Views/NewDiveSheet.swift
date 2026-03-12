@@ -699,7 +699,8 @@ struct NewDiveSheet: View {
             siteId: selectedSiteId,
             computerDiveNumber: editingDive?.computerDiveNumber,
             fingerprint: editingDive?.fingerprint,
-            timezoneOffsetSec: savedTimezoneOffset
+            timezoneOffsetSec: savedTimezoneOffset,
+            bottomEndTOverrideSec: editingDive?.bottomEndTOverrideSec
         )
 
         var allTags = [selectedDiveTypeTag.rawValue]

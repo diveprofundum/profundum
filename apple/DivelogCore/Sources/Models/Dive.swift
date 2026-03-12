@@ -46,6 +46,8 @@ public struct Dive: Identifiable, Equatable, Hashable, Sendable {
     /// Non-nil means `startTimeUnix`/`endTimeUnix` are real UTC; offset enables local display.
     /// Nil means legacy local-as-UTC convention (all pre-migration-015 dives).
     public var timezoneOffsetSec: Int32?
+    /// Manual override for bottom_end_t (user correction, in seconds from dive start).
+    public var bottomEndTOverrideSec: Int32?
 
     public init(
         id: String = UUID().uuidString,
@@ -84,7 +86,8 @@ public struct Dive: Identifiable, Equatable, Hashable, Sendable {
         environment: String? = nil,
         visibility: String? = nil,
         weather: String? = nil,
-        timezoneOffsetSec: Int32? = nil
+        timezoneOffsetSec: Int32? = nil,
+        bottomEndTOverrideSec: Int32? = nil
     ) {
         self.id = id
         self.deviceId = deviceId
@@ -123,6 +126,7 @@ public struct Dive: Identifiable, Equatable, Hashable, Sendable {
         self.visibility = visibility
         self.weather = weather
         self.timezoneOffsetSec = timezoneOffsetSec
+        self.bottomEndTOverrideSec = bottomEndTOverrideSec
     }
 
     /// Date suitable for display with UTC-based DateFormatters.
@@ -187,6 +191,7 @@ extension Dive: Codable, FetchableRecord, PersistableRecord {
         case visibility
         case weather
         case timezoneOffsetSec = "timezone_offset_sec"
+        case bottomEndTOverrideSec = "bottom_end_t_override_sec"
     }
 }
 

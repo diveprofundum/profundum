@@ -288,7 +288,11 @@ struct DepthProfileChartData {
                     ceilingM: s.ceilingM,
                     gf99: s.gf99,
                     gasmixIndex: s.gasmixIndex.map { Int32($0) },
-                    ppo2: s.ppo2_1 ?? s.setpointPpo2
+                    ppo2: s.ppo2_1 ?? s.setpointPpo2,
+                    ttsSec: s.ttsSec.map { Int32($0) },
+                    ndlSec: s.ndlSec.map { Int32($0) },
+                    decoStopDepthM: s.decoStopDepthM,
+                    atPlusFiveTtsMin: s.atPlusFiveTtsMin.map { Int32($0) }
                 )
             }
             let gasMixInputs = gasMixes.map { mix in

@@ -418,6 +418,7 @@ public final class DiveComputerImportService: Sendable {
               AND (dives.end_time_unix + COALESCE(dives.timezone_offset_sec, 0)) > ?
               AND dives.device_id != ?
               AND COALESCE(devices.ownership, 'mine') = 'mine'
+            ORDER BY dives.start_time_unix ASC
             LIMIT 1
             """, arguments: [localEndTime, localStartTime, deviceId])
         return row?["id"] as String?

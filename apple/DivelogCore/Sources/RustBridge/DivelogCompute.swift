@@ -35,9 +35,21 @@ public enum DivelogCompute {
     }
 
     /// Compute statistics for a segment from samples.
-    public static func computeSegmentStats(startTSec: Int32, endTSec: Int32, samples: [SampleInput]) -> SegmentStats {
+    public static func computeSegmentStats(
+        startTSec: Int32,
+        endTSec: Int32,
+        samples: [SampleInput],
+        diveBottomEndT: Int32,
+        diveDecoStartT: Int32
+    ) -> SegmentStats {
         // Call the UniFFI-generated free function
-        DivelogCore.computeSegmentStats(startTSec: startTSec, endTSec: endTSec, samples: samples)
+        DivelogCore.computeSegmentStats(
+            startTSec: startTSec,
+            endTSec: endTSec,
+            samples: samples,
+            diveBottomEndT: diveBottomEndT,
+            diveDecoStartT: diveDecoStartT
+        )
     }
 
     /// Get list of supported formula functions.

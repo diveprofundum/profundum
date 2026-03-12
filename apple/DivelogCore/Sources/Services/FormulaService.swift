@@ -56,18 +56,21 @@ public final class FormulaService: Sendable {
 
     /// Evaluate a formula for a specific segment.
     public func evaluateFormulaForSegment(_ expression: String, segmentId: String) throws -> Double {
-        let (segment, samples) = try database.dbQueue.read { db in
+        let (segment, dive, samples) = try database.dbQueue.read { db in
             guard let segment = try Segment.fetchOne(db, key: segmentId) else {
                 throw FormulaServiceError.segmentNotFound(segmentId)
+            }
+            guard let dive = try Dive.fetchOne(db, key: segment.diveId) else {
+                throw FormulaServiceError.diveNotFound(segment.diveId)
             }
             let samples = try DiveSample
                 .filter(Column("dive_id") == segment.diveId)
                 .order(Column("t_sec"))
                 .fetchAll(db)
-            return (segment, samples)
+            return (segment, dive, samples)
         }
 
-        let stats = computeSegmentStats(segment: segment, samples: samples)
+        let stats = computeSegmentStats(segment: segment, dive: dive, samples: samples)
         let variables = FormulaVariables.fromSegment(segment, stats: stats)
 
         return try DivelogCompute.evaluateFormula(expression, variables: variables)
@@ -93,18 +96,21 @@ public final class FormulaService: Sendable {
 
     /// Compute statistics for a segment.
     public func computeSegmentStats(segmentId: String) throws -> SegmentStats {
-        let (segment, samples) = try database.dbQueue.read { db in
+        let (segment, dive, samples) = try database.dbQueue.read { db in
             guard let segment = try Segment.fetchOne(db, key: segmentId) else {
                 throw FormulaServiceError.segmentNotFound(segmentId)
+            }
+            guard let dive = try Dive.fetchOne(db, key: segment.diveId) else {
+                throw FormulaServiceError.diveNotFound(segment.diveId)
             }
             let samples = try DiveSample
                 .filter(Column("dive_id") == segment.diveId)
                 .order(Column("t_sec"))
                 .fetchAll(db)
-            return (segment, samples)
+            return (segment, dive, samples)
         }
 
-        return computeSegmentStats(segment: segment, samples: samples)
+        return computeSegmentStats(segment: segment, dive: dive, samples: samples)
     }
 
     // MARK: - Calculated Fields
@@ -130,47 +136,55 @@ public final class FormulaService: Sendable {
 
     // MARK: - Private Helpers
 
+    private func makeSampleInputs(from samples: [DiveSample]) -> [SampleInput] {
+        samples.map { sample in
+            SampleInput(
+                tSec: sample.tSec,
+                depthM: sample.depthM,
+                tempC: sample.tempC,
+                setpointPpo2: sample.setpointPpo2,
+                ceilingM: sample.ceilingM,
+                gf99: sample.gf99,
+                gasmixIndex: sample.gasmixIndex.map { Int32($0) },
+                ppo2: sample.ppo2_1 ?? sample.setpointPpo2,
+                ttsSec: sample.ttsSec.map { Int32($0) },
+                ndlSec: sample.ndlSec.map { Int32($0) },
+                decoStopDepthM: sample.decoStopDepthM,
+                atPlusFiveTtsMin: sample.atPlusFiveTtsMin.map { Int32($0) }
+            )
+        }
+    }
+
     private func computeDiveStats(dive: Dive, samples: [DiveSample]) -> DiveStats {
         let diveInput = DiveInput(
             startTimeUnix: dive.startTimeUnix,
             endTimeUnix: dive.endTimeUnix,
-            bottomTimeSec: dive.bottomTimeSec
+            bottomTimeSec: dive.bottomTimeSec,
+            isCcr: dive.isCcr,
+            bottomEndTOverrideSec: dive.bottomEndTOverrideSec
         )
 
-        let sampleInputs = samples.map { sample in
-            SampleInput(
-                tSec: sample.tSec,
-                depthM: sample.depthM,
-                tempC: sample.tempC,
-                setpointPpo2: sample.setpointPpo2,
-                ceilingM: sample.ceilingM,
-                gf99: sample.gf99,
-                gasmixIndex: sample.gasmixIndex.map { Int32($0) },
-                ppo2: sample.ppo2_1 ?? sample.setpointPpo2
-            )
-        }
-
-        return DivelogCompute.computeDiveStats(dive: diveInput, samples: sampleInputs)
+        return DivelogCompute.computeDiveStats(dive: diveInput, samples: makeSampleInputs(from: samples))
     }
 
-    private func computeSegmentStats(segment: Segment, samples: [DiveSample]) -> SegmentStats {
-        let sampleInputs = samples.map { sample in
-            SampleInput(
-                tSec: sample.tSec,
-                depthM: sample.depthM,
-                tempC: sample.tempC,
-                setpointPpo2: sample.setpointPpo2,
-                ceilingM: sample.ceilingM,
-                gf99: sample.gf99,
-                gasmixIndex: sample.gasmixIndex.map { Int32($0) },
-                ppo2: sample.ppo2_1 ?? sample.setpointPpo2
-            )
-        }
+    private func computeSegmentStats(segment: Segment, dive: Dive, samples: [DiveSample]) -> SegmentStats {
+        let sampleInputs = makeSampleInputs(from: samples)
+
+        let diveInput = DiveInput(
+            startTimeUnix: dive.startTimeUnix,
+            endTimeUnix: dive.endTimeUnix,
+            bottomTimeSec: dive.bottomTimeSec,
+            isCcr: dive.isCcr,
+            bottomEndTOverrideSec: dive.bottomEndTOverrideSec
+        )
+        let diveStats = DivelogCompute.computeDiveStats(dive: diveInput, samples: sampleInputs)
 
         return DivelogCompute.computeSegmentStats(
             startTSec: segment.startTSec,
             endTSec: segment.endTSec,
-            samples: sampleInputs
+            samples: sampleInputs,
+            diveBottomEndT: diveStats.bottomEndT,
+            diveDecoStartT: diveStats.decoStartT
         )
     }
 }
@@ -209,6 +223,10 @@ public enum FormulaVariables {
         "total_time_min",
         "deco_time_sec",
         "deco_time_min",
+        "deco_obligation_sec",
+        "deco_obligation_min",
+        "max_tts_sec",
+        "max_tts_min",
         "min_temp_c",
         "max_temp_c",
         "avg_temp_c",
@@ -221,6 +239,11 @@ public enum FormulaVariables {
         "max_gf99",
         "descent_rate_m_min",
         "ascent_rate_m_min",
+        "bottom_end_t",
+        "bottom_end_t_min",
+        "deco_start_t",
+        "ascent_time_sec",
+        "ascent_time_min",
     ]
 
     /// Available variables for segment formulas.
@@ -239,6 +262,10 @@ public enum FormulaVariables {
         "max_temp_f",
         "deco_time_sec",
         "deco_time_min",
+        "deco_obligation_sec",
+        "deco_obligation_min",
+        "max_tts_sec",
+        "max_tts_min",
         "sample_count",
     ]
 
@@ -267,6 +294,10 @@ public enum FormulaVariables {
         vars["total_time_min"] = Double(stats.totalTimeSec) / 60.0
         vars["deco_time_sec"] = Double(stats.decoTimeSec)
         vars["deco_time_min"] = Double(stats.decoTimeSec) / 60.0
+        vars["deco_obligation_sec"] = Double(stats.decoObligationSec)
+        vars["deco_obligation_min"] = Double(stats.decoObligationSec) / 60.0
+        vars["max_tts_sec"] = Double(stats.maxTtsSec)
+        vars["max_tts_min"] = Double(stats.maxTtsSec) / 60.0
         vars["weighted_avg_depth_m"] = Double(stats.weightedAvgDepthM)
         vars["min_temp_c"] = Double(stats.minTempC)
         vars["max_temp_c"] = Double(stats.maxTempC)
@@ -276,6 +307,11 @@ public enum FormulaVariables {
         vars["max_gf99"] = Double(stats.maxGf99)
         vars["descent_rate_m_min"] = Double(stats.descentRateMMin)
         vars["ascent_rate_m_min"] = Double(stats.ascentRateMMin)
+        vars["bottom_end_t"] = Double(stats.bottomEndT)
+        vars["bottom_end_t_min"] = Double(stats.bottomEndT) / 60.0
+        vars["deco_start_t"] = Double(stats.decoStartT)
+        vars["ascent_time_sec"] = Double(stats.ascentTimeSec)
+        vars["ascent_time_min"] = Double(stats.ascentTimeSec) / 60.0
 
         UnitFormatter.addImperialVariables(to: &vars)
 
@@ -299,6 +335,10 @@ public enum FormulaVariables {
         vars["max_temp_c"] = Double(stats.maxTempC)
         vars["deco_time_sec"] = Double(stats.decoTimeSec)
         vars["deco_time_min"] = Double(stats.decoTimeSec) / 60.0
+        vars["deco_obligation_sec"] = Double(stats.decoObligationSec)
+        vars["deco_obligation_min"] = Double(stats.decoObligationSec) / 60.0
+        vars["max_tts_sec"] = Double(stats.maxTtsSec)
+        vars["max_tts_min"] = Double(stats.maxTtsSec) / 60.0
         vars["sample_count"] = Double(stats.sampleCount)
 
         UnitFormatter.addImperialVariables(to: &vars)

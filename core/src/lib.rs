@@ -65,8 +65,16 @@ fn compute_segment_stats(
     start_t_sec: i32,
     end_t_sec: i32,
     samples: Vec<SampleInput>,
+    dive_bottom_end_t: i32,
+    dive_deco_start_t: i32,
 ) -> SegmentStats {
-    SegmentStats::compute(start_t_sec, end_t_sec, &samples)
+    SegmentStats::compute(
+        start_t_sec,
+        end_t_sec,
+        &samples,
+        dive_bottom_end_t,
+        dive_deco_start_t,
+    )
 }
 
 /// Get list of supported functions for UI display.
@@ -125,6 +133,8 @@ mod tests {
             start_time_unix: 1700000000,
             end_time_unix: 1700003600,
             bottom_time_sec: 3000,
+            is_ccr: false,
+            bottom_end_t_override_sec: None,
         };
 
         let samples = vec![
@@ -137,6 +147,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 300,
@@ -147,6 +161,10 @@ mod tests {
                 gf99: Some(60.0),
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 600,
@@ -157,6 +175,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
 
@@ -177,6 +199,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 200,
@@ -187,6 +213,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 300,
@@ -197,10 +227,14 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
 
-        let stats = compute_segment_stats(100, 300, samples);
+        let stats = compute_segment_stats(100, 300, samples, 0, 0);
         assert_eq!(stats.duration_sec, 200);
         assert_eq!(stats.max_depth_m, 25.0);
         assert_eq!(stats.sample_count, 3);
@@ -231,6 +265,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 60,
@@ -241,6 +279,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 600,
@@ -251,6 +293,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: None,
                 ppo2: None,
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
         let gas_mixes = vec![];

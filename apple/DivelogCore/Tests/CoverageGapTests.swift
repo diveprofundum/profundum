@@ -211,10 +211,10 @@ final class CoverageGapTests: XCTestCase {
     func testComputeSurfaceGfWithExplicitSurfacePressure() {
         // Exercise the surfacePressureBar parameter path
         let samples = [
-            SampleInput(tSec: 0, depthM: 0.0, tempC: 20.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil, ppo2: nil),
-            SampleInput(tSec: 60, depthM: 20.0, tempC: 20.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil, ppo2: nil),
-            SampleInput(tSec: 3000, depthM: 20.0, tempC: 20.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil, ppo2: nil),
-            SampleInput(tSec: 3600, depthM: 0.0, tempC: 20.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil, ppo2: nil),
+            SampleInput(tSec: 0, depthM: 0.0, tempC: 20.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil, ppo2: nil, ttsSec: nil, ndlSec: nil, decoStopDepthM: nil, atPlusFiveTtsMin: nil),
+            SampleInput(tSec: 60, depthM: 20.0, tempC: 20.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil, ppo2: nil, ttsSec: nil, ndlSec: nil, decoStopDepthM: nil, atPlusFiveTtsMin: nil),
+            SampleInput(tSec: 3000, depthM: 20.0, tempC: 20.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil, ppo2: nil, ttsSec: nil, ndlSec: nil, decoStopDepthM: nil, atPlusFiveTtsMin: nil),
+            SampleInput(tSec: 3600, depthM: 0.0, tempC: 20.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil, ppo2: nil, ttsSec: nil, ndlSec: nil, decoStopDepthM: nil, atPlusFiveTtsMin: nil),
         ]
         let gasMixes = [GasMixInput(mixIndex: 0, o2Fraction: 0.21, heFraction: 0.0)]
 

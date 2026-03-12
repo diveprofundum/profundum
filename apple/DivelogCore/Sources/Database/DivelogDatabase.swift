@@ -398,6 +398,11 @@ public final class DivelogDatabase: Sendable {
             try db.execute(sql: "ALTER TABLE dives ADD COLUMN timezone_offset_sec INTEGER")
         }
 
+        // Migration 16: Add manual override column for bottom_end_t
+        migrator.registerMigration("016_bottom_end_t_override") { db in
+            try db.execute(sql: "ALTER TABLE dives ADD COLUMN bottom_end_t_override_sec INTEGER")
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

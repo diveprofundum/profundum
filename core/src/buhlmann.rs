@@ -312,6 +312,10 @@ mod tests {
             gf99: None,
             gasmix_index,
             ppo2: None,
+            tts_sec: None,
+            ndl_sec: None,
+            deco_stop_depth_m: None,
+            at_plus_five_tts_min: None,
         }
     }
 
@@ -575,6 +579,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: Some(0.7),
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 60,
@@ -585,6 +593,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: Some(1.2),
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
 
@@ -671,6 +683,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: Some(0.7),
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 60,
@@ -681,6 +697,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: Some(1.3),
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 120,
@@ -691,6 +711,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: Some(1.3),
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
 
@@ -759,6 +783,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: Some(0.7),
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 60,
@@ -769,6 +797,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: Some(1.2),
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 660,
@@ -779,6 +811,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: Some(1.2),
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
 
@@ -867,6 +903,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: Some(0.7),
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 60,
@@ -877,6 +917,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: Some(1.3),
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 600,
@@ -887,6 +931,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: Some(1.3),
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
 
@@ -945,6 +993,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: Some(0.5),
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 300,
@@ -955,6 +1007,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: Some(1.3),
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
 
@@ -969,6 +1025,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: Some(1.0),
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
             SampleInput {
                 t_sec: 300,
@@ -979,6 +1039,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: Some(1.3),
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             },
         ];
 
@@ -1267,6 +1331,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: Some(0.7),
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             }];
             s.push(SampleInput {
                 t_sec: 60,
@@ -1277,6 +1345,10 @@ mod tests {
                 gf99: None,
                 gasmix_index: Some(0),
                 ppo2: Some(1.2),
+                tts_sec: None,
+                ndl_sec: None,
+                deco_stop_depth_m: None,
+                at_plus_five_tts_min: None,
             });
             for i in 2..=20 {
                 s.push(SampleInput {
@@ -1288,6 +1360,10 @@ mod tests {
                     gf99: None,
                     gasmix_index: Some(0),
                     ppo2: Some(1.2),
+                    tts_sec: None,
+                    ndl_sec: None,
+                    deco_stop_depth_m: None,
+                    at_plus_five_tts_min: None,
                 });
             }
             s
