@@ -534,7 +534,7 @@ struct DiveRowView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
 
-                Label(formatDuration(dive.bottomTimeSec), systemImage: "timer")
+                Label(formatDuration(Int32(dive.endTimeUnix - dive.startTimeUnix)), systemImage: "timer")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
 
@@ -553,7 +553,7 @@ struct DiveRowView: View {
     private var rowAccessibilityLabel: String {
         let dateStr = formatDate(dive.displayStartDate)
         let depthStr = UnitFormatter.formatDepthCompact(dive.maxDepthM, unit: appState.depthUnit)
-        let durationStr = formatDuration(dive.bottomTimeSec)
+        let durationStr = formatDuration(Int32(dive.endTimeUnix - dive.startTimeUnix))
         var label = "Dive on \(dateStr), \(depthStr), \(durationStr)"
         if let siteName = diveWithSite.siteName {
             label = "Dive on \(dateStr), \(siteName), \(depthStr), \(durationStr)"
