@@ -718,6 +718,9 @@ struct DepthProfileChart: View {
     var showPpo2: Bool = false
     var showTankPressure: Bool = false
     var pressureUnit: PressureUnit = .bar
+    var bottomEndT: Int32?
+    var decoStartT: Int32?
+    var isManualOverride: Bool = false
     var isFullscreen: Bool = false
 
     @State private var chartData: DepthProfileChartData?
@@ -1082,6 +1085,49 @@ struct DepthProfileChart: View {
     }
 
     @ChartContentBuilder
+    private func phaseMarkerContent(data: DepthProfileChartData) -> some ChartContent {
+        if let bet = bottomEndT, bet > 0 {
+            let timeMin = Float(bet) / 60.0
+            if timeMin <= data.totalMinutes {
+                let markerColor: Color = isManualOverride ? .accentColor : .secondary
+                RuleMark(x: .value("Time", timeMin))
+                    .foregroundStyle(markerColor.opacity(0.7))
+                    .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [6, 3]))
+                    .annotation(position: .top, alignment: .leading, spacing: 2) {
+                        if selectedTime == nil {
+                            Text("Bottom End")
+                                .font(.system(size: isFullscreen ? 10 : 8, weight: .semibold))
+                                .foregroundStyle(markerColor)
+                                .padding(.horizontal, 3)
+                                .padding(.vertical, 1)
+                                .background(annotationBackground)
+                                .cornerRadius(3)
+                        }
+                    }
+            }
+        }
+        if let dst = decoStartT, dst > 0 {
+            let timeMin = Float(dst) / 60.0
+            if timeMin <= data.totalMinutes {
+                RuleMark(x: .value("Time", timeMin))
+                    .foregroundStyle(Color.secondary.opacity(0.7))
+                    .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [6, 3]))
+                    .annotation(position: .top, alignment: .leading, spacing: 2) {
+                        if selectedTime == nil {
+                            Text("Deco Start")
+                                .font(.system(size: isFullscreen ? 10 : 8, weight: .semibold))
+                                .foregroundStyle(Color.secondary)
+                                .padding(.horizontal, 3)
+                                .padding(.vertical, 1)
+                                .background(annotationBackground)
+                                .cornerRadius(3)
+                        }
+                    }
+            }
+        }
+    }
+
+    @ChartContentBuilder
     private var scrubContent: some ChartContent {
         if let selectedPoint {
             RuleMark(x: .value("Selected", selectedPoint.timeMinutes))
@@ -1106,6 +1152,7 @@ struct DepthProfileChart: View {
             tankPressureContent(data: data)
             gasSwitchContent(data: data)
             setpointSwitchContent(data: data)
+            phaseMarkerContent(data: data)
             scrubContent
         }
         .chartYScale(domain: data.domainMin ... data.domainMax)

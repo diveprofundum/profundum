@@ -7,6 +7,9 @@ struct DepthProfileFullscreenView: View {
     let temperatureUnit: TemperatureUnit
     var gasMixes: [GasMix] = []
     var pressureUnit: PressureUnit = .bar
+    var bottomEndT: Int32?
+    var decoStartT: Int32?
+    var isManualOverride: Bool = false
 
     @Environment(\.dismiss) private var dismiss
     @State private var showTemperature = false
@@ -154,6 +157,9 @@ struct DepthProfileFullscreenView: View {
                 showPpo2: showPpo2,
                 showTankPressure: showTankPressure,
                 pressureUnit: pressureUnit,
+                bottomEndT: bottomEndT,
+                decoStartT: decoStartT,
+                isManualOverride: isManualOverride,
                 isFullscreen: true
             )
             .frame(maxHeight: .infinity)

@@ -30,10 +30,12 @@ struct DiveDetailView: View {
     @State private var splitDeviceId: String?
     @State private var showSplitConfirmation = false
     @State private var splitError: String?
+    @State private var showBottomEndOverride = false
+    @State private var currentDive: Dive?
 
     var onDiveUpdated: (() -> Void)?
 
-    private var dive: Dive { diveWithSite.dive }
+    private var dive: Dive { currentDive ?? diveWithSite.dive }
 
     private var predefinedTags: [PredefinedDiveTag] {
         tags.compactMap { PredefinedDiveTag(fromTag: $0) }
@@ -246,6 +248,19 @@ struct DiveDetailView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(splitError ?? "")
+        }
+        .sheet(isPresented: $showBottomEndOverride) {
+            if let autoValue = stats?.bottomEndT, autoValue > 0 {
+                BottomEndOverrideSheet(
+                    dive: dive,
+                    samples: samples,
+                    autoBottomEndT: autoValue,
+                    depthUnit: appState.depthUnit,
+                    onSave: { newOverride in
+                        saveBottomEndOverride(newOverride)
+                    }
+                )
+            }
         }
     }
 
@@ -477,7 +492,10 @@ struct DiveDetailView: View {
                 gasMixes: gasMixes,
                 showPpo2: showPpo2,
                 showTankPressure: showTankPressure,
-                pressureUnit: appState.pressureUnit
+                pressureUnit: appState.pressureUnit,
+                bottomEndT: stats?.bottomEndT,
+                decoStartT: stats?.decoStartT,
+                isManualOverride: dive.bottomEndTOverrideSec != nil
             )
             .frame(height: 200)
             .background(
@@ -493,7 +511,10 @@ struct DiveDetailView: View {
                 depthUnit: appState.depthUnit,
                 temperatureUnit: appState.temperatureUnit,
                 gasMixes: gasMixes,
-                pressureUnit: appState.pressureUnit
+                pressureUnit: appState.pressureUnit,
+                bottomEndT: stats?.bottomEndT,
+                decoStartT: stats?.decoStartT,
+                isManualOverride: dive.bottomEndTOverrideSec != nil
             )
         }
         #else
@@ -503,7 +524,10 @@ struct DiveDetailView: View {
                 depthUnit: appState.depthUnit,
                 temperatureUnit: appState.temperatureUnit,
                 gasMixes: gasMixes,
-                pressureUnit: appState.pressureUnit
+                pressureUnit: appState.pressureUnit,
+                bottomEndT: stats?.bottomEndT,
+                decoStartT: stats?.decoStartT,
+                isManualOverride: dive.bottomEndTOverrideSec != nil
             )
             .frame(minWidth: 700, minHeight: 500)
         }
@@ -592,6 +616,25 @@ struct DiveDetailView: View {
                     }
                     if avgPpo2 > 0 {
                         StatCard(title: "Avg PPO2", value: String(format: "%.2f bar", avgPpo2))
+                    }
+                    if stats.bottomEndT > 0 {
+                        Button {
+                            showBottomEndOverride = true
+                        } label: {
+                            StatCard(
+                                title: "Bottom End",
+                                value: formatMinSec(stats.bottomEndT),
+                                subtitle: dive.bottomEndTOverrideSec != nil ? "Manual" : nil
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Tap to override bottom end time")
+                    }
+                    if stats.decoStartT > 0 {
+                        StatCard(title: "Deco Start", value: formatMinSec(stats.decoStartT))
+                    }
+                    if stats.ascentTimeSec > 0 {
+                        StatCard(title: "Ascent Phase", value: "\(stats.ascentTimeSec / 60) min")
                     }
                 }
             }
@@ -763,6 +806,12 @@ struct DiveDetailView: View {
         return "\(minutes)m"
     }
 
+    private func formatMinSec(_ totalSec: Int32) -> String {
+        let m = totalSec / 60
+        let s = totalSec % 60
+        return String(format: "%d:%02d", m, s)
+    }
+
     private func gasMixLabel(_ mix: GasMix) -> String {
         DepthProfileChartData.gasLabel(o2: mix.o2Fraction, he: mix.heFraction)
     }
@@ -798,9 +847,32 @@ struct DiveDetailView: View {
         splitDeviceId = nil
     }
 
+    private func saveBottomEndOverride(_ newOverride: Int32?) {
+        do {
+            var updated = dive
+            updated.bottomEndTOverrideSec = newOverride
+            try appState.diveService.saveDive(
+                updated,
+                tags: tags,
+                teammateIds: loadedTeammateIds,
+                equipmentIds: loadedEquipmentIds
+            )
+            currentDive = updated
+            Task {
+                await loadDiveData()
+                onDiveUpdated?()
+            }
+        } catch {
+            errorMessage = "Failed to save override: \(error.localizedDescription)"
+        }
+    }
+
     private func loadDiveData() async {
         do {
-            let detail = try appState.diveService.getDiveDetail(diveId: dive.id)
+            let diveId = dive.id
+            // Refresh dive from DB to pick up saved changes (e.g. override)
+            currentDive = try appState.diveService.getDive(id: diveId)
+            let detail = try appState.diveService.getDiveDetail(diveId: diveId)
             samples = detail.samples
             tags = detail.tags
             gasMixes = detail.gasMixes
@@ -1063,12 +1135,20 @@ struct StatCard: View {
     let title: String
     let value: String
     var color: Color?
+    var subtitle: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundColor(.secondary)
+            HStack(spacing: 4) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundColor(.accentColor)
+                }
+            }
             Text(value)
                 .font(.title3)
                 .fontWeight(.semibold)
