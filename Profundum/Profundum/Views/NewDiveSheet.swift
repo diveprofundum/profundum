@@ -13,6 +13,7 @@ struct NewDiveSheet: View {
     @State private var maxDepthText = "30.0"
     @State private var avgDepthText = "18.0"
     @State private var bottomTimeMinutes = 50
+    @State private var initialBottomTimeMinutes = 50
 
     @State private var isCCR = false
     @State private var decoRequired = false
@@ -53,6 +54,7 @@ struct NewDiveSheet: View {
     var editingTags: [String] = []
     var editingTeammateIds: [String] = []
     var editingEquipmentIds: [String] = []
+    var computedBottomTimeSec: Int32?
 
     private var sheetTitle: String {
         editingDive != nil ? "Edit Dive" : "New Dive"
@@ -122,7 +124,8 @@ struct NewDiveSheet: View {
                     let displayAvgDepth = UnitFormatter.depth(dive.avgDepthM, unit: appState.depthUnit)
                     maxDepthText = String(format: "%.1f", displayMaxDepth)
                     avgDepthText = String(format: "%.1f", displayAvgDepth)
-                    bottomTimeMinutes = Int(dive.bottomTimeSec / 60)
+                    bottomTimeMinutes = Int((computedBottomTimeSec ?? dive.bottomTimeSec) / 60)
+                    initialBottomTimeMinutes = bottomTimeMinutes
                     isCCR = dive.isCcr
                     decoRequired = dive.decoRequired
                     cnsPercentText = String(format: "%.0f", dive.cnsPercent)
@@ -700,7 +703,9 @@ struct NewDiveSheet: View {
             computerDiveNumber: editingDive?.computerDiveNumber,
             fingerprint: editingDive?.fingerprint,
             timezoneOffsetSec: savedTimezoneOffset,
-            bottomEndTOverrideSec: editingDive?.bottomEndTOverrideSec
+            bottomEndTOverrideSec: bottomTimeMinutes != initialBottomTimeMinutes
+                ? Int32(bottomTimeMinutes * 60)
+                : editingDive?.bottomEndTOverrideSec
         )
 
         var allTags = [selectedDiveTypeTag.rawValue]

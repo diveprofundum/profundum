@@ -214,7 +214,8 @@ struct DiveDetailView: View {
                 editingDive: dive,
                 editingTags: tags,
                 editingTeammateIds: loadedTeammateIds,
-                editingEquipmentIds: loadedEquipmentIds
+                editingEquipmentIds: loadedEquipmentIds,
+                computedBottomTimeSec: stats?.bottomTimeSec
             )
         }
         .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
