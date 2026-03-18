@@ -1,10 +1,12 @@
 import DivelogCore
 import SwiftUI
 
-struct BottomEndOverrideSheet: View {
+struct PhaseOverrideSheet: View {
+    let title: String
     let dive: Dive
     let samples: [DiveSample]
-    let autoBottomEndT: Int32
+    let autoValue: Int32
+    let currentOverride: Int32?
     let depthUnit: DepthUnit
     let onSave: (Int32?) -> Void
 
@@ -14,16 +16,18 @@ struct BottomEndOverrideSheet: View {
     @State private var seconds: Int
 
     init(
-        dive: Dive, samples: [DiveSample], autoBottomEndT: Int32,
-        depthUnit: DepthUnit, onSave: @escaping (Int32?) -> Void
+        title: String, dive: Dive, samples: [DiveSample], autoValue: Int32,
+        currentOverride: Int32?, depthUnit: DepthUnit, onSave: @escaping (Int32?) -> Void
     ) {
+        self.title = title
         self.dive = dive
         self.samples = samples
-        self.autoBottomEndT = autoBottomEndT
+        self.autoValue = autoValue
+        self.currentOverride = currentOverride
         self.depthUnit = depthUnit
         self.onSave = onSave
 
-        let initial = dive.bottomEndTOverrideSec ?? autoBottomEndT
+        let initial = currentOverride ?? autoValue
         _minutes = State(initialValue: Int(initial) / 60)
         _seconds = State(initialValue: Int(initial) % 60)
     }
@@ -58,7 +62,7 @@ struct BottomEndOverrideSheet: View {
     }
 
     private var isModified: Bool {
-        overrideSeconds != autoBottomEndT
+        overrideSeconds != autoValue
     }
 
     private var isValid: Bool {
@@ -66,7 +70,7 @@ struct BottomEndOverrideSheet: View {
     }
 
     private var hasExistingOverride: Bool {
-        dive.bottomEndTOverrideSec != nil
+        currentOverride != nil
     }
 
     private var maxSeconds: Int32 {
@@ -81,7 +85,7 @@ struct BottomEndOverrideSheet: View {
                     Text("Auto-Detected")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Text(formatTime(autoBottomEndT))
+                    Text(formatTime(autoValue))
                         .font(.title2)
                         .fontWeight(.semibold)
                 }
@@ -218,7 +222,7 @@ struct BottomEndOverrideSheet: View {
                 }
             }
             .padding()
-            .navigationTitle("Bottom End Override")
+            .navigationTitle(title)
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

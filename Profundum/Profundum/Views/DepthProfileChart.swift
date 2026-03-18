@@ -720,7 +720,8 @@ struct DepthProfileChart: View {
     var pressureUnit: PressureUnit = .bar
     var bottomEndT: Int32?
     var decoStartT: Int32?
-    var isManualOverride: Bool = false
+    var isBottomEndManualOverride: Bool = false
+    var isDecoStartManualOverride: Bool = false
     var isFullscreen: Bool = false
 
     @State private var chartData: DepthProfileChartData?
@@ -1089,7 +1090,7 @@ struct DepthProfileChart: View {
         if let bet = bottomEndT, bet > 0 {
             let timeMin = Float(bet) / 60.0
             if timeMin <= data.totalMinutes {
-                let markerColor: Color = isManualOverride ? .accentColor : .secondary
+                let markerColor: Color = isBottomEndManualOverride ? .accentColor : .secondary
                 RuleMark(x: .value("Time", timeMin))
                     .foregroundStyle(markerColor.opacity(0.7))
                     .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [6, 3]))
@@ -1109,14 +1110,15 @@ struct DepthProfileChart: View {
         if let dst = decoStartT, dst > 0 {
             let timeMin = Float(dst) / 60.0
             if timeMin <= data.totalMinutes {
+                let decoMarkerColor: Color = isDecoStartManualOverride ? .accentColor : .secondary
                 RuleMark(x: .value("Time", timeMin))
-                    .foregroundStyle(Color.secondary.opacity(0.7))
+                    .foregroundStyle(decoMarkerColor.opacity(0.7))
                     .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [6, 3]))
                     .annotation(position: .top, alignment: .leading, spacing: 2) {
                         if selectedTime == nil {
                             Text("Deco Start")
                                 .font(.system(size: isFullscreen ? 10 : 8, weight: .semibold))
-                                .foregroundStyle(Color.secondary)
+                                .foregroundStyle(decoMarkerColor)
                                 .padding(.horizontal, 3)
                                 .padding(.vertical, 1)
                                 .background(annotationBackground)

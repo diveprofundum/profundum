@@ -135,6 +135,7 @@ mod tests {
             bottom_time_sec: 3000,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
 
         let samples = vec![

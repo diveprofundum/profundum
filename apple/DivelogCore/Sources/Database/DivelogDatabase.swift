@@ -403,6 +403,11 @@ public final class DivelogDatabase: Sendable {
             try db.execute(sql: "ALTER TABLE dives ADD COLUMN bottom_end_t_override_sec INTEGER")
         }
 
+        // Migration 17: Add manual override column for deco_start_t
+        migrator.registerMigration("017_deco_start_override") { db in
+            try db.execute(sql: "ALTER TABLE dives ADD COLUMN deco_start_t_override_sec INTEGER")
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

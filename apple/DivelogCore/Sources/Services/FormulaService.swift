@@ -161,7 +161,8 @@ public final class FormulaService: Sendable {
             endTimeUnix: dive.endTimeUnix,
             bottomTimeSec: dive.bottomTimeSec,
             isCcr: dive.isCcr,
-            bottomEndTOverrideSec: dive.bottomEndTOverrideSec
+            bottomEndTOverrideSec: dive.bottomEndTOverrideSec,
+            decoStartTOverrideSec: dive.decoStartTOverrideSec
         )
 
         return DivelogCompute.computeDiveStats(dive: diveInput, samples: makeSampleInputs(from: samples))
@@ -175,7 +176,8 @@ public final class FormulaService: Sendable {
             endTimeUnix: dive.endTimeUnix,
             bottomTimeSec: dive.bottomTimeSec,
             isCcr: dive.isCcr,
-            bottomEndTOverrideSec: dive.bottomEndTOverrideSec
+            bottomEndTOverrideSec: dive.bottomEndTOverrideSec,
+            decoStartTOverrideSec: dive.decoStartTOverrideSec
         )
         let diveStats = DivelogCompute.computeDiveStats(dive: diveInput, samples: sampleInputs)
 

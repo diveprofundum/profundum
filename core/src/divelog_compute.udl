@@ -63,6 +63,7 @@ dictionary DiveInput {
     i32 bottom_time_sec;
     boolean is_ccr;
     i32? bottom_end_t_override_sec;
+    i32? deco_start_t_override_sec;
 };
 
 dictionary SampleInput {

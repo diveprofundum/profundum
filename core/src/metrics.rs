@@ -52,6 +52,8 @@ pub struct DiveInput {
     pub is_ccr: bool,
     /// Manual override for bottom_end_t (user correction, in seconds from dive start)
     pub bottom_end_t_override_sec: Option<i32>,
+    /// Manual override for deco_start_t (user correction, in seconds from dive start)
+    pub deco_start_t_override_sec: Option<i32>,
 }
 
 /// Input data for a sample point.
@@ -90,7 +92,7 @@ pub struct DiveStats {
     pub total_time_sec: i32,
     /// Bottom time in seconds (deco dives: descent + time at working depth; non-deco: 0)
     pub bottom_time_sec: i32,
-    /// Deco time in seconds (ascent-phase only: ceiling > 0 after leaving working depth)
+    /// Deco time in seconds (all time from deco_start_t to end of dive)
     pub deco_time_sec: i32,
     /// Total time with deco obligation in seconds (all time with ceiling > 0, including at depth)
     pub deco_obligation_sec: i32,
@@ -379,7 +381,8 @@ impl DiveStats {
 
         // deco_start_t: when deco phase begins (gas switch for OC, first stop for CCR)
         let deco_start_t: i32 = if has_deco && bottom_end_t > 0 {
-            compute_deco_start_t(samples, bottom_end_t, dive.is_ccr)
+            dive.deco_start_t_override_sec
+                .unwrap_or_else(|| compute_deco_start_t(samples, bottom_end_t, dive.is_ccr))
         } else {
             0
         };
@@ -392,8 +395,7 @@ impl DiveStats {
         let mut max_temp_c = f32::MIN;
         let mut temp_sum: f64 = 0.0;
 
-        // Deco tracking (split into ascent-phase and total obligation)
-        let mut deco_time_sec: i32 = 0;
+        // Deco tracking
         let mut deco_obligation_sec: i32 = 0;
         let mut max_ceiling_m: f32 = 0.0;
         let mut max_gf99: f32 = 0.0;
@@ -427,7 +429,7 @@ impl DiveStats {
             }
             temp_sum += sample.temp_c as f64;
 
-            // Deco time: split into total obligation and ascent-phase only
+            // Deco obligation: total time with ceiling > 0
             if let Some(ceiling) = sample.ceiling_m {
                 if ceiling > 0.0 {
                     let deco_dt = if i + 1 < samples.len() {
@@ -438,9 +440,6 @@ impl DiveStats {
                         1
                     };
                     deco_obligation_sec += deco_dt;
-                    if deco_start_t > 0 && sample.t_sec >= deco_start_t {
-                        deco_time_sec += deco_dt;
-                    }
                 }
                 if ceiling > max_ceiling_m {
                     max_ceiling_m = ceiling;
@@ -503,6 +502,14 @@ impl DiveStats {
         if max_temp_c == f32::MIN {
             max_temp_c = 0.0;
         }
+
+        // deco_time_sec: all time from deco_start_t to end of dive
+        // Clamp to 0 in case override exceeds total dive time
+        let deco_time_sec: i32 = if deco_start_t > 0 {
+            (total_time_sec as i32 - deco_start_t).max(0)
+        } else {
+            0
+        };
 
         let ascent_time_sec = if deco_start_t > bottom_end_t {
             deco_start_t - bottom_end_t
@@ -644,9 +651,8 @@ impl SegmentStats {
     ///
     /// `dive_bottom_end_t` is the dive-level bottom-end time.
     /// `dive_deco_start_t` is the dive-level deco-start time.
-    /// Samples with `t_sec > dive_deco_start_t` and `ceiling > 0`
-    /// count as ascent-phase deco (`deco_time_sec`); all ceiling > 0 samples count
-    /// toward `deco_obligation_sec`.
+    /// `deco_time_sec` = overlap of [deco_start_t, end_t_sec] with segment range.
+    /// `deco_obligation_sec` = total time with ceiling > 0 within segment.
     pub fn compute(
         start_t_sec: i32,
         end_t_sec: i32,
@@ -677,7 +683,6 @@ impl SegmentStats {
         let mut depth_sum: f64 = 0.0;
         let mut min_temp_c = f32::MAX;
         let mut max_temp_c = f32::MIN;
-        let mut deco_time_sec: i32 = 0;
         let mut deco_obligation_sec: i32 = 0;
         let mut max_tts_sec: i32 = 0;
 
@@ -704,11 +709,6 @@ impl SegmentStats {
                         1
                     };
                     deco_obligation_sec += dt;
-                    // Only count ascent-phase deco when a deco boundary exists,
-                    // matching dive-level semantics (deco_time=0 when deco_start_t=0)
-                    if dive_deco_start_t > 0 && sample.t_sec >= dive_deco_start_t {
-                        deco_time_sec += dt;
-                    }
                 }
             }
 
@@ -725,6 +725,13 @@ impl SegmentStats {
         if max_temp_c == f32::MIN {
             max_temp_c = 0.0;
         }
+
+        // deco_time_sec: overlap of [deco_start_t, ∞) with segment [start_t, end_t]
+        let deco_time_sec: i32 = if dive_deco_start_t > 0 && end_t_sec > dive_deco_start_t {
+            end_t_sec - dive_deco_start_t.max(start_t_sec)
+        } else {
+            0
+        };
 
         SegmentStats {
             duration_sec: end_t_sec - start_t_sec,
@@ -751,6 +758,7 @@ mod tests {
             bottom_time_sec: 3000,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         }
     }
 
@@ -1325,9 +1333,8 @@ mod tests {
         assert_eq!(stats.min_temp_c, 16.0);
         assert_eq!(stats.max_temp_c, 17.0);
         assert_eq!(stats.sample_count, 3);
-        // deco: all 3 samples have ceiling > 0. dt=[300,300,300] = 900
-        // With dive_deco_start_t=300, all samples at t>=300 are in deco phase
-        assert_eq!(stats.deco_time_sec, 900);
+        // deco_time: end_t(900) - max(deco_start_t=300, start_t=300) = 600
+        assert_eq!(stats.deco_time_sec, 600);
         assert_eq!(stats.deco_obligation_sec, 900);
     }
 
@@ -1392,8 +1399,8 @@ mod tests {
         assert_eq!(stats.min_temp_c, 18.0);
         assert_eq!(stats.max_temp_c, 18.0);
         assert_eq!(stats.sample_count, 1);
-        // single sample with ceiling > 0: dt fallback = 1, t=100 >= deco_start_t=100
-        assert_eq!(stats.deco_time_sec, 1);
+        // deco_time: end_t(200) - max(deco_start_t=100, start_t=100) = 100
+        assert_eq!(stats.deco_time_sec, 100);
     }
 
     #[test]
@@ -1423,6 +1430,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let stats = DiveStats::compute(&dive, &[]);
         assert_eq!(stats.total_time_sec, 1500);
@@ -1484,6 +1492,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let samples = vec![SampleInput {
             t_sec: 0,
@@ -1674,8 +1683,8 @@ mod tests {
         // deco_start_t = 400 (first ceiling > 0 after bottom_end_t)
         // deco_obligation: ceiling > 0 at t=100 (dt=300) + t=400 (dt=300) = 600
         assert_eq!(stats.deco_obligation_sec, 600);
-        // deco_time: ceiling > 0 at t >= 400: t=400 (dt=300) = 300
-        assert_eq!(stats.deco_time_sec, 300);
+        // deco_time: total_time(3600) - deco_start_t(400) = 3200
+        assert_eq!(stats.deco_time_sec, 3200);
     }
 
     #[test]
@@ -1914,9 +1923,8 @@ mod tests {
             },
         ];
         let stats = SegmentStats::compute(100, 400, &samples, 0, 100);
-        // sample 0 (i=0): ceiling=3>0, dt=300; sample 1 (i=1): ceiling=2>0, dt=300
-        // dive_deco_start_t=100, all t>=100 → both are in deco phase
-        assert_eq!(stats.deco_time_sec, 600);
+        // deco_time: end_t(400) - max(deco_start_t=100, start_t=100) = 300
+        assert_eq!(stats.deco_time_sec, 300);
         assert_eq!(stats.deco_obligation_sec, 600);
         assert_eq!(stats.sample_count, 2);
     }
@@ -1972,6 +1980,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let samples = vec![
             SampleInput {
@@ -2098,8 +2107,8 @@ mod tests {
         assert_eq!(stats.deco_start_t, 1800);
         // deco_obligation: all ceiling>0 (t=900,1200,1500,1800) dt=[300,300,300,600] = 1500
         assert_eq!(stats.deco_obligation_sec, 1500);
-        // deco_time: ceiling > 0 from deco_start_t=1800, t=1800 ceil=3 dt=600
-        assert_eq!(stats.deco_time_sec, 600);
+        // deco_time: total_time(3600) - deco_start_t(1800) = 1800
+        assert_eq!(stats.deco_time_sec, 1800);
     }
 
     #[test]
@@ -2112,6 +2121,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let samples = vec![
             SampleInput {
@@ -2231,6 +2241,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let samples = vec![
             SampleInput {
@@ -2339,6 +2350,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let samples = vec![
             SampleInput {
@@ -2475,8 +2487,8 @@ mod tests {
         // dt: 600,300,300,600,300 = 2100
         assert_eq!(stats.deco_obligation_sec, 2100);
 
-        // deco_time: ceiling > 0 at t >= 1800: t=1800(dt=600),t=2400(dt=300) = 900
-        assert_eq!(stats.deco_time_sec, 900);
+        // deco_time: total_time(3600) - deco_start_t(1800) = 1800
+        assert_eq!(stats.deco_time_sec, 1800);
     }
 
     #[test]
@@ -2488,6 +2500,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let samples = vec![
             SampleInput {
@@ -2562,6 +2575,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let samples = vec![
             SampleInput {
@@ -2695,8 +2709,8 @@ mod tests {
 
         // deco_obligation: all 3 samples have ceiling>0, dt=[300,300,300]=900
         assert_eq!(stats.deco_obligation_sec, 900);
-        // deco_time: t >= 600 with ceiling>0: t=600(dt=300) + t=900(dt=300) = 600
-        assert_eq!(stats.deco_time_sec, 600);
+        // deco_time: end_t(900) - max(deco_start_t=600, start_t=300) = 300
+        assert_eq!(stats.deco_time_sec, 300);
         assert_eq!(stats.max_tts_sec, 300);
     }
 
@@ -2709,6 +2723,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let samples = vec![
             SampleInput {
@@ -2816,6 +2831,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let mut samples = Vec::new();
         // Descent to 58m over 3 min (10s intervals)
@@ -2873,7 +2889,8 @@ mod tests {
         );
         // deco_time should be > 0 (deco stops at 6m)
         assert!(stats.deco_time_sec > 0);
-        assert!(stats.deco_obligation_sec > stats.deco_time_sec);
+        // deco_time = total_time - deco_start_t, includes all time from deco_start to surface
+        assert!(stats.deco_time_sec >= stats.deco_obligation_sec);
     }
 
     #[test]
@@ -2885,6 +2902,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let mut samples = Vec::new();
         // Descent 3 min
@@ -2932,6 +2950,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let mut samples = Vec::new();
         // Descent 2 min
@@ -2972,6 +2991,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: false,
             bottom_end_t_override_sec: Some(999),
+            deco_start_t_override_sec: None,
         };
         let samples = vec![
             sample(0, 0.0, Some(0.0)),
@@ -2986,6 +3006,76 @@ mod tests {
     }
 
     #[test]
+    fn test_deco_start_override() {
+        // Override in DiveInput should be used directly
+        let dive = DiveInput {
+            start_time_unix: 0,
+            end_time_unix: 3600,
+            bottom_time_sec: 0,
+            is_ccr: false,
+            bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: Some(1500),
+        };
+        let samples = vec![
+            sample(0, 0.0, Some(0.0)),
+            sample(120, 40.0, Some(3.0)),
+            sample(600, 40.0, Some(6.0)),
+            sample(1200, 6.0, Some(3.0)),
+            sample(1800, 0.0, Some(0.0)),
+        ];
+        let stats = DiveStats::compute(&dive, &samples);
+        assert_eq!(stats.deco_start_t, 1500);
+        // deco_time = total(3600) - deco_start(1500) = 2100
+        assert_eq!(stats.deco_time_sec, 2100);
+    }
+
+    #[test]
+    fn test_deco_start_override_beyond_dive_end() {
+        // Override beyond dive end should clamp deco_time to 0
+        let dive = DiveInput {
+            start_time_unix: 0,
+            end_time_unix: 3600,
+            bottom_time_sec: 0,
+            is_ccr: false,
+            bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: Some(5000),
+        };
+        let samples = vec![
+            sample(0, 0.0, Some(0.0)),
+            sample(120, 40.0, Some(3.0)),
+            sample(600, 40.0, Some(6.0)),
+            sample(1200, 6.0, Some(3.0)),
+            sample(1800, 0.0, Some(0.0)),
+        ];
+        let stats = DiveStats::compute(&dive, &samples);
+        assert_eq!(stats.deco_start_t, 5000);
+        // Clamped to 0 since override exceeds total_time
+        assert_eq!(stats.deco_time_sec, 0);
+    }
+
+    #[test]
+    fn test_deco_start_override_ignored_without_deco() {
+        // Override should be ignored when has_deco is false
+        let dive = DiveInput {
+            start_time_unix: 0,
+            end_time_unix: 3600,
+            bottom_time_sec: 0,
+            is_ccr: false,
+            bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: Some(500),
+        };
+        let samples = vec![
+            sample(0, 0.0, None), // no ceiling data = no deco
+            sample(600, 20.0, None),
+            sample(1200, 20.0, None),
+            sample(1800, 0.0, None),
+        ];
+        let stats = DiveStats::compute(&dive, &samples);
+        assert_eq!(stats.deco_start_t, 0);
+        assert_eq!(stats.deco_time_sec, 0);
+    }
+
+    #[test]
     fn test_delta5_defers_trigger() {
         // Ascent with strongly positive Δ+5 should not trigger bottom_end
         let dive = DiveInput {
@@ -2994,6 +3084,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let mut samples = Vec::new();
         // Descent to 50m
@@ -3043,6 +3134,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let mut samples = Vec::new();
         // Descent to 50m
@@ -3080,6 +3172,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let samples = vec![
             sample(0, 0.0, None),
@@ -3102,6 +3195,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let mut samples = Vec::new();
         // Descent on gas 0
@@ -3141,6 +3235,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: true,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let mut samples = Vec::new();
         // Descent
@@ -3189,6 +3284,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let mut samples = Vec::new();
         for t in (0..=120).step_by(10) {
@@ -3224,6 +3320,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: false,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let mut samples = Vec::new();
         // Descent with gas 0
@@ -3246,10 +3343,10 @@ mod tests {
         samples.push(sample_with_gas(2100, 0.0, Some(0.0), 1));
 
         let stats = DiveStats::compute(&dive, &samples);
-        // deco_time should only count from deco_start_t onward
+        // deco_time = total_time - deco_start_t, includes all time from deco_start to surface
         assert!(
-            stats.deco_time_sec < stats.deco_obligation_sec,
-            "deco_time {} should be less than obligation {} (some obligation at depth)",
+            stats.deco_time_sec >= stats.deco_obligation_sec,
+            "deco_time {} should be >= obligation {} (deco_time is all time from deco_start)",
             stats.deco_time_sec,
             stats.deco_obligation_sec
         );
@@ -3268,6 +3365,7 @@ mod tests {
             bottom_time_sec: 0,
             is_ccr: true,
             bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: None,
         };
         let mut samples = Vec::new();
         // Descent to 57m over 3 min (10s intervals)

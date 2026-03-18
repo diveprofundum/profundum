@@ -705,7 +705,8 @@ struct NewDiveSheet: View {
             timezoneOffsetSec: savedTimezoneOffset,
             bottomEndTOverrideSec: bottomTimeMinutes != initialBottomTimeMinutes
                 ? Int32(bottomTimeMinutes * 60)
-                : editingDive?.bottomEndTOverrideSec
+                : editingDive?.bottomEndTOverrideSec,
+            decoStartTOverrideSec: editingDive?.decoStartTOverrideSec
         )
 
         var allTags = [selectedDiveTypeTag.rawValue]
