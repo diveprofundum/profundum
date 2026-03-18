@@ -504,8 +504,9 @@ impl DiveStats {
         }
 
         // deco_time_sec: all time from deco_start_t to end of dive
+        // Clamp to 0 in case override exceeds total dive time
         let deco_time_sec: i32 = if deco_start_t > 0 {
-            total_time_sec as i32 - deco_start_t
+            (total_time_sec as i32 - deco_start_t).max(0)
         } else {
             0
         };
@@ -3026,6 +3027,52 @@ mod tests {
         assert_eq!(stats.deco_start_t, 1500);
         // deco_time = total(3600) - deco_start(1500) = 2100
         assert_eq!(stats.deco_time_sec, 2100);
+    }
+
+    #[test]
+    fn test_deco_start_override_beyond_dive_end() {
+        // Override beyond dive end should clamp deco_time to 0
+        let dive = DiveInput {
+            start_time_unix: 0,
+            end_time_unix: 3600,
+            bottom_time_sec: 0,
+            is_ccr: false,
+            bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: Some(5000),
+        };
+        let samples = vec![
+            sample(0, 0.0, Some(0.0)),
+            sample(120, 40.0, Some(3.0)),
+            sample(600, 40.0, Some(6.0)),
+            sample(1200, 6.0, Some(3.0)),
+            sample(1800, 0.0, Some(0.0)),
+        ];
+        let stats = DiveStats::compute(&dive, &samples);
+        assert_eq!(stats.deco_start_t, 5000);
+        // Clamped to 0 since override exceeds total_time
+        assert_eq!(stats.deco_time_sec, 0);
+    }
+
+    #[test]
+    fn test_deco_start_override_ignored_without_deco() {
+        // Override should be ignored when has_deco is false
+        let dive = DiveInput {
+            start_time_unix: 0,
+            end_time_unix: 3600,
+            bottom_time_sec: 0,
+            is_ccr: false,
+            bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: Some(500),
+        };
+        let samples = vec![
+            sample(0, 0.0, None), // no ceiling data = no deco
+            sample(600, 20.0, None),
+            sample(1200, 20.0, None),
+            sample(1800, 0.0, None),
+        ];
+        let stats = DiveStats::compute(&dive, &samples);
+        assert_eq!(stats.deco_start_t, 0);
+        assert_eq!(stats.deco_time_sec, 0);
     }
 
     #[test]
