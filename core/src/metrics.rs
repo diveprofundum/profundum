@@ -725,7 +725,7 @@ impl SegmentStats {
             max_temp_c = 0.0;
         }
 
-        // deco_time_sec: overlap of [deco_start_t, end_of_dive] with segment range
+        // deco_time_sec: overlap of [deco_start_t, ∞) with segment [start_t, end_t]
         let deco_time_sec: i32 = if dive_deco_start_t > 0 && end_t_sec > dive_deco_start_t {
             end_t_sec - dive_deco_start_t.max(start_t_sec)
         } else {
@@ -3002,6 +3002,30 @@ mod tests {
         let stats = DiveStats::compute(&dive, &samples);
         assert_eq!(stats.bottom_end_t, 999);
         assert_eq!(stats.bottom_time_sec, 999);
+    }
+
+    #[test]
+    fn test_deco_start_override() {
+        // Override in DiveInput should be used directly
+        let dive = DiveInput {
+            start_time_unix: 0,
+            end_time_unix: 3600,
+            bottom_time_sec: 0,
+            is_ccr: false,
+            bottom_end_t_override_sec: None,
+            deco_start_t_override_sec: Some(1500),
+        };
+        let samples = vec![
+            sample(0, 0.0, Some(0.0)),
+            sample(120, 40.0, Some(3.0)),
+            sample(600, 40.0, Some(6.0)),
+            sample(1200, 6.0, Some(3.0)),
+            sample(1800, 0.0, Some(0.0)),
+        ];
+        let stats = DiveStats::compute(&dive, &samples);
+        assert_eq!(stats.deco_start_t, 1500);
+        // deco_time = total(3600) - deco_start(1500) = 2100
+        assert_eq!(stats.deco_time_sec, 2100);
     }
 
     #[test]
