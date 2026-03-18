@@ -48,6 +48,8 @@ public struct Dive: Identifiable, Equatable, Hashable, Sendable {
     public var timezoneOffsetSec: Int32?
     /// Manual override for bottom_end_t (user correction, in seconds from dive start).
     public var bottomEndTOverrideSec: Int32?
+    /// Manual override for deco_start_t (user correction, in seconds from dive start).
+    public var decoStartTOverrideSec: Int32?
 
     public init(
         id: String = UUID().uuidString,
@@ -87,7 +89,8 @@ public struct Dive: Identifiable, Equatable, Hashable, Sendable {
         visibility: String? = nil,
         weather: String? = nil,
         timezoneOffsetSec: Int32? = nil,
-        bottomEndTOverrideSec: Int32? = nil
+        bottomEndTOverrideSec: Int32? = nil,
+        decoStartTOverrideSec: Int32? = nil
     ) {
         self.id = id
         self.deviceId = deviceId
@@ -127,6 +130,7 @@ public struct Dive: Identifiable, Equatable, Hashable, Sendable {
         self.weather = weather
         self.timezoneOffsetSec = timezoneOffsetSec
         self.bottomEndTOverrideSec = bottomEndTOverrideSec
+        self.decoStartTOverrideSec = decoStartTOverrideSec
     }
 
     /// Date suitable for display with UTC-based DateFormatters.
@@ -192,6 +196,7 @@ extension Dive: Codable, FetchableRecord, PersistableRecord {
         case weather
         case timezoneOffsetSec = "timezone_offset_sec"
         case bottomEndTOverrideSec = "bottom_end_t_override_sec"
+        case decoStartTOverrideSec = "deco_start_t_override_sec"
     }
 }
 

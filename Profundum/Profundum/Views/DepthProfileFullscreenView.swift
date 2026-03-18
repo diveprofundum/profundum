@@ -9,7 +9,8 @@ struct DepthProfileFullscreenView: View {
     var pressureUnit: PressureUnit = .bar
     var bottomEndT: Int32?
     var decoStartT: Int32?
-    var isManualOverride: Bool = false
+    var isBottomEndManualOverride: Bool = false
+    var isDecoStartManualOverride: Bool = false
 
     @Environment(\.dismiss) private var dismiss
     @State private var showTemperature = false
@@ -159,7 +160,8 @@ struct DepthProfileFullscreenView: View {
                 pressureUnit: pressureUnit,
                 bottomEndT: bottomEndT,
                 decoStartT: decoStartT,
-                isManualOverride: isManualOverride,
+                isBottomEndManualOverride: isBottomEndManualOverride,
+                isDecoStartManualOverride: isDecoStartManualOverride,
                 isFullscreen: true
             )
             .frame(maxHeight: .infinity)

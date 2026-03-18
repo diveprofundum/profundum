@@ -131,7 +131,7 @@ namespace divelog_compute {
 
 ### Data Model
 
-The schema (implemented in Swift GRDB migrations 001–016) models technical diving with CCR support:
+The schema (implemented in Swift GRDB migrations 001–017) models technical diving with CCR support:
 - Dives track CNS/OTU, setpoint, O2 consumption rates, deco status
 - Dive tags include breathing-system tags (oc, ccr) and activity tags (rec, deco, cave, etc.) plus user custom tags
 - Samples include depth, temp, setpoint_ppo2, ceiling_m, gf99

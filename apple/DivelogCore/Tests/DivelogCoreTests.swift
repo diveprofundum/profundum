@@ -209,7 +209,8 @@ final class DivelogCoreTests: XCTestCase {
             endTimeUnix: 1700003600,
             bottomTimeSec: 3000,
             isCcr: false,
-            bottomEndTOverrideSec: nil
+            bottomEndTOverrideSec: nil,
+            decoStartTOverrideSec: nil
         )
 
         let samples = [

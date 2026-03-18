@@ -581,7 +581,7 @@ final class FormulaServiceTests: XCTestCase {
         )
 
         let stats = DivelogCompute.computeDiveStats(
-            dive: DiveInput(startTimeUnix: 1700000000, endTimeUnix: 1700003600, bottomTimeSec: 3000, isCcr: false, bottomEndTOverrideSec: nil),
+            dive: DiveInput(startTimeUnix: 1700000000, endTimeUnix: 1700003600, bottomTimeSec: 3000, isCcr: false, bottomEndTOverrideSec: nil, decoStartTOverrideSec: nil),
             samples: [
                 SampleInput(tSec: 0, depthM: 0.0, tempC: 22.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil, ppo2: nil, ttsSec: nil, ndlSec: nil, decoStopDepthM: nil, atPlusFiveTtsMin: nil),
                 SampleInput(tSec: 300, depthM: 30.0, tempC: 16.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil, ppo2: nil, ttsSec: nil, ndlSec: nil, decoStopDepthM: nil, atPlusFiveTtsMin: nil),
@@ -641,7 +641,7 @@ final class FormulaServiceTests: XCTestCase {
         )
 
         let stats = DivelogCompute.computeDiveStats(
-            dive: DiveInput(startTimeUnix: 1700000000, endTimeUnix: 1700003600, bottomTimeSec: 3000, isCcr: false, bottomEndTOverrideSec: nil),
+            dive: DiveInput(startTimeUnix: 1700000000, endTimeUnix: 1700003600, bottomTimeSec: 3000, isCcr: false, bottomEndTOverrideSec: nil, decoStartTOverrideSec: nil),
             samples: [
                 SampleInput(tSec: 0, depthM: 0.0, tempC: 22.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil, ppo2: nil, ttsSec: nil, ndlSec: nil, decoStopDepthM: nil, atPlusFiveTtsMin: nil),
                 SampleInput(tSec: 300, depthM: 30.0, tempC: 16.0, setpointPpo2: nil, ceilingM: nil, gf99: nil, gasmixIndex: nil, ppo2: nil, ttsSec: nil, ndlSec: nil, decoStopDepthM: nil, atPlusFiveTtsMin: nil),

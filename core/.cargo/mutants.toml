@@ -14,106 +14,102 @@ exclude_re = [
     # ── metrics.rs: compute_bottom_end_t — guard/boundary equivalences ──
     # Called only when has_deco && max_depth_m > 0.0, so max_depth_m <= 0
     # branch is unreachable; samples.len() < 2 never occurs with real dives.
-    "src/metrics\\.rs:149:22:.*replace < with .* in compute_bottom_end_t",
-    "src/metrics\\.rs:149:26:.*replace \\|\\| with && in compute_bottom_end_t",
+    "src/metrics\\.rs:151:22:.*replace < with .* in compute_bottom_end_t",
+    "src/metrics\\.rs:151:26:.*replace \\|\\| with && in compute_bottom_end_t",
     # While-loop backward walk: ±1 sample in 120s window doesn't change rate
-    "src/metrics\\.rs:160:41:.*replace > with >= in compute_bottom_end_t",
+    "src/metrics\\.rs:162:41:.*replace > with >= in compute_bottom_end_t",
     # j < i guard: when j == i, dt_sec = 0, caught by dt_sec > 0 guard
-    "src/metrics\\.rs:163:14:.*replace < with <= in compute_bottom_end_t",
+    "src/metrics\\.rs:165:14:.*replace < with <= in compute_bottom_end_t",
     # dt_sec > 0: duplicate timestamps never occur in real dive profiles
-    "src/metrics\\.rs:165:23:.*replace > with >= in compute_bottom_end_t",
+    "src/metrics\\.rs:167:23:.*replace > with >= in compute_bottom_end_t",
     # first_deep_t search direction: time guard is redundant because ascent
     # rate check already rejects all descent/early-dive samples
-    "src/metrics\\.rs:176:29:.*replace >= with < in compute_bottom_end_t",
+    "src/metrics\\.rs:178:29:.*replace >= with < in compute_bottom_end_t",
     # Float rate vs threshold: exact equality to 1.5 m/min never occurs
-    "src/metrics\\.rs:194:28:.*replace < with <= in compute_bottom_end_t",
+    "src/metrics\\.rs:196:28:.*replace < with <= in compute_bottom_end_t",
     # t_sec == first_deep_t: that sample is at max depth with no ascent rate
-    "src/metrics\\.rs:199:29:.*replace < with .* in compute_bottom_end_t",
+    "src/metrics\\.rs:201:29:.*replace < with .* in compute_bottom_end_t",
     # depth == min_candidate_depth: at exact 25% boundary is immaterial
-    "src/metrics\\.rs:204:31:.*replace < with .* in compute_bottom_end_t",
+    "src/metrics\\.rs:206:31:.*replace < with .* in compute_bottom_end_t",
     # Fallback walk-back window ±1 sample doesn't change peak finding
-    "src/metrics\\.rs:237:33:.*replace < with <= in compute_bottom_end_t",
+    "src/metrics\\.rs:239:33:.*replace < with <= in compute_bottom_end_t",
     # Peak tie-break when two samples have identical depth (FP equality rare)
-    "src/metrics\\.rs:240:35:.*replace > with .* in compute_bottom_end_t",
+    "src/metrics\\.rs:242:35:.*replace > with .* in compute_bottom_end_t",
 
     # ── metrics.rs: compute_bottom_end_t — Δ+5 path (never exercised) ───
     # No test data has at_plus_five_tts_min values, so delta5_samples is
     # always empty and the entire Δ+5 block is dead code in tests.
     # These are NOT equivalent in production, but untestable without Δ+5
     # test data (tracked as a coverage gap, not an exclusion rationale).
-    "src/metrics\\.rs:184:75:.*replace \\+ with \\* in compute_bottom_end_t",
-    "src/metrics\\.rs:217:28:.*replace \\+ with \\* in compute_bottom_end_t",
-    "src/metrics\\.rs:222:12:.*delete ! in compute_bottom_end_t",
-    "src/metrics\\.rs:225:33:.*replace >= with < in compute_bottom_end_t",
-    "src/metrics\\.rs:227:35:.*replace > with .* in compute_bottom_end_t",
-    "src/metrics\\.rs:227:31:.*replace \\* with .* in compute_bottom_end_t",
-    "src/metrics\\.rs:233:47:.*replace - with \\+ in compute_bottom_end_t",
+    "src/metrics\\.rs:186:75:.*replace \\+ with \\* in compute_bottom_end_t",
+    "src/metrics\\.rs:219:28:.*replace \\+ with \\* in compute_bottom_end_t",
+    "src/metrics\\.rs:224:12:.*delete ! in compute_bottom_end_t",
+    "src/metrics\\.rs:227:33:.*replace >= with < in compute_bottom_end_t",
+    "src/metrics\\.rs:229:35:.*replace > with .* in compute_bottom_end_t",
+    "src/metrics\\.rs:229:31:.*replace \\* with .* in compute_bottom_end_t",
+    "src/metrics\\.rs:235:47:.*replace - with \\+ in compute_bottom_end_t",
 
     # ── metrics.rs: compute_deco_start_t — boundary equivalences ─────────
     # At bottom_end_t itself, the sample is at working depth, not a gas
     # switch or ceiling-approach point; including it changes nothing.
-    "src/metrics\\.rs:272:24:.*replace > with .* in compute_deco_start_t",
+    "src/metrics\\.rs:274:24:.*replace > with .* in compute_deco_start_t",
     # ceiling > 0.0: ceiling == 0.0 is the "no ceiling" sentinel; FP exact
     # equality at 0.0 is reliable (set explicitly, not computed)
-    "src/metrics\\.rs:304:28:.*replace > with >= in compute_deco_start_t",
+    "src/metrics\\.rs:306:28:.*replace > with >= in compute_deco_start_t",
     # Depth-band ±2.0m hold check: at exactly 2.0m difference is sensor noise
-    "src/metrics\\.rs:310:64:.*replace > with .* in compute_deco_start_t",
+    "src/metrics\\.rs:312:64:.*replace > with .* in compute_deco_start_t",
     # abs(depth_diff) arithmetic: - vs / gives same sign for small diffs
-    "src/metrics\\.rs:310:48:.*replace - with / in compute_deco_start_t",
+    "src/metrics\\.rs:312:48:.*replace - with / in compute_deco_start_t",
     # k+1 < samples.len() boundary: last sample dt defaults to 1
-    "src/metrics\\.rs:313:43:.*replace < with .* in compute_deco_start_t",
-    "src/metrics\\.rs:313:39:.*replace \\+ with .* in compute_deco_start_t",
+    "src/metrics\\.rs:315:43:.*replace < with .* in compute_deco_start_t",
+    "src/metrics\\.rs:315:39:.*replace \\+ with .* in compute_deco_start_t",
     # dt calculation: with 2-second samples, mutations produce dt=0 or dt=4
     # instead of dt=2, but hold_t accumulates to ≥20 either way
-    "src/metrics\\.rs:314:51:.*replace - with .* in compute_deco_start_t",
-    "src/metrics\\.rs:314:40:.*replace \\+ with .* in compute_deco_start_t",
+    "src/metrics\\.rs:316:51:.*replace - with .* in compute_deco_start_t",
+    "src/metrics\\.rs:316:40:.*replace \\+ with .* in compute_deco_start_t",
     # hold_t >= 20: hold threshold with 2-second samples always crosses 20
-    "src/metrics\\.rs:319:35:.*replace >= with < in compute_deco_start_t",
+    "src/metrics\\.rs:321:35:.*replace >= with < in compute_deco_start_t",
 
     # ── metrics.rs: DiveStats::compute — idempotent max/min tracking ─────
     # Setting max/min = value when they're already equal is a no-op.
-    "src/metrics\\.rs:362:.*replace > with >= in DiveStats::compute",   # max_depth_m (pre-scan)
-    "src/metrics\\.rs:422:.*replace < with <= in DiveStats::compute",   # min_temp_c
-    "src/metrics\\.rs:425:.*replace > with >= in DiveStats::compute",   # max_temp_c
-    "src/metrics\\.rs:445:.*replace > with >= in DiveStats::compute",   # max_ceiling_m
-    "src/metrics\\.rs:452:.*replace > with >= in DiveStats::compute",   # max_gf99
-    "src/metrics\\.rs:459:.*replace > with >= in DiveStats::compute",   # max_tts_sec
+    "src/metrics\\.rs:364:.*replace > with >= in DiveStats::compute",   # max_depth_m (pre-scan)
+    "src/metrics\\.rs:424:.*replace < with <= in DiveStats::compute",   # min_temp_c
+    "src/metrics\\.rs:427:.*replace > with >= in DiveStats::compute",   # max_temp_c
+    "src/metrics\\.rs:444:.*replace > with >= in DiveStats::compute",   # max_ceiling_m
+    "src/metrics\\.rs:451:.*replace > with >= in DiveStats::compute",   # max_gf99
+    "src/metrics\\.rs:458:.*replace > with >= in DiveStats::compute",   # max_tts_sec
     # weight_sum > 0.0: weight_sum is always strictly positive when samples exist
-    "src/metrics\\.rs:484:.*replace > with >= in DiveStats::compute",
+    "src/metrics\\.rs:483:.*replace > with >= in DiveStats::compute",
     # max_depth_m > 0.0: has_deco && max_depth_m == 0.0 is physically impossible
     # (no deco obligation at zero depth); >= produces equivalent result
-    "src/metrics\\.rs:373:60:.*replace > with >= in DiveStats::compute",
+    "src/metrics\\.rs:375:60:.*replace > with >= in DiveStats::compute",
     # has_deco && bottom_end_t > 0: replacing && with || calls compute_deco_start_t
     # with bottom_end_t=0, which returns 0 immediately — same as else branch
-    "src/metrics\\.rs:381:45:.*replace && with \\|\\| in DiveStats::compute",
+    "src/metrics\\.rs:383:45:.*replace && with \\|\\| in DiveStats::compute",
     # bottom_end_t > 0: bottom_end_t is never negative; when 0, compute_deco_start_t
     # returns 0 immediately, equivalent to the else branch
-    "src/metrics\\.rs:381:61:.*replace > with >= in DiveStats::compute",
+    "src/metrics\\.rs:383:61:.*replace > with >= in DiveStats::compute",
     # deco_start_t > bottom_end_t: when equal, subtraction is 0 either way
-    "src/metrics\\.rs:507:.*replace > with >= in DiveStats::compute",
+    "src/metrics\\.rs:513:.*replace > with >= in DiveStats::compute",
 
     # ── metrics.rs: DiveStats::compute_rates — boundary guards ───────────
     # dt_min > 0.0 guards: dt_min=0 only when timestamps are duplicated,
     # which never occurs in real dive profiles. Either way, rate=0.
-    "src/metrics\\.rs:591:.*replace > with >= in DiveStats::compute_rates",  # descent first_max_idx > 0
-    "src/metrics\\.rs:593:.*replace > with >= in DiveStats::compute_rates",  # descent dt_min
-    "src/metrics\\.rs:606:.*replace > with >= in DiveStats::compute_rates",  # ascent dt_min
+    "src/metrics\\.rs:597:.*replace > with >= in DiveStats::compute_rates",  # descent first_max_idx > 0
+    "src/metrics\\.rs:599:.*replace > with >= in DiveStats::compute_rates",  # descent dt_min
+    "src/metrics\\.rs:612:.*replace > with >= in DiveStats::compute_rates",  # ascent dt_min
     # last_max_idx < samples.len()-1: boundary and len-1 arithmetic
-    "src/metrics\\.rs:603:43:.*replace < with <= in DiveStats::compute_rates",
-    "src/metrics\\.rs:603:59:.*replace - with \\+ in DiveStats::compute_rates",
-    "src/metrics\\.rs:603:59:.*replace - with / in DiveStats::compute_rates",
+    "src/metrics\\.rs:609:43:.*replace < with <= in DiveStats::compute_rates",
+    "src/metrics\\.rs:609:59:.*replace - with \\+ in DiveStats::compute_rates",
+    "src/metrics\\.rs:609:59:.*replace - with / in DiveStats::compute_rates",
 
     # ── metrics.rs: SegmentStats::compute — idempotent max/min tracking ──
-    "src/metrics\\.rs:685:.*replace > with >= in SegmentStats::compute",   # max_depth_m
-    "src/metrics\\.rs:690:.*replace < with <= in SegmentStats::compute",   # min_temp_c
-    "src/metrics\\.rs:693:.*replace > with >= in SegmentStats::compute",   # max_temp_c
+    "src/metrics\\.rs:689:.*replace > with >= in SegmentStats::compute",   # max_depth_m
+    "src/metrics\\.rs:694:.*replace < with <= in SegmentStats::compute",   # min_temp_c
+    "src/metrics\\.rs:697:.*replace > with >= in SegmentStats::compute",   # max_temp_c
     # ceiling > 0.0: ceiling == 0.0 is the "no ceiling" sentinel value
-    "src/metrics\\.rs:698:.*replace > with >= in SegmentStats::compute",
-    # dive_deco_start_t > 0: when 0, no deco boundary exists; >= would
-    # count all ceiling>0 samples as deco_time, but test segments always
-    # have either deco_start_t=0 (no deco) or deco_start_t > segment start
-    "src/metrics\\.rs:709:.*replace > with >= in SegmentStats::compute",
-    "src/metrics\\.rs:716:.*replace > with >= in SegmentStats::compute",   # max_tts_sec
+    "src/metrics\\.rs:702:.*replace > with >= in SegmentStats::compute",
+    "src/metrics\\.rs:715:.*replace > with >= in SegmentStats::compute",   # max_tts_sec
 
     # ── buhlmann.rs — FP threshold guards ────────────────────────────────
     # Leading compartment tie-break: exact FP equality across 16 compartments'

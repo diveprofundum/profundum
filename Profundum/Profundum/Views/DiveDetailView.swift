@@ -31,6 +31,7 @@ struct DiveDetailView: View {
     @State private var showSplitConfirmation = false
     @State private var splitError: String?
     @State private var showBottomEndOverride = false
+    @State private var showDecoStartOverride = false
     @State private var currentDive: Dive?
 
     var onDiveUpdated: (() -> Void)?
@@ -252,13 +253,30 @@ struct DiveDetailView: View {
         }
         .sheet(isPresented: $showBottomEndOverride) {
             if let autoValue = stats?.bottomEndT, autoValue > 0 {
-                BottomEndOverrideSheet(
+                PhaseOverrideSheet(
+                    title: "Bottom End Override",
                     dive: dive,
                     samples: samples,
-                    autoBottomEndT: autoValue,
+                    autoValue: autoValue,
+                    currentOverride: dive.bottomEndTOverrideSec,
                     depthUnit: appState.depthUnit,
                     onSave: { newOverride in
                         saveBottomEndOverride(newOverride)
+                    }
+                )
+            }
+        }
+        .sheet(isPresented: $showDecoStartOverride) {
+            if let autoValue = stats?.decoStartT, autoValue > 0 {
+                PhaseOverrideSheet(
+                    title: "Deco Start Override",
+                    dive: dive,
+                    samples: samples,
+                    autoValue: autoValue,
+                    currentOverride: dive.decoStartTOverrideSec,
+                    depthUnit: appState.depthUnit,
+                    onSave: { newOverride in
+                        saveDecoStartOverride(newOverride)
                     }
                 )
             }
@@ -496,7 +514,8 @@ struct DiveDetailView: View {
                 pressureUnit: appState.pressureUnit,
                 bottomEndT: stats?.bottomEndT,
                 decoStartT: stats?.decoStartT,
-                isManualOverride: dive.bottomEndTOverrideSec != nil
+                isBottomEndManualOverride: dive.bottomEndTOverrideSec != nil,
+                isDecoStartManualOverride: dive.decoStartTOverrideSec != nil
             )
             .frame(height: 200)
             .background(
@@ -515,7 +534,8 @@ struct DiveDetailView: View {
                 pressureUnit: appState.pressureUnit,
                 bottomEndT: stats?.bottomEndT,
                 decoStartT: stats?.decoStartT,
-                isManualOverride: dive.bottomEndTOverrideSec != nil
+                isBottomEndManualOverride: dive.bottomEndTOverrideSec != nil,
+                isDecoStartManualOverride: dive.decoStartTOverrideSec != nil
             )
         }
         #else
@@ -528,7 +548,8 @@ struct DiveDetailView: View {
                 pressureUnit: appState.pressureUnit,
                 bottomEndT: stats?.bottomEndT,
                 decoStartT: stats?.decoStartT,
-                isManualOverride: dive.bottomEndTOverrideSec != nil
+                isBottomEndManualOverride: dive.bottomEndTOverrideSec != nil,
+                isDecoStartManualOverride: dive.decoStartTOverrideSec != nil
             )
             .frame(minWidth: 700, minHeight: 500)
         }
@@ -632,7 +653,17 @@ struct DiveDetailView: View {
                         .accessibilityHint("Tap to override bottom end time")
                     }
                     if stats.decoStartT > 0 {
-                        StatCard(title: "Deco Start", value: formatMinSec(stats.decoStartT))
+                        Button {
+                            showDecoStartOverride = true
+                        } label: {
+                            StatCard(
+                                title: "Deco Start",
+                                value: formatMinSec(stats.decoStartT),
+                                subtitle: dive.decoStartTOverrideSec != nil ? "Manual" : nil
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Tap to override deco start time")
                     }
                     if stats.ascentTimeSec > 0 {
                         StatCard(title: "Ascent Phase", value: "\(stats.ascentTimeSec / 60) min")
@@ -868,6 +899,26 @@ struct DiveDetailView: View {
         }
     }
 
+    private func saveDecoStartOverride(_ newOverride: Int32?) {
+        do {
+            var updated = dive
+            updated.decoStartTOverrideSec = newOverride
+            try appState.diveService.saveDive(
+                updated,
+                tags: tags,
+                teammateIds: loadedTeammateIds,
+                equipmentIds: loadedEquipmentIds
+            )
+            currentDive = updated
+            Task {
+                await loadDiveData()
+                onDiveUpdated?()
+            }
+        } catch {
+            errorMessage = "Failed to save override: \(error.localizedDescription)"
+        }
+    }
+
     private func loadDiveData() async {
         do {
             let diveId = dive.id
@@ -890,7 +941,8 @@ struct DiveDetailView: View {
                 endTimeUnix: dive.endTimeUnix,
                 bottomTimeSec: dive.bottomTimeSec,
                 isCcr: dive.isCcr,
-                bottomEndTOverrideSec: dive.bottomEndTOverrideSec
+                bottomEndTOverrideSec: dive.bottomEndTOverrideSec,
+                decoStartTOverrideSec: dive.decoStartTOverrideSec
             )
 
             let sampleInputs = detail.samples.map { sample in
