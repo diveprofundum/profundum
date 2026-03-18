@@ -150,7 +150,7 @@ Variables available for dive formulas:
 - `max_depth_m`, `avg_depth_m`, `weighted_avg_depth_m`
 - `max_depth_ft`, `avg_depth_ft`, `weighted_avg_depth_ft` (imperial equivalents)
 - `bottom_time_sec`, `bottom_time_min`, `total_time_sec`, `total_time_min`
-- `deco_time_sec`, `deco_time_min` (ascent-phase only: ceiling > 0 after leaving working depth)
+- `deco_time_sec`, `deco_time_min` (all time from deco_start_t to end of dive)
 - `deco_obligation_sec`, `deco_obligation_min` (total time with ceiling > 0, including at depth)
 - `max_tts_sec`, `max_tts_min` (peak time-to-surface during dive)
 - `cns_percent`, `otu`, `is_ccr`, `deco_required`
@@ -168,7 +168,7 @@ Variables available for segment formulas:
 - `max_depth_ft`, `avg_depth_ft` (imperial equivalents)
 - `min_temp_c`, `max_temp_c`
 - `min_temp_f`, `max_temp_f` (imperial equivalents)
-- `deco_time_sec`, `deco_time_min` (ascent-phase only)
+- `deco_time_sec`, `deco_time_min` (overlap of deco phase with segment)
 - `deco_obligation_sec`, `deco_obligation_min` (total time with ceiling > 0)
 - `max_tts_sec`, `max_tts_min` (peak TTS in segment)
 - `sample_count`
