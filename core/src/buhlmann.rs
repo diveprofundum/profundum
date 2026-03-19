@@ -1485,10 +1485,10 @@ mod tests {
         }
 
         // At surface (t=0), GF99 should be near 0
+        let gf99_at_surface = result[0].gf99;
         assert!(
-            result[0].gf99.abs() < 1.0,
-            "GF99 at surface should be ~0, got {}",
-            result[0].gf99
+            gf99_at_surface.abs() < 1.0,
+            "GF99 at surface should be ~0, got {gf99_at_surface}"
         );
 
         // After ascent to surface, GF99 = SurfGF (ambient = surface pressure)
