@@ -468,15 +468,15 @@ struct DepthProfileChartData {
             let wStart = max(0, si - halfWindow)
             let wEnd = min(samples.count - 1, si + halfWindow)
             var sum: Float = 0
-            var count = 0
+            var nValues = 0
             for j in wStart ... wEnd {
                 if let v = values[j] {
                     sum += v
-                    count += 1
+                    nValues += 1
                 }
             }
-            if count > 0 {
-                let avg = sum / Float(count)
+            if nValues > 0 {
+                let avg = sum / Float(nValues)
                 let fraction = (avg - range.min) / rangeDelta
                 let normalized = -(maxDepth * (1.0 - fraction))
                 pts.append(OverlayDataPoint(id: idx, timeMinutes: t, normalizedValue: normalized))
