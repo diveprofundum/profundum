@@ -94,6 +94,9 @@ pub struct SurfaceGfPoint {
     pub surface_gf: f32,
     /// Index (0–15) of the leading (most loaded) compartment.
     pub leading_compartment: u8,
+    /// GF99: gradient factor at current ambient pressure (0–100+).
+    /// Measures how loaded tissues are relative to the M-value at current depth.
+    pub gf99: f32,
 }
 
 // ============================================================================
@@ -157,6 +160,15 @@ impl TissueState {
             }
         }
         (max_gf, leading)
+    }
+
+    /// Maximum gradient factor across all compartments at a given ambient pressure.
+    ///
+    /// At surface pressure this equals SurfGF; at current depth it equals GF99.
+    fn max_gf_at_pressure(&self, ambient_pressure: f64) -> f64 {
+        (0..NUM_COMPARTMENTS)
+            .map(|i| self.compartment_gf(i, ambient_pressure))
+            .fold(0.0_f64, f64::max)
     }
 
     /// Gradient factor for a single compartment at the given ambient pressure.
@@ -283,10 +295,15 @@ pub fn compute_surface_gf(
 
         let (sgf, leading) = tissues.surface_gf_and_leading(surface_p);
 
+        // GF99: gradient factor at current ambient pressure (depth)
+        let current_ambient_p = surface_p + (sample.depth_m as f64).max(0.0) * BAR_PER_METER;
+        let gf99 = tissues.max_gf_at_pressure(current_ambient_p);
+
         results.push(SurfaceGfPoint {
             t_sec: sample.t_sec,
             surface_gf: sgf as f32,
             leading_compartment: leading as u8,
+            gf99: gf99 as f32,
         });
     }
 
@@ -1395,6 +1412,97 @@ mod tests {
         assert!(
             ccr_final > 30.0,
             "CCR 60m/20min SurfGF should be meaningful, got {ccr_final}"
+        );
+    }
+
+    #[test]
+    fn test_gf99_at_surface_is_near_zero() {
+        // Equilibrium tissues at surface → GF99 at surface pressure ≈ 0
+        let tissues = TissueState::surface_equilibrium(DEFAULT_SURFACE_PRESSURE);
+        let gf99 = tissues.max_gf_at_pressure(DEFAULT_SURFACE_PRESSURE);
+        assert!(
+            gf99.abs() < 1.0,
+            "GF99 at surface equilibrium should be ~0, got {gf99}"
+        );
+    }
+
+    #[test]
+    fn test_gf99_less_than_surface_gf() {
+        // During ascent, GF99 should be positive but less than SurfGF,
+        // because tissues are supersaturated relative to current ambient
+        // but even more supersaturated relative to surface.
+        let mut samples = vec![sample(0, 0.0, None)];
+        samples.push(sample(60, 30.0, None));
+        for i in 2..=20 {
+            samples.push(sample(i * 60, 30.0, None));
+        }
+        // Ascend to 6m — tissues loaded from 30m are now supersaturated
+        samples.push(sample(21 * 60, 6.0, None));
+
+        let result = compute_surface_gf(&samples, &[], None);
+
+        // At constant depth, GF99 ≤ SurfGF (tissues undersaturated at current ambient)
+        let at_depth = &result[10];
+        assert!(
+            at_depth.gf99 <= at_depth.surface_gf,
+            "GF99 ({}) should be ≤ SurfGF ({}) at depth",
+            at_depth.gf99,
+            at_depth.surface_gf
+        );
+
+        // During ascent, GF99 is positive and less than SurfGF
+        let during_ascent = result.last().unwrap();
+        assert!(
+            during_ascent.gf99 > 0.0,
+            "GF99 should be positive during ascent, got {}",
+            during_ascent.gf99
+        );
+        assert!(
+            during_ascent.gf99 < during_ascent.surface_gf,
+            "GF99 ({}) should be < SurfGF ({}) during ascent",
+            during_ascent.gf99,
+            during_ascent.surface_gf
+        );
+    }
+
+    #[test]
+    fn test_gf99_field_in_output() {
+        // Verify the gf99 field is populated for every sample in compute_surface_gf.
+        // Profile: descend to 30m, stay, then ascend — GF99 becomes positive on ascent.
+        let mut samples = vec![sample(0, 0.0, None)];
+        samples.push(sample(60, 30.0, None));
+        for i in 2..=10 {
+            samples.push(sample(i * 60, 30.0, None));
+        }
+        // Ascend to surface
+        samples.push(sample(11 * 60, 0.0, None));
+
+        let result = compute_surface_gf(&samples, &[], None);
+        assert_eq!(result.len(), samples.len());
+
+        for pt in &result {
+            assert!(pt.gf99.is_finite(), "GF99 must be finite at t={}", pt.t_sec);
+        }
+
+        // At surface (t=0), GF99 should be near 0
+        assert!(
+            result[0].gf99.abs() < 1.0,
+            "GF99 at surface should be ~0, got {}",
+            result[0].gf99
+        );
+
+        // After ascent to surface, GF99 = SurfGF (ambient = surface pressure)
+        let last = result.last().unwrap();
+        assert!(
+            last.gf99 > 0.0,
+            "GF99 should be positive after ascent to surface, got {}",
+            last.gf99
+        );
+        assert!(
+            (last.gf99 - last.surface_gf).abs() < 0.1,
+            "At surface, GF99 ({}) should equal SurfGF ({})",
+            last.gf99,
+            last.surface_gf
         );
     }
 }

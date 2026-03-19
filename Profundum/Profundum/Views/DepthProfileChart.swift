@@ -56,7 +56,7 @@ struct DepthProfileChartData {
         depthUnit: DepthUnit,
         temperatureUnit: TemperatureUnit,
         gasMixes: [GasMix] = [],
-        needsSurfGf: Bool = false
+        needsBuhlmannSim: Bool = false
     ) {
         var maxD: Float = 0
         var minC: Float = .greatestFiniteMagnitude
@@ -253,15 +253,9 @@ struct DepthProfileChartData {
             self.ceilingPoints = []
         }
 
-        // GF99 overlay
-        let gf99Values: [Float?] = samples.map { s in
-            guard let g = s.gf99, g > 0 else { return nil }
-            return g
-        }
-        let gf99Result = Self.downsampleOverlay(samples: samples, values: gf99Values, maxDepth: maxD)
-        self.hasGf99Data = gf99Result.hasData
-        self.gf99DisplayRange = gf99Result.range
-        self.gf99Points = gf99Result.points
+        // GF99 overlay — use native data if available, otherwise computed from Bühlmann sim
+        let hasNativeGf99 = samples.contains(where: { ($0.gf99 ?? 0) > 0 })
+        // (gf99Lookup populated below in the Bühlmann sim block)
 
         // @+5 TTS overlay
         let atPlusFiveValues: [Float?] = samples.map { s in s.atPlusFiveTtsMin.map { Float($0) } }
@@ -277,8 +271,9 @@ struct DepthProfileChartData {
         self.deltaFiveDisplayRange = deltaFiveResult.range
         self.deltaFivePoints = deltaFiveResult.points
 
-        // SurfGF overlay (lazy — only run Bühlmann simulation when requested)
-        if needsSurfGf {
+        // Bühlmann sim overlay (lazy — only run when SurfGF or computed GF99 needed)
+        let needsComputedGf99 = !hasNativeGf99
+        if needsBuhlmannSim || needsComputedGf99 {
             let sampleInputs = samples.map { s in
                 SampleInput(
                     tSec: s.tSec,
@@ -302,16 +297,19 @@ struct DepthProfileChartData {
                     heFraction: Double(mix.heFraction)
                 )
             }
-            let surfGfResult = DivelogCompute.computeSurfaceGf(
+            let simResult = DivelogCompute.computeSurfaceGf(
                 samples: sampleInputs,
                 gasMixes: gasMixInputs
             )
 
             var surfGfLookupLocal: [Int32: Float] = [:]
-            for pt in surfGfResult {
+            var gf99LookupLocal: [Int32: Float] = [:]
+            for pt in simResult {
                 surfGfLookupLocal[pt.tSec] = pt.surfaceGf
+                gf99LookupLocal[pt.tSec] = pt.gf99
             }
             self.surfGfLookup = surfGfLookupLocal
+            self.gf99Lookup = gf99LookupLocal
 
             let surfGfValues: [Float?] = samples.map { s in
                 guard let sgf = surfGfLookupLocal[s.tSec], sgf > 0.1 else { return nil }
@@ -326,6 +324,33 @@ struct DepthProfileChartData {
             self.surfGfDisplayRange = nil
             self.surfGfPoints = []
             self.surfGfLookup = [:]
+            self.gf99Lookup = [:]
+        }
+
+        // Build GF99 overlay points (native or computed)
+        let gf99LookupRef = self.gf99Lookup
+        if hasNativeGf99 {
+            let gf99Values: [Float?] = samples.map { s in
+                guard let g = s.gf99, g > 0 else { return nil }
+                return g
+            }
+            let gf99Result = Self.downsampleOverlay(samples: samples, values: gf99Values, maxDepth: maxD)
+            self.hasGf99Data = gf99Result.hasData
+            self.gf99DisplayRange = gf99Result.range
+            self.gf99Points = gf99Result.points
+        } else if !gf99LookupRef.isEmpty {
+            let gf99Values: [Float?] = samples.map { s in
+                guard let g = gf99LookupRef[s.tSec], g > 0.1 else { return nil }
+                return g
+            }
+            let gf99Result = Self.downsampleOverlay(samples: samples, values: gf99Values, maxDepth: maxD)
+            self.hasGf99Data = gf99Result.hasData
+            self.gf99DisplayRange = gf99Result.range
+            self.gf99Points = gf99Result.points
+        } else {
+            self.hasGf99Data = false
+            self.gf99DisplayRange = nil
+            self.gf99Points = []
         }
 
         // PPO2 overlay (averaged — uses ppo2_1 which stores sensor average or DC_SENSOR_NONE value)
@@ -496,7 +521,28 @@ struct DepthProfileChartData {
         return palette[index % palette.count]
     }
 
+    /// Computed GF99 lookup by sample tSec (from Bühlmann simulation when native gf99 data is absent).
+    let gf99Lookup: [Int32: Float]
+
     // MARK: - Lookup helpers
+
+    /// Scan ±maxWindow samples from idx to find closest sample where extract() is non-nil.
+    /// Returns the value and the index of the matching sample.
+    func nearestWithData<T>(
+        from idx: Int, in samples: [DiveSample],
+        maxWindow: Int = 5, extract: (DiveSample) -> T?
+    ) -> (value: T, index: Int)? {
+        // Check exact index first
+        if let v = extract(samples[idx]) { return (v, idx) }
+        // Scan outward alternating left/right
+        for offset in 1...maxWindow {
+            let left = idx - offset
+            let right = idx + offset
+            if left >= 0, let v = extract(samples[left]) { return (v, left) }
+            if right < samples.count, let v = extract(samples[right]) { return (v, right) }
+        }
+        return nil
+    }
 
     /// Binary search for the nearest depth point to a given time.
     func nearestDepthPoint(to time: Float) -> DepthDataPoint? {
@@ -566,19 +612,26 @@ struct DepthProfileChartData {
     /// Ceiling display string for the nearest sample.
     /// Reads the raw dive computer value (not the smoothed display value) so the tooltip
     /// shows exactly what the diver saw on their wrist computer.
+    /// Falls back to nearby samples (±5) when the exact sample has nil ceiling.
     func nearestCeilingDisplay(to time: Float, samples: [DiveSample], unit: DepthUnit) -> String? {
         guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
-        guard let cm = samples[idx].ceilingM, cm > 0 else { return nil }
-        return UnitFormatter.formatDepth(cm, unit: unit)
+        guard let match = nearestWithData(from: idx, in: samples, extract: { s in
+            s.ceilingM.flatMap { $0 > 0 ? $0 : nil }
+        }) else { return nil }
+        return UnitFormatter.formatDepth(match.value, unit: unit)
     }
 
     /// TTS display string for the nearest sample.
     /// Only returns a value when the sample is in deco (ceiling > 0), since TTS
     /// outside deco is just ascent time and not useful in the tooltip.
+    /// Falls back to nearby samples (±5) when the exact sample has nil TTS.
     func nearestTtsDisplay(to time: Float, samples: [DiveSample]) -> String? {
         guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
-        guard let cm = samples[idx].ceilingM, cm > 0 else { return nil }
-        guard let tts = samples[idx].ttsSec, tts > 0 else { return nil }
+        guard let match = nearestWithData(from: idx, in: samples, extract: { (s: DiveSample) -> Int? in
+            guard (s.ceilingM ?? 0) > 0, let tts = s.ttsSec, tts > 0 else { return nil }
+            return tts
+        }) else { return nil }
+        let tts = match.value
         let minutes = tts / 60
         let seconds = tts % 60
         if minutes > 0 {
@@ -589,14 +642,17 @@ struct DepthProfileChartData {
 
     /// NDL display string for the nearest sample.
     /// Returns nil if the sample has a ceiling, is past the first deco obligation, or has no NDL data.
+    /// Falls back to nearby samples (±5) when the exact sample has nil NDL.
     func nearestNdlDisplay(to time: Float, samples: [DiveSample]) -> String? {
         guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
         // Only show NDL when not in deco (no ceiling)
         if let cm = samples[idx].ceilingM, cm > 0 { return nil }
         // Don't show NDL after deco has been entered — only pre-deco portion
         if let firstCeiling = firstCeilingTimeMinutes, time >= firstCeiling { return nil }
-        guard let ndl = samples[idx].ndlSec, ndl > 0 else { return nil }
-        let minutes = ndl / 60
+        guard let match = nearestWithData(from: idx, in: samples, extract: { s in
+            s.ndlSec.flatMap { $0 > 0 ? $0 : nil }
+        }) else { return nil }
+        let minutes = match.value / 60
         return "\(minutes) min"
     }
 
@@ -619,10 +675,20 @@ struct DepthProfileChartData {
     }
 
     /// GF99 display string for the nearest sample.
+    /// Falls back to nearby samples (±5), then to computed gf99Lookup.
     func nearestGf99Display(to time: Float, samples: [DiveSample]) -> String? {
         guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
-        guard let gf = samples[idx].gf99, gf > 0 else { return nil }
-        return String(format: "%.0f%%", gf)
+        // Try native data with nearby-sample fallback
+        if let match = nearestWithData(from: idx, in: samples, extract: { s in
+            s.gf99.flatMap { $0 > 0 ? $0 : nil }
+        }) {
+            return String(format: "%.0f%%", match.value)
+        }
+        // Fall back to computed GF99 from Bühlmann sim
+        if let gf = gf99Lookup[samples[idx].tSec], gf > 0.1 {
+            return String(format: "%.0f%%", gf)
+        }
+        return nil
     }
 
     /// Denormalize a negative Y chart value back to GF99 percentage.
@@ -659,10 +725,13 @@ struct DepthProfileChartData {
     }
 
     /// PPO2 display string for the nearest sample.
+    /// Falls back to nearby samples (±5) when the exact sample has nil PPO2.
     func nearestPpo2Display(to time: Float, samples: [DiveSample]) -> String? {
         guard let idx = nearestSampleIndex(to: time, in: samples) else { return nil }
-        guard let p = samples[idx].ppo2_1, p > 0 else { return nil }
-        return String(format: "%.2f", p)
+        guard let match = nearestWithData(from: idx, in: samples, extract: { s in
+            s.ppo2_1.flatMap { $0 > 0 ? $0 : nil }
+        }) else { return nil }
+        return String(format: "%.2f", match.value)
     }
 
     /// Tank pressure 1 display string for the nearest sample, formatted with unit.
@@ -831,7 +900,11 @@ struct DepthProfileChart: View {
             label += " Deco ceiling shown, maximum ceiling \(maxCeilingDisp)."
         }
         if showGf99, data.hasGf99Data {
-            let gf99Values = samples.compactMap(\.gf99).filter { $0 > 0 }
+            // Use native gf99 values if available, otherwise computed from Bühlmann sim
+            var gf99Values = samples.compactMap(\.gf99).filter { $0 > 0 }
+            if gf99Values.isEmpty {
+                gf99Values = data.gf99Lookup.values.filter { $0 > 0.1 }
+            }
             if let loGf = gf99Values.min(), let hiGf = gf99Values.max() {
                 let loStr = String(format: "%.0f%%", loGf)
                 let hiStr = String(format: "%.0f%%", hiGf)
@@ -888,6 +961,9 @@ struct DepthProfileChart: View {
             buildChartData()
         }
         .onChange(of: showSurfGf) { _, newValue in
+            if newValue { buildChartData() }
+        }
+        .onChange(of: showGf99) { _, newValue in
             if newValue { buildChartData() }
         }
     }
@@ -1326,7 +1402,7 @@ struct DepthProfileChart: View {
             depthUnit: depthUnit,
             temperatureUnit: temperatureUnit,
             gasMixes: gasMixes,
-            needsSurfGf: showSurfGf
+            needsBuhlmannSim: showSurfGf || showGf99
         )
     }
 }
