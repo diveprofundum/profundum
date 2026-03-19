@@ -271,9 +271,8 @@ struct DepthProfileChartData {
         self.deltaFiveDisplayRange = deltaFiveResult.range
         self.deltaFivePoints = deltaFiveResult.points
 
-        // Bühlmann sim overlay (lazy — only run when SurfGF or computed GF99 needed)
-        let needsComputedGf99 = !hasNativeGf99
-        if needsBuhlmannSim || needsComputedGf99 {
+        // Bühlmann sim overlay (lazy — only run when SurfGF or GF99 overlay is active)
+        if needsBuhlmannSim {
             let sampleInputs = samples.map { s in
                 SampleInput(
                     tSec: s.tSec,
