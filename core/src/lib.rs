@@ -21,7 +21,10 @@ uniffi::include_scaffolding!("divelog_compute");
 
 // Re-export public types for Rust consumers
 pub use buhlmann::{GasMixInput, SurfaceGfPoint};
-pub use deco::{DecoModel, DecoSimError, DecoSimParams, DecoSimPoint, DecoSimResult, DecoStop};
+pub use deco::{
+    DecoModel, DecoSimError, DecoSimParams, DecoSimPoint, DecoSimResult, DecoStop, GasSwitchPlan,
+    ProfileGenParams, ProfileGenResult,
+};
 pub use error::FormulaError;
 pub use formula::{compute, validate, validate_with_variables, FunctionInfo};
 pub use metrics::{DepthClass, DiveInput, DiveStats, SampleInput, SegmentStats};
@@ -96,6 +99,11 @@ fn compute_surface_gf(
 /// Run a deco simulation with the specified model and parameters.
 fn compute_deco_simulation(params: DecoSimParams) -> Result<DecoSimResult, DecoSimError> {
     deco::compute_deco_simulation(params)
+}
+
+/// Generate a synthetic dive profile with computed deco stops.
+fn generate_dive_profile(params: ProfileGenParams) -> Result<ProfileGenResult, DecoSimError> {
+    deco::profile_generator::generate_dive_profile(params)
 }
 
 #[cfg(test)]

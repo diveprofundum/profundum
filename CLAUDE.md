@@ -95,6 +95,7 @@ The Rust layer is a minimal, stateless compute library:
   - **buhlmann_engine.rs**: Bühlmann ZHL-16C + Baker GF (ceilings, stops, TTS, NDL)
   - **thalmann_engine.rs**: Thalmann EL-DCA with E-L gas kinetics and MPTT ceilings
   - **thalmann_params.rs**: XVal-He-9_023 parameter set, unit conversions, blood gas constants
+  - **profile_generator.rs**: Synthetic dive profile generator (two-pass deco, gas switches)
   - **shared.rs**: Shared physics constants and helpers (used by both `buhlmann.rs` and deco engine)
 
 ### Swift Storage Layer (apple/DivelogCore/)
@@ -136,6 +137,7 @@ namespace divelog_compute {
     SegmentStats compute_segment_stats(i32 start_t_sec, i32 end_t_sec, sequence<SampleInput> samples, i32 dive_bottom_end_t, i32 dive_deco_start_t);
     sequence<FunctionInfo> supported_functions();
     DecoSimResult compute_deco_simulation(DecoSimParams params);
+    ProfileGenResult generate_dive_profile(ProfileGenParams params);
 }
 ```
 
