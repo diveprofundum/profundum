@@ -396,7 +396,6 @@ struct ReplayProfileSheet: View {
         r.totalTimeSec - r.bottomEndTSec
     }
 
-
     // MARK: - Prefill
 
     private func prefill() {
