@@ -843,6 +843,7 @@ mod tests {
             stop_interval_m: Some(3.0),
             gf_low: Some(50),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: true,
         };
 
@@ -904,6 +905,7 @@ mod tests {
             stop_interval_m: Some(3.0),
             gf_low: Some(30),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: true,
         };
 
@@ -946,6 +948,7 @@ mod tests {
             stop_interval_m: Some(3.0),
             gf_low: Some(100),
             gf_high: Some(100),
+            thalmann_pdcs: None,
             plan_ascent: true,
         };
 
@@ -959,6 +962,7 @@ mod tests {
             stop_interval_m: Some(3.0),
             gf_low: Some(50),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: true,
         };
 
@@ -1002,6 +1006,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: Some(100),
             gf_high: Some(100),
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
         let result = engine.simulate(&params).unwrap();
@@ -1046,6 +1051,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: Some(50),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
 
@@ -1087,6 +1093,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: None,
             gf_high: None,
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
 
@@ -1107,6 +1114,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: Some(90),
             gf_high: Some(70),
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
 
@@ -1127,6 +1135,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: Some(0),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
 
@@ -1148,6 +1157,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: None,
             gf_high: None,
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
         assert!(matches!(
@@ -1166,6 +1176,7 @@ mod tests {
             stop_interval_m: Some(0.0),
             gf_low: None,
             gf_high: None,
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
         assert!(matches!(
@@ -1239,6 +1250,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: Some(100),
             gf_high: Some(100),
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
 
@@ -1262,6 +1274,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: Some(100),
             gf_high: Some(100),
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
         let oc_result = engine.simulate(&oc_params).unwrap();
@@ -1294,6 +1307,7 @@ mod tests {
             stop_interval_m: Some(3.0),
             gf_low: Some(50),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
 
@@ -1334,6 +1348,7 @@ mod tests {
             stop_interval_m: Some(3.0),
             gf_low: Some(50),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
 
@@ -1365,6 +1380,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: Some(100),
             gf_high: Some(100),
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
 
@@ -1396,6 +1412,7 @@ mod tests {
             stop_interval_m: Some(3.0),
             gf_low: Some(50),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: true,
         };
 
@@ -1565,6 +1582,7 @@ mod tests {
             stop_interval_m: Some(6.0),
             gf_low: Some(50),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: true,
         };
 
@@ -1595,6 +1613,7 @@ mod tests {
             stop_interval_m: Some(3.0),
             gf_low: Some(50),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: true,
         };
 

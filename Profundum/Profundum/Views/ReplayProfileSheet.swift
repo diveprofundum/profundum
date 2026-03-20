@@ -17,6 +17,7 @@ struct ReplayProfileSheet: View {
     @State private var descentRateText: String = ""
     @State private var ascentRateText: String = ""
     @State private var selectedModel: DecoModel = .buhlmannZhl16c
+    @State private var thalmannPdcs: ThalmannPdcs = .pdcs23
     @State private var gfLow: Int = 30
     @State private var gfHigh: Int = 70
     @State private var gfLowText: String = "30"
@@ -48,7 +49,7 @@ struct ReplayProfileSheet: View {
                     if selectedModel == .buhlmannZhl16c {
                         gradientFactorsSection
                     } else {
-                        thalmannConservatismNote
+                        thalmannConservatismSection
                     }
                     if dive.isCcr {
                         ccrDiluentSection
@@ -196,13 +197,19 @@ struct ReplayProfileSheet: View {
         }
     }
 
-    private var thalmannConservatismNote: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Conservatism")
+    private var thalmannConservatismSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("DCS Risk Target")
                 .font(.headline)
-            // swiftlint:disable:next line_length
-            Text("Thalmann EL-DCA uses the XVal-He-9_023 parameter set (2.3% P_DCS target). Additional conservatism options planned for a future release.")
-                .font(.callout)
+            Picker("P_DCS", selection: $thalmannPdcs) {
+                Text("2.3%").tag(ThalmannPdcs.pdcs23)
+                Text("4.0%").tag(ThalmannPdcs.pdcs40)
+                Text("5.0%").tag(ThalmannPdcs.pdcs50)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityLabel("Target probability of DCS")
+            Text("XVal-He-9 parameter sets from NEDU TR 18-05. Lower is more conservative.")
+                .font(.caption)
                 .foregroundColor(.secondary)
         }
     }
@@ -653,6 +660,7 @@ struct ReplayProfileSheet: View {
             lastStopDepthM: lastStop,
             stopIntervalM: stopInterval,
             setpointPpo2: sp,
+            thalmannPdcs: selectedModel == .thalmannElDca ? thalmannPdcs : nil,
             sampleIntervalSec: nil,
             tempC: temp
         )

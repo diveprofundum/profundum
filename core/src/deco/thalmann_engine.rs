@@ -46,7 +46,11 @@ impl ThalmannEngine {
             });
         }
 
-        let thal_params = &XVAL_HE_9_023;
+        let thal_params = match params.thalmann_pdcs {
+            Some(ThalmannPdcs::Pdcs40) => &XVAL_HE_9_040,
+            Some(ThalmannPdcs::Pdcs50) => &XVAL_HE_9_050,
+            _ => &XVAL_HE_9_023,
+        };
         if let Err(msg) = thal_params.validate() {
             return Err(DecoSimError::InvalidParam { msg });
         }
@@ -621,6 +625,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: None,
             gf_high: None,
+            thalmann_pdcs: None,
             plan_ascent: false,
         }
     }

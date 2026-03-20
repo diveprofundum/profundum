@@ -57,6 +57,8 @@ pub struct ProfileGenParams {
     pub stop_interval_m: Option<f64>,
     /// CCR setpoint PPO2 in bar. `None` = open circuit.
     pub setpoint_ppo2: Option<f64>,
+    /// Thalmann P_DCS target (Thalmann only, default Pdcs23).
+    pub thalmann_pdcs: Option<ThalmannPdcs>,
     /// Sample interval in seconds (default 10).
     pub sample_interval_sec: Option<i32>,
     /// Water temperature in °C (default 20.0).
@@ -172,6 +174,7 @@ pub fn generate_dive_profile(params: ProfileGenParams) -> Result<ProfileGenResul
         stop_interval_m: Some(stop_interval),
         gf_low: params.gf_low,
         gf_high: params.gf_high,
+        thalmann_pdcs: params.thalmann_pdcs,
         plan_ascent: true,
     };
 
@@ -201,6 +204,7 @@ pub fn generate_dive_profile(params: ProfileGenParams) -> Result<ProfileGenResul
         stop_interval_m: Some(stop_interval),
         gf_low: params.gf_low,
         gf_high: params.gf_high,
+        thalmann_pdcs: params.thalmann_pdcs,
         plan_ascent: false,
     };
 
@@ -599,6 +603,7 @@ mod tests {
             last_stop_depth_m: None,
             stop_interval_m: None,
             setpoint_ppo2: None,
+            thalmann_pdcs: None,
             sample_interval_sec: None,
             temp_c: None,
         }

@@ -161,6 +161,12 @@ enum DecoModel {
     "ThalmannElDca",
 };
 
+enum ThalmannPdcs {
+    "Pdcs23",
+    "Pdcs40",
+    "Pdcs50",
+};
+
 [Error]
 enum DecoSimError {
     "EmptySamples",
@@ -178,6 +184,7 @@ dictionary DecoSimParams {
     f64? stop_interval_m;
     u8? gf_low;
     u8? gf_high;
+    ThalmannPdcs? thalmann_pdcs;
     boolean plan_ascent;
 };
 
@@ -220,6 +227,7 @@ dictionary ProfileGenParams {
     f64? last_stop_depth_m;
     f64? stop_interval_m;
     f64? setpoint_ppo2;
+    ThalmannPdcs? thalmann_pdcs;
     i32? sample_interval_sec;
     f32? temp_c;
 };
