@@ -33,6 +33,7 @@ struct DiveDetailView: View {
     @State private var showBottomEndOverride = false
     @State private var showDecoStartOverride = false
     @State private var currentDive: Dive?
+    @State private var showReplaySheet = false
 
     var onDiveUpdated: (() -> Void)?
 
@@ -181,6 +182,14 @@ struct DiveDetailView: View {
                 }
                 .accessibilityIdentifier("editDiveButton")
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showReplaySheet = true
+                } label: {
+                    Image(systemName: "play.circle")
+                }
+                .accessibilityLabel("Replay dive profile")
+            }
             #else
             ToolbarItem {
                 if let exportFileURL {
@@ -200,6 +209,14 @@ struct DiveDetailView: View {
                     showEditSheet = true
                 }
                 .accessibilityIdentifier("editDiveButton")
+            }
+            ToolbarItem {
+                Button {
+                    showReplaySheet = true
+                } label: {
+                    Image(systemName: "play.circle")
+                }
+                .accessibilityLabel("Replay dive profile")
             }
             #endif
         }
@@ -555,6 +572,9 @@ struct DiveDetailView: View {
             .frame(minWidth: 700, minHeight: 500)
         }
         #endif
+        .sheet(isPresented: $showReplaySheet) {
+            ReplayProfileSheet(dive: dive, gasMixes: gasMixes, stats: stats, samples: samples)
+        }
     }
 
     private func notesSection(_ notes: String) -> some View {

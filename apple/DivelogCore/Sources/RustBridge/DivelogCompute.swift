@@ -75,6 +75,11 @@ public enum DivelogCompute {
     public static func computeDecoSimulation(params: DecoSimParams) throws -> DecoSimResult {
         try DivelogCore.computeDecoSimulation(params: params)
     }
+
+    /// Generate a synthetic dive profile with two-pass deco planning.
+    public static func generateDiveProfile(params: ProfileGenParams) throws -> ProfileGenResult {
+        try DivelogCore.generateDiveProfile(params: params)
+    }
 }
 
 // Note: DiveInput, SampleInput, DiveStats, SegmentStats, FunctionInfo, DepthClass, and FormulaError

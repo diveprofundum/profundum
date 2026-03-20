@@ -74,3 +74,4 @@ coverage/
 *.temp
 *.log
 tmp_logs/
+core/.cargo/config.toml
