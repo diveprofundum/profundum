@@ -646,9 +646,17 @@ mod tests {
     }
 
     #[test]
-    fn test_zero_gf_rejected() {
+    fn test_zero_gf_low_rejected() {
         let mut params = air_params(30.0, 600);
         params.gf_low = Some(0);
+        let result = generate_dive_profile(params);
+        assert!(matches!(result, Err(DecoSimError::InvalidParam { .. })));
+    }
+
+    #[test]
+    fn test_zero_gf_high_rejected() {
+        let mut params = air_params(30.0, 600);
+        params.gf_high = Some(0);
         let result = generate_dive_profile(params);
         assert!(matches!(result, Err(DecoSimError::InvalidParam { .. })));
     }
