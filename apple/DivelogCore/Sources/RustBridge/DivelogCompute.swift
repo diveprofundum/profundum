@@ -70,6 +70,11 @@ public enum DivelogCompute {
             surfacePressureBar: surfacePressureBar
         )
     }
+
+    /// Run a multi-model deco simulation — ceilings, stops, TTS, NDL.
+    public static func computeDecoSimulation(params: DecoSimParams) throws -> DecoSimResult {
+        try DivelogCore.computeDecoSimulation(params: params)
+    }
 }
 
 // Note: DiveInput, SampleInput, DiveStats, SegmentStats, FunctionInfo, DepthClass, and FormulaError

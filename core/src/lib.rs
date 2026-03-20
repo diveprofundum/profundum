@@ -10,6 +10,7 @@
 #![allow(clippy::empty_line_after_doc_comments)]
 
 pub mod buhlmann;
+pub mod deco;
 pub mod error;
 pub mod formula;
 pub mod metrics;
@@ -20,6 +21,7 @@ uniffi::include_scaffolding!("divelog_compute");
 
 // Re-export public types for Rust consumers
 pub use buhlmann::{GasMixInput, SurfaceGfPoint};
+pub use deco::{DecoModel, DecoSimError, DecoSimParams, DecoSimPoint, DecoSimResult, DecoStop};
 pub use error::FormulaError;
 pub use formula::{compute, validate, validate_with_variables, FunctionInfo};
 pub use metrics::{DepthClass, DiveInput, DiveStats, SampleInput, SegmentStats};
@@ -89,6 +91,11 @@ fn compute_surface_gf(
     surface_pressure_bar: Option<f64>,
 ) -> Vec<SurfaceGfPoint> {
     buhlmann::compute_surface_gf(&samples, &gas_mixes, surface_pressure_bar)
+}
+
+/// Run a deco simulation with the specified model and parameters.
+fn compute_deco_simulation(params: DecoSimParams) -> Result<DecoSimResult, DecoSimError> {
+    deco::compute_deco_simulation(params)
 }
 
 #[cfg(test)]
