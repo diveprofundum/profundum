@@ -1,3 +1,4 @@
+import Charts
 import DivelogCore
 import SwiftUI
 
@@ -365,7 +366,7 @@ struct ReplayProfileSheet: View {
                 )
             }
 
-            // Phase 4 placeholder: animated chart will go here
+            ReplayChartSection(result: result, depthUnit: appState.depthUnit)
         }
     }
 
