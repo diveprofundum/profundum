@@ -90,33 +90,35 @@ exclude_re = [
     # returns 0 immediately, equivalent to the else branch
     "src/metrics\\.rs:383:61:.*replace > with >= in DiveStats::compute",
     # deco_start_t > bottom_end_t: when equal, subtraction is 0 either way
-    "src/metrics\\.rs:513:.*replace > with >= in DiveStats::compute",
+    "src/metrics\\.rs:514:.*replace > with >= in DiveStats::compute",
 
     # ── metrics.rs: DiveStats::compute_rates — boundary guards ───────────
     # dt_min > 0.0 guards: dt_min=0 only when timestamps are duplicated,
     # which never occurs in real dive profiles. Either way, rate=0.
-    "src/metrics\\.rs:597:.*replace > with >= in DiveStats::compute_rates",  # descent first_max_idx > 0
-    "src/metrics\\.rs:599:.*replace > with >= in DiveStats::compute_rates",  # descent dt_min
-    "src/metrics\\.rs:612:.*replace > with >= in DiveStats::compute_rates",  # ascent dt_min
+    "src/metrics\\.rs:598:.*replace > with >= in DiveStats::compute_rates",  # descent first_max_idx > 0
+    "src/metrics\\.rs:600:.*replace > with >= in DiveStats::compute_rates",  # descent dt_min
+    "src/metrics\\.rs:613:.*replace > with >= in DiveStats::compute_rates",  # ascent dt_min
     # last_max_idx < samples.len()-1: boundary and len-1 arithmetic
-    "src/metrics\\.rs:609:43:.*replace < with <= in DiveStats::compute_rates",
-    "src/metrics\\.rs:609:59:.*replace - with \\+ in DiveStats::compute_rates",
-    "src/metrics\\.rs:609:59:.*replace - with / in DiveStats::compute_rates",
+    "src/metrics\\.rs:610:43:.*replace < with <= in DiveStats::compute_rates",
+    "src/metrics\\.rs:610:59:.*replace - with \\+ in DiveStats::compute_rates",
+    "src/metrics\\.rs:610:59:.*replace - with / in DiveStats::compute_rates",
 
     # ── metrics.rs: SegmentStats::compute — idempotent max/min tracking ──
-    "src/metrics\\.rs:689:.*replace > with >= in SegmentStats::compute",   # max_depth_m
-    "src/metrics\\.rs:694:.*replace < with <= in SegmentStats::compute",   # min_temp_c
-    "src/metrics\\.rs:697:.*replace > with >= in SegmentStats::compute",   # max_temp_c
+    "src/metrics\\.rs:690:.*replace > with >= in SegmentStats::compute",   # max_depth_m
+    "src/metrics\\.rs:695:.*replace < with <= in SegmentStats::compute",   # min_temp_c
+    "src/metrics\\.rs:698:.*replace > with >= in SegmentStats::compute",   # max_temp_c
     # ceiling > 0.0: ceiling == 0.0 is the "no ceiling" sentinel value
-    "src/metrics\\.rs:702:.*replace > with >= in SegmentStats::compute",
-    "src/metrics\\.rs:715:.*replace > with >= in SegmentStats::compute",   # max_tts_sec
+    "src/metrics\\.rs:703:.*replace > with >= in SegmentStats::compute",
+    "src/metrics\\.rs:716:.*replace > with >= in SegmentStats::compute",   # max_tts_sec
+    # dive_deco_start_t > 0: when 0 (no deco), else branch returns 0 either way
+    "src/metrics\\.rs:730:72:.*replace > with >= in SegmentStats::compute",
 
     # ── buhlmann.rs — FP threshold guards ────────────────────────────────
     # Leading compartment tie-break: exact FP equality across 16 compartments'
     # weighted N2+He GF values never occurs in practice
-    "src/buhlmann\\.rs:153:.*replace > with >= in TissueState::surface_gf_and_leading",
+    "src/buhlmann\\.rs:156:.*replace > with >= in TissueState::surface_gf_and_leading",
     # denom > 1e-10: Bühlmann constants always give denom >> 1e-10
-    "src/buhlmann\\.rs:180:.*replace > with >= in TissueState::compartment_gf",
+    "src/buhlmann\\.rs:192:.*replace > with >= in TissueState::compartment_gf",
     # dil_inert > 1e-10: gas fractions from real mixes never produce exactly 1e-10
-    "src/buhlmann\\.rs:254:.*replace > with >= in compute_surface_gf",
+    "src/buhlmann\\.rs:266:.*replace > with >= in compute_surface_gf",
 ]

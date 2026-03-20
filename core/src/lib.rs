@@ -305,5 +305,11 @@ mod tests {
         assert_eq!(result.len(), 3);
         // Verify SurfGF increases at depth
         assert!(result[2].surface_gf > result[0].surface_gf);
+        // GF99 at constant depth should be ≤ SurfGF (tissues undersaturated at current ambient)
+        assert!(result[2].gf99.is_finite(), "GF99 must be finite");
+        assert!(
+            result[2].gf99 <= result[2].surface_gf,
+            "GF99 at depth should be ≤ SurfGF"
+        );
     }
 }

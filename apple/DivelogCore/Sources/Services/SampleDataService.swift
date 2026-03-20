@@ -14,8 +14,9 @@ public final class SampleDataService: Sendable {
     /// Check if sample data has already been loaded.
     public func hasSampleData() throws -> Bool {
         try database.dbQueue.read { db in
-            let count = try Device.fetchCount(db)
-            return count > 0
+            // fetchCount returns Int, not a collection (false positive on Linux without SourceKit)
+            // swiftlint:disable:next empty_count superfluous_disable_command
+            try Device.fetchCount(db) > 0
         }
     }
 

@@ -87,7 +87,7 @@ jobs:
         working-directory: core
 
   # ─────────────────────────────────────────────────────────
-  # Swift: lint (Linux, fast — catches style issues early)
+  # Swift: lint (Ubuntu — SwiftLint doesn't need Xcode)
   # ─────────────────────────────────────────────────────────
   swift-lint:
     needs: changes
@@ -95,97 +95,31 @@ jobs:
       needs.changes.outputs.swift == 'true' ||
       needs.changes.outputs.app == 'true' ||
       needs.changes.outputs.ci == 'true'
-    runs-on: macos-14
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install SwiftLint
-        run: brew install swiftlint
+        run: |
+          SWIFTLINT_VERSION=0.57.0
+          curl -sL "https://github.com/realm/SwiftLint/releases/download/${SWIFTLINT_VERSION}/swiftlint_linux.zip" -o swiftlint.zip
+          unzip -q swiftlint.zip swiftlint
+          chmod +x swiftlint
+          sudo mv swiftlint /usr/local/bin/
 
       - name: Run SwiftLint
         run: swiftlint lint --strict --config .swiftlint.yml
 
   # ─────────────────────────────────────────────────────────
-  # Swift: build + test (macOS)
-  # Runs when Rust OR Swift sources change, since Swift
-  # links the Rust XCFramework.
+  # Swift: build + test + coverage (macOS, single job)
+  # Builds XCFramework once for both tests and coverage,
+  # eliminating a redundant ~4min xcframework rebuild.
   # ─────────────────────────────────────────────────────────
   swift-test:
     needs: [changes, rust-test]
-    # Run if Rust, Swift, app, or CI files changed.
-    # Also always run on push to main for safety.
     if: |
       always() &&
       (needs.rust-test.result == 'success' || needs.rust-test.result == 'skipped') &&
-      (
-        needs.changes.outputs.rust == 'true' ||
-        needs.changes.outputs.swift == 'true' ||
-        needs.changes.outputs.app == 'true' ||
-        needs.changes.outputs.ci == 'true'
-      )
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: core -> target
-
-      - name: Cache Swift SPM
-        uses: actions/cache@v4
-        with:
-          path: apple/DivelogCore/.build
-          key: spm-${{ runner.os }}-${{ hashFiles('apple/DivelogCore/Package.resolved') }}
-          restore-keys: spm-${{ runner.os }}-
-
-      - name: Build XCFramework (includes UniFFI binding generation)
-        run: make xcframework
-
-      - name: Run Swift tests
-        run: cd apple/DivelogCore && swift test
-
-  # ─────────────────────────────────────────────────────────
-  # Security: dependency audit + license/advisory compliance
-  # ─────────────────────────────────────────────────────────
-  security:
-    needs: changes
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Generate Cargo.lock
-        run: cargo generate-lockfile
-        working-directory: core
-
-      - name: Check for known vulnerabilities
-        uses: rustsec/audit-check@v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          working-directory: core
-
-      - name: Check licenses, advisories, and bans
-        uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          manifest-path: core/Cargo.toml
-
-  # ─────────────────────────────────────────────────────────
-  # Coverage: collect and upload to Codecov
-  # ─────────────────────────────────────────────────────────
-  coverage:
-    needs: [changes, rust-test, swift-test]
-    if: |
-      always() &&
-      (needs.rust-test.result == 'success' || needs.rust-test.result == 'skipped') &&
-      (needs.swift-test.result == 'success' || needs.swift-test.result == 'skipped') &&
       (
         needs.changes.outputs.rust == 'true' ||
         needs.changes.outputs.swift == 'true' ||
@@ -216,8 +150,11 @@ jobs:
           key: spm-${{ runner.os }}-${{ hashFiles('apple/DivelogCore/Package.resolved') }}
           restore-keys: spm-${{ runner.os }}-
 
-      - name: Build XCFramework
+      - name: Build XCFramework (includes UniFFI binding generation)
         run: make xcframework
+
+      - name: Run Swift tests
+        run: cd apple/DivelogCore && swift test
 
       - name: Rust coverage
         run: make rust-coverage
@@ -240,6 +177,33 @@ jobs:
           flags: swift
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  # ─────────────────────────────────────────────────────────
+  # Security: dependency audit + license/advisory compliance
+  # ─────────────────────────────────────────────────────────
+  security:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate Cargo.lock
+        run: cargo generate-lockfile
+        working-directory: core
+
+      - name: Check for known vulnerabilities
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: core
+
+      - name: Check licenses, advisories, and bans
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: core/Cargo.toml
 
   # ─────────────────────────────────────────────────────────
   # Version check: ensure VERSION file, Cargo.toml, and

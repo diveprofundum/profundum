@@ -48,7 +48,8 @@ struct DiveDetailView: View {
     }
 
     private var hasGf99Data: Bool {
-        samples.contains { ($0.gf99 ?? 0) > 0 }
+        // Native GF99 from dive computer, or computable via Bühlmann sim for any dive with depth
+        samples.contains { ($0.gf99 ?? 0) > 0 || $0.depthM > 3.0 }
     }
 
     private var hasAtPlusFiveData: Bool {

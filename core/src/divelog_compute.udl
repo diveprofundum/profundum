@@ -141,4 +141,5 @@ dictionary SurfaceGfPoint {
     i32 t_sec;
     f32 surface_gf;
     u8 leading_compartment;
+    f32 gf99;
 };
