@@ -16,9 +16,6 @@ pub(crate) const FSW_PER_ATM: f64 = 33.0;
 /// Metres per foot (exact).
 const M_PER_FT: f64 = 0.3048;
 
-/// Surface pressure in fsw (1 atm = 33 fsw).
-pub(crate) const SURFACE_P_FSW: f64 = 33.0;
-
 // ============================================================================
 // Unit conversion helpers
 // ============================================================================
@@ -84,14 +81,48 @@ pub(crate) struct ThalmannParamSet {
     pub half_times_min: &'static [f64],
     /// Saturation/Desaturation Ratio per compartment.
     /// SDR > 1 means faster washout; SDR < 1 means slower washout.
+    /// Must be > 0 (SDR=0 causes division by zero).
     pub sdr: &'static [f64],
     /// Surfacing M-value (M0) in fsw, per compartment.
     pub m0_fsw: &'static [f64],
     /// MPTT slope per compartment. M_i(D) = M0[i] + beta1[i] * D.
+    /// Must be > 0 (beta1=0 causes division by zero in ceiling computation).
     pub beta1: &'static [f64],
     /// Threshold inert gas overpressure for linear washout transition (fsw).
     /// 0.0 means crossover whenever tissue is supersaturated past venous gas deficit.
     pub pbovp_fsw: f64,
+}
+
+impl ThalmannParamSet {
+    /// Validate that all parameter arrays are consistent and values are in
+    /// valid ranges. Returns an error message if invalid.
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        let n = self.num_compartments;
+        if n == 0 {
+            return Err("num_compartments must be > 0".to_string());
+        }
+        if self.half_times_min.len() != n
+            || self.sdr.len() != n
+            || self.m0_fsw.len() != n
+            || self.beta1.len() != n
+        {
+            return Err(format!(
+                "Parameter array lengths must all equal num_compartments ({n})"
+            ));
+        }
+        for i in 0..n {
+            if self.half_times_min[i] <= 0.0 {
+                return Err(format!("half_times_min[{i}] must be > 0"));
+            }
+            if self.sdr[i] <= 0.0 {
+                return Err(format!("sdr[{i}] must be > 0"));
+            }
+            if self.beta1[i] <= 0.0 {
+                return Err(format!("beta1[{i}] must be > 0"));
+            }
+        }
+        Ok(())
+    }
 }
 
 // ============================================================================

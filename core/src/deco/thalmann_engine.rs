@@ -47,6 +47,9 @@ impl ThalmannEngine {
         }
 
         let thal_params = &XVAL_HE_9_023;
+        if let Err(msg) = thal_params.validate() {
+            return Err(DecoSimError::InvalidParam { msg });
+        }
 
         // Build gas mix lookup
         let mut gas_lookup: std::collections::HashMap<i32, (f64, f64)> =
@@ -58,7 +61,7 @@ impl ThalmannEngine {
         let mut current_fo2 = default_gas.0;
         let mut current_fhe = default_gas.1;
 
-        let mut tissues = ThalmannTissueState::surface_equilibrium(thal_params);
+        let mut tissues = ThalmannTissueState::surface_equilibrium(surface_p, thal_params);
         let mut points = Vec::with_capacity(params.samples.len());
         let mut max_ceiling_m: f32 = 0.0;
         let mut max_gf99: f32 = 0.0;
@@ -217,10 +220,13 @@ struct ThalmannTissueState {
 
 impl ThalmannTissueState {
     /// Initialise all compartments at surface air equilibrium.
-    fn surface_equilibrium(params: &ThalmannParamSet) -> Self {
-        // N2 fraction in air, inspired through Thalmann's alveolar correction
+    ///
+    /// Uses the provided surface pressure (in bar) for altitude-aware
+    /// initialisation. Falls back to sea-level 33 fsw if not specified.
+    fn surface_equilibrium(surface_pressure_bar: f64, params: &ThalmannParamSet) -> Self {
+        let surface_fsw = bar_to_fsw(surface_pressure_bar);
         let f_inert_air = 1.0 - AIR_FO2; // ~0.7905 (N2 + trace gases)
-        let p_surface = (SURFACE_P_FSW - PACO2_FSW) * f_inert_air;
+        let p_surface = (surface_fsw - PACO2_FSW) * f_inert_air;
         Self {
             p_ig: vec![p_surface; params.num_compartments],
         }
@@ -624,7 +630,8 @@ mod tests {
     #[test]
     fn test_exponential_ongassing_matches_schreiner() {
         let params = &XVAL_HE_9_023;
-        let mut tissues = ThalmannTissueState::surface_equilibrium(params);
+        let mut tissues =
+            ThalmannTissueState::surface_equilibrium(DEFAULT_SURFACE_PRESSURE, params);
         let initial = tissues.p_ig[0];
 
         // On-gassing at high pressure — should be purely exponential
@@ -781,7 +788,7 @@ mod tests {
     #[test]
     fn test_zero_ceiling_at_equilibrium() {
         let params = &XVAL_HE_9_023;
-        let tissues = ThalmannTissueState::surface_equilibrium(params);
+        let tissues = ThalmannTissueState::surface_equilibrium(DEFAULT_SURFACE_PRESSURE, params);
         let ceil = tissues.ceiling_fsw(params);
         assert!(
             ceil <= 0.0,
@@ -1143,5 +1150,82 @@ mod tests {
             (result3 - 3.0).abs() < 0.01,
             "0.1m should round to 3.0m, got {result3}"
         );
+    }
+
+    #[test]
+    fn test_altitude_surface_pressure() {
+        // At altitude (e.g., 2000m, ~0.80 bar), initial tissue tension should
+        // be lower than at sea level (1.01325 bar).
+        let params = &XVAL_HE_9_023;
+        let sea_level = ThalmannTissueState::surface_equilibrium(DEFAULT_SURFACE_PRESSURE, params);
+        let altitude = ThalmannTissueState::surface_equilibrium(0.80, params);
+
+        assert!(
+            altitude.p_ig[0] < sea_level.p_ig[0],
+            "Altitude tissue ({}) should be lower than sea level ({})",
+            altitude.p_ig[0],
+            sea_level.p_ig[0]
+        );
+    }
+
+    #[test]
+    fn test_altitude_produces_different_result() {
+        // Same dive profile at altitude should produce different deco output
+        let samples = vec![sample(0, 0.0), sample(60, 30.0), sample(1200, 30.0)];
+        let mut sea_params = default_params(samples.clone());
+        sea_params.surface_pressure_bar = Some(1.01325);
+
+        let mut alt_params = default_params(samples);
+        alt_params.surface_pressure_bar = Some(0.80); // ~2000m altitude
+
+        let sea_result = ThalmannEngine.simulate(&sea_params).unwrap();
+        let alt_result = ThalmannEngine.simulate(&alt_params).unwrap();
+
+        // At altitude, effective depth is greater → more loading → higher ceiling
+        let sea_ceil = sea_result.points.last().unwrap().ceiling_m;
+        let alt_ceil = alt_result.points.last().unwrap().ceiling_m;
+        assert!(
+            alt_ceil >= sea_ceil,
+            "Altitude ceiling ({alt_ceil}) should be >= sea level ({sea_ceil})"
+        );
+    }
+
+    #[test]
+    fn test_param_validation_sdr_zero() {
+        let bad_params = ThalmannParamSet {
+            num_compartments: 1,
+            half_times_min: &[10.0],
+            sdr: &[0.0], // invalid!
+            m0_fsw: &[85.0],
+            beta1: &[1.0],
+            pbovp_fsw: 0.0,
+        };
+        assert!(bad_params.validate().is_err());
+    }
+
+    #[test]
+    fn test_param_validation_beta1_zero() {
+        let bad_params = ThalmannParamSet {
+            num_compartments: 1,
+            half_times_min: &[10.0],
+            sdr: &[1.0],
+            m0_fsw: &[85.0],
+            beta1: &[0.0], // invalid!
+            pbovp_fsw: 0.0,
+        };
+        assert!(bad_params.validate().is_err());
+    }
+
+    #[test]
+    fn test_param_validation_length_mismatch() {
+        let bad_params = ThalmannParamSet {
+            num_compartments: 2,
+            half_times_min: &[10.0], // only 1 element, need 2
+            sdr: &[1.0, 1.0],
+            m0_fsw: &[85.0, 64.0],
+            beta1: &[1.0, 1.0],
+            pbovp_fsw: 0.0,
+        };
+        assert!(bad_params.validate().is_err());
     }
 }
