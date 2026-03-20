@@ -80,6 +80,9 @@ pub struct ProfileGenResult {
     pub bottom_end_t_sec: i32,
     /// Total dive time (seconds).
     pub total_time_sec: i32,
+    /// True if the pass-1 deco planner hit a safety limit (e.g., max stop time)
+    /// and the ascent schedule may be incomplete.
+    pub truncated: bool,
 }
 
 // ============================================================================
@@ -210,6 +213,7 @@ pub fn generate_dive_profile(params: ProfileGenParams) -> Result<ProfileGenResul
         descent_end_t_sec: descent_end_t,
         bottom_end_t_sec: bottom_end_t,
         total_time_sec,
+        truncated: pass1_result.truncated,
     })
 }
 
@@ -278,18 +282,21 @@ fn validate_params(params: &ProfileGenParams) -> Result<(), DecoSimError> {
         }
     }
 
-    // Validate gas plan: at most one gas with switch_depth_m == None (bottom gas)
-    let bottom_gas_count = params
-        .gas_plan
-        .iter()
-        .filter(|g| g.switch_depth_m.is_none())
-        .count();
-    if bottom_gas_count > 1 {
-        return Err(DecoSimError::InvalidParam {
-            msg: format!(
-                "gas_plan must have at most one gas with switch_depth_m = None (bottom gas), found {bottom_gas_count}"
-            ),
-        });
+    // Validate gas plan: exactly one gas with switch_depth_m == None (bottom gas)
+    // when gas_plan is non-empty; empty gas_plan defaults to air.
+    if !params.gas_plan.is_empty() {
+        let bottom_gas_count = params
+            .gas_plan
+            .iter()
+            .filter(|g| g.switch_depth_m.is_none())
+            .count();
+        if bottom_gas_count != 1 {
+            return Err(DecoSimError::InvalidParam {
+                msg: format!(
+                    "gas_plan must have exactly one gas with switch_depth_m = None (bottom gas), found {bottom_gas_count}"
+                ),
+            });
+        }
     }
 
     Ok(())
@@ -707,6 +714,21 @@ mod tests {
     fn test_negative_sample_interval_rejected() {
         let mut params = air_params(30.0, 600);
         params.sample_interval_sec = Some(-5);
+        let result = generate_dive_profile(params);
+        assert!(matches!(result, Err(DecoSimError::InvalidParam { .. })));
+    }
+
+    #[test]
+    fn test_no_bottom_gas_rejected() {
+        let mut params = air_params(30.0, 600);
+        params.gas_plan = vec![GasSwitchPlan {
+            gas: GasMixInput {
+                mix_index: 0,
+                o2_fraction: 0.50,
+                he_fraction: 0.0,
+            },
+            switch_depth_m: Some(21.0),
+        }];
         let result = generate_dive_profile(params);
         assert!(matches!(result, Err(DecoSimError::InvalidParam { .. })));
     }
