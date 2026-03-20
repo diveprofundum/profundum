@@ -346,7 +346,7 @@ struct ReplayProfileSheet: View {
                 )
                 StatCard(
                     title: "Stops",
-                    value: "\(result.decoResult.decoStops.count)"
+                    value: "\(result.plannedStops.count)"
                 )
                 StatCard(
                     title: "Max Ceiling",

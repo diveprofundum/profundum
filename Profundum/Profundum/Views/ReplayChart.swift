@@ -442,15 +442,17 @@ final class ReplayAnimationController {
     private func startPlaying() {
         isPlaying = true
         let interval: TimeInterval = 1.0 / 30.0
-        let t = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            self.visibleTimeSec += self.speed.rawValue * Float(interval)
-            if self.visibleTimeSec >= self.totalTimeSec {
-                self.visibleTimeSec = self.totalTimeSec
-                self.pause()
-                #if os(iOS)
-                UIAccessibility.post(notification: .announcement, argument: "Profile animation complete")
-                #endif
+        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.visibleTimeSec += self.speed.rawValue * Float(interval)
+                if self.visibleTimeSec >= self.totalTimeSec {
+                    self.visibleTimeSec = self.totalTimeSec
+                    self.pause()
+                    #if os(iOS)
+                    UIAccessibility.post(notification: .announcement, argument: "Profile animation complete")
+                    #endif
+                }
             }
         }
         RunLoop.main.add(t, forMode: .common)
