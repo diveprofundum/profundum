@@ -11,7 +11,7 @@
 pub enum DecoModel {
     /// Bühlmann ZHL-16C with gradient factors (Baker method).
     BuhlmannZhl16c,
-    /// Thalmann EL-DCA (stub — not yet implemented).
+    /// Thalmann EL-DCA with asymmetric E-L gas kinetics and MPTT ceilings.
     ThalmannElDca,
 }
 
@@ -59,7 +59,7 @@ pub struct DecoSimPoint {
     pub surface_gf: f32,
     /// Time-to-surface in seconds (0 if no deco obligation).
     pub tts_sec: i32,
-    /// Index (0–15) of the leading (most loaded) compartment.
+    /// Index of the leading (most loaded) compartment.
     pub leading_compartment: u8,
     /// No-decompression limit in seconds (0 if in deco).
     pub ndl_sec: i32,

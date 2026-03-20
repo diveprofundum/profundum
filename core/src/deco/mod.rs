@@ -8,6 +8,7 @@ pub mod types;
 
 mod buhlmann_engine;
 mod thalmann_engine;
+mod thalmann_params;
 
 pub use types::*;
 
@@ -47,10 +48,10 @@ mod tests {
     }
 
     #[test]
-    fn test_thalmann_returns_unsupported() {
+    fn test_dispatch_thalmann() {
         let params = DecoSimParams {
             model: DecoModel::ThalmannElDca,
-            samples: vec![sample(0, 0.0)],
+            samples: vec![sample(0, 0.0), sample(600, 20.0)],
             gas_mixes: vec![],
             surface_pressure_bar: None,
             ascent_rate_m_min: None,
@@ -61,8 +62,9 @@ mod tests {
             plan_ascent: false,
         };
 
-        let result = compute_deco_simulation(params);
-        assert!(matches!(result, Err(DecoSimError::UnsupportedModel { .. })));
+        let result = compute_deco_simulation(params).unwrap();
+        assert_eq!(result.points.len(), 2);
+        assert_eq!(result.model, DecoModel::ThalmannElDca);
     }
 
     #[test]

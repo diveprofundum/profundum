@@ -93,7 +93,8 @@ The Rust layer is a minimal, stateless compute library:
   - **mod.rs**: `DecoEngine` trait, `DecoModel` enum dispatch, public `compute_deco_simulation`
   - **types.rs**: `DecoSimParams`, `DecoSimResult`, `DecoSimPoint`, `DecoStop`, `DecoSimError`
   - **buhlmann_engine.rs**: Bühlmann ZHL-16C + Baker GF (ceilings, stops, TTS, NDL)
-  - **thalmann_engine.rs**: Thalmann EL-DCA stub (returns `UnsupportedModel`)
+  - **thalmann_engine.rs**: Thalmann EL-DCA with E-L gas kinetics and MPTT ceilings
+  - **thalmann_params.rs**: XVal-He-9_023 parameter set, unit conversions, blood gas constants
   - **shared.rs**: Shared physics constants and helpers (used by both `buhlmann.rs` and deco engine)
 
 ### Swift Storage Layer (apple/DivelogCore/)
