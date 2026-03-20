@@ -172,7 +172,7 @@ impl BuhlmannEngine {
         }
 
         // Deco stop planning from final state
-        let deco_stops = if params.plan_ascent {
+        let (deco_stops, truncated) = if params.plan_ascent {
             let last_sample = params.samples.last().unwrap();
             let current_depth_m = (last_sample.depth_m as f64).max(0.0);
             let pp = PlanParams {
@@ -188,7 +188,7 @@ impl BuhlmannEngine {
             };
             plan_deco_stops(&tissues, current_depth_m, &pp)
         } else {
-            Vec::new()
+            (Vec::new(), false)
         };
 
         let total_deco_time_sec: i32 = deco_stops.iter().map(|s| s.duration_sec).sum();
@@ -201,6 +201,7 @@ impl BuhlmannEngine {
             max_gf99,
             max_tts_sec,
             model: DecoModel::BuhlmannZhl16c,
+            truncated,
         })
     }
 }
@@ -387,7 +388,7 @@ struct PlanParams {
 ///
 /// Clones tissues, simulates ascent with stops, returns total time in seconds.
 fn compute_tts(tissues: &EngineTissueState, current_depth_m: f64, pp: &PlanParams) -> i32 {
-    let stops = plan_deco_stops(tissues, current_depth_m, pp);
+    let (stops, _truncated) = plan_deco_stops(tissues, current_depth_m, pp);
 
     let mut total_sec = 0.0;
     let mut depth = current_depth_m;
@@ -490,6 +491,11 @@ fn compute_ndl(
 
 /// Plan deco stops from current depth/tissue state to the surface.
 ///
+/// NOTE: The planner uses OC gas fractions for ascent computation, even for
+/// CCR profiles. This is the conservative (bailout) assumption — CCR divers
+/// plan for loss-of-loop scenarios. True CCR ascent planning with setpoint
+/// schedules is a future enhancement.
+///
 /// Algorithm:
 /// 1. Find the first stop (ceiling rounded up to stop_interval)
 /// 2. Ascend at ascent_rate, updating tissues during travel
@@ -499,10 +505,11 @@ fn plan_deco_stops(
     tissues: &EngineTissueState,
     current_depth_m: f64,
     pp: &PlanParams,
-) -> Vec<DecoStop> {
+) -> (Vec<DecoStop>, bool) {
     let mut tissues = tissues.clone();
     let mut stops = Vec::new();
     let mut depth = current_depth_m;
+    let mut truncated = false;
 
     // Determine first stop from ceiling
     let ceil_p = tissues.gf_ceiling(pp.gf_low, pp.gf_high, pp.first_stop_depth_m, pp.surface_p);
@@ -518,7 +525,7 @@ fn plan_deco_stops(
     let first_stop = pp.first_stop_depth_m.unwrap_or(stop_depth);
 
     if stop_depth <= 0.0 {
-        return stops; // No deco obligation
+        return (stops, false); // No deco obligation
     }
 
     // Ascend to first stop, updating tissues during travel
@@ -564,6 +571,7 @@ fn plan_deco_stops(
             stop_time_sec += 60.0;
 
             if stop_time_sec > max_total_stop_time {
+                truncated = true;
                 break; // Safety limit
             }
         }
@@ -593,7 +601,7 @@ fn plan_deco_stops(
         current_stop = next_stop;
     }
 
-    stops
+    (stops, truncated)
 }
 
 /// Simulate ascent between two depths, updating tissue state during travel.

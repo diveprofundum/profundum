@@ -202,4 +202,5 @@ dictionary DecoSimResult {
     f32 max_gf99;
     i32 max_tts_sec;
     DecoModel model;
+    boolean truncated;
 };

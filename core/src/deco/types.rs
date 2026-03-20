@@ -93,6 +93,9 @@ pub struct DecoSimResult {
     pub max_tts_sec: i32,
     /// The model that was used.
     pub model: DecoModel,
+    /// True if the planner hit a safety limit (e.g., max stop time exceeded)
+    /// and the deco schedule may be incomplete.
+    pub truncated: bool,
 }
 
 /// Errors that can occur during deco simulation.
