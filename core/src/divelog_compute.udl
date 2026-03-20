@@ -25,6 +25,10 @@ namespace divelog_compute {
         sequence<GasMixInput> gas_mixes,
         f64? surface_pressure_bar
     );
+
+    // Multi-model deco simulation — ceilings, stops, TTS, NDL
+    [Throws=DecoSimError]
+    DecoSimResult compute_deco_simulation(DecoSimParams params);
 };
 
 // ============================================================================
@@ -142,4 +146,60 @@ dictionary SurfaceGfPoint {
     f32 surface_gf;
     u8 leading_compartment;
     f32 gf99;
+};
+
+// ============================================================================
+// Deco Simulation Types
+// ============================================================================
+
+enum DecoModel {
+    "BuhlmannZhl16c",
+    "ThalmannElDca",
+};
+
+[Error]
+enum DecoSimError {
+    "EmptySamples",
+    "UnsupportedModel",
+    "InvalidParam",
+};
+
+dictionary DecoSimParams {
+    DecoModel model;
+    sequence<SampleInput> samples;
+    sequence<GasMixInput> gas_mixes;
+    f64? surface_pressure_bar;
+    f64? ascent_rate_m_min;
+    f64? last_stop_depth_m;
+    f64? stop_interval_m;
+    u8? gf_low;
+    u8? gf_high;
+    boolean plan_ascent;
+};
+
+dictionary DecoSimPoint {
+    i32 t_sec;
+    f32 depth_m;
+    f32 ceiling_m;
+    f32 gf99;
+    f32 surface_gf;
+    i32 tts_sec;
+    u8 leading_compartment;
+    i32 ndl_sec;
+};
+
+dictionary DecoStop {
+    f32 depth_m;
+    i32 duration_sec;
+    i32 gas_mix_index;
+};
+
+dictionary DecoSimResult {
+    sequence<DecoSimPoint> points;
+    sequence<DecoStop> deco_stops;
+    i32 total_deco_time_sec;
+    f32 max_ceiling_m;
+    f32 max_gf99;
+    i32 max_tts_sec;
+    DecoModel model;
 };
