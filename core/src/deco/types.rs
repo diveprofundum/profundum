@@ -59,7 +59,7 @@ pub struct DecoSimPoint {
     pub surface_gf: f32,
     /// Time-to-surface in seconds (0 if no deco obligation).
     pub tts_sec: i32,
-    /// Index (0–15) of the leading (most loaded) compartment.
+    /// Index of the leading (most loaded) compartment.
     pub leading_compartment: u8,
     /// No-decompression limit in seconds (0 if in deco).
     pub ndl_sec: i32,
