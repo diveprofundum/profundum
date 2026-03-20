@@ -23,8 +23,8 @@ struct ReplayProfileSheet: View {
     @State private var setpointText: String = "1.3"
     @State private var surfacePressureText: String = "1.01325"
     @State private var tempText: String = ""
-    @State private var lastStopDepthText: String = "3.0"
-    @State private var stopIntervalText: String = "3.0"
+    @State private var lastStopDepthText: String = ""
+    @State private var stopIntervalText: String = ""
 
     // MARK: - Result state
 
@@ -262,22 +262,22 @@ struct ReplayProfileSheet: View {
                     TextField("Last stop depth", text: $lastStopDepthText)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 80)
-                        .accessibilityLabel("Last stop depth in meters")
+                        .accessibilityLabel("Last stop depth in \(depthLabel)")
                         #if os(iOS)
                         .keyboardType(.decimalPad)
                         #endif
-                    Text("m")
+                    Text(depthLabel)
                         .foregroundColor(.secondary)
                 }
                 HStack {
                     TextField("Stop interval", text: $stopIntervalText)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 80)
-                        .accessibilityLabel("Deco stop interval in meters")
+                        .accessibilityLabel("Deco stop interval in \(depthLabel)")
                         #if os(iOS)
                         .keyboardType(.decimalPad)
                         #endif
-                    Text("m")
+                    Text(depthLabel)
                         .foregroundColor(.secondary)
                 }
             }
@@ -351,17 +351,17 @@ struct ReplayProfileSheet: View {
                 StatCard(
                     title: "Max Ceiling",
                     value: UnitFormatter.formatDepth(
-                        maxCeiling(result),
+                        result.decoResult.maxCeilingM,
                         unit: appState.depthUnit
                     )
                 )
                 StatCard(
                     title: "Max GF99",
-                    value: String(format: "%.0f%%", maxGf99(result))
+                    value: String(format: "%.0f%%", result.decoResult.maxGf99)
                 )
                 StatCard(
                     title: "Max TTS",
-                    value: "\(maxTts(result) / 60) min"
+                    value: "\(result.decoResult.maxTtsSec / 60) min"
                 )
             }
 
@@ -396,17 +396,6 @@ struct ReplayProfileSheet: View {
         r.totalTimeSec - r.bottomEndTSec
     }
 
-    private func maxCeiling(_ r: ProfileGenResult) -> Float {
-        r.samples.compactMap(\.ceilingM).max() ?? 0
-    }
-
-    private func maxGf99(_ r: ProfileGenResult) -> Float {
-        r.samples.compactMap(\.gf99).max() ?? 0
-    }
-
-    private func maxTts(_ r: ProfileGenResult) -> Int32 {
-        r.samples.compactMap(\.ttsSec).max() ?? 0
-    }
 
     // MARK: - Prefill
 
@@ -459,6 +448,10 @@ struct ReplayProfileSheet: View {
             setpointText = String(format: "%.1f", maxSp)
         }
 
+        // Advanced defaults in display units
+        lastStopDepthText = String(format: "%.0f", UnitFormatter.depth(3.0, unit: du))
+        stopIntervalText = String(format: "%.0f", UnitFormatter.depth(3.0, unit: du))
+
         // Surface pressure
         if let sp = dive.surfacePressureBar {
             surfacePressureText = String(format: "%.3f", sp)
@@ -501,8 +494,8 @@ struct ReplayProfileSheet: View {
 
         let surfacePressure = Double(surfacePressureText)
         let temp: Float? = Float(tempText).map { UnitFormatter.temperatureToMetric($0, from: tu) }
-        let lastStop = Double(lastStopDepthText)
-        let stopInterval = Double(stopIntervalText)
+        let lastStop: Double? = Float(lastStopDepthText).map { Double(UnitFormatter.depthToMetric($0, from: du)) }
+        let stopInterval: Double? = Float(stopIntervalText).map { Double(UnitFormatter.depthToMetric($0, from: du)) }
         let sp: Double? = dive.isCcr ? Double(setpointText) : nil
 
         return ProfileGenParams(
