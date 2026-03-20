@@ -162,40 +162,33 @@ struct ReplayChartData {
         self.surfGfLookup = sgLookup
 
         // -- Gas switch markers --
+        // Build mixIndex → label dictionary for O(1) lookup
+        var mixLabels: [Int32: String] = [:]
+        for mix in gasMixes {
+            mixLabels[mix.mixIndex] = DepthProfileChartData.gasLabel(
+                o2: Float(mix.o2Fraction), he: Float(mix.heFraction)
+            )
+        }
+
         var markers: [GasSwitchMarker] = []
         var gasLook: [Int32: String] = [:]
-        var currentMixIdx: Int32 = -1
-        // Find the first gas label
-        if let firstGas = gasMixes.first {
-            let label = DepthProfileChartData.gasLabel(
-                o2: Float(firstGas.o2Fraction), he: Float(firstGas.heFraction)
-            )
-            for s in samples where (s.gasmixIndex ?? 0) == firstGas.mixIndex {
-                gasLook[s.tSec] = label
-            }
-            currentMixIdx = firstGas.mixIndex
-        }
+        var currentMixIdx: Int32 = gasMixes.first?.mixIndex ?? -1
+        var currentLabel = mixLabels[currentMixIdx]
+
         for s in samples {
-            let mixIdx = s.gasmixIndex ?? -1
-            if mixIdx != currentMixIdx, mixIdx >= 0 {
+            let mixIdx = s.gasmixIndex ?? currentMixIdx
+            if mixIdx != currentMixIdx, mixIdx >= 0, let label = mixLabels[mixIdx] {
                 currentMixIdx = mixIdx
-                if let mix = gasMixes.first(where: { $0.mixIndex == mixIdx }) {
-                    let label = DepthProfileChartData.gasLabel(
-                        o2: Float(mix.o2Fraction), he: Float(mix.heFraction)
-                    )
-                    markers.append(GasSwitchMarker(
-                        id: markers.count,
-                        timeMinutes: Float(s.tSec) / 60.0,
-                        gasLabel: label,
-                        color: DepthProfileChartData.gasColor(index: markers.count)
-                    ))
-                }
+                currentLabel = label
+                markers.append(GasSwitchMarker(
+                    id: markers.count,
+                    timeMinutes: Float(s.tSec) / 60.0,
+                    gasLabel: label,
+                    color: DepthProfileChartData.gasColor(index: markers.count)
+                ))
             }
-            // Update gas lookup for all samples
-            if let mix = gasMixes.first(where: { $0.mixIndex == currentMixIdx }) {
-                gasLook[s.tSec] = DepthProfileChartData.gasLabel(
-                    o2: Float(mix.o2Fraction), he: Float(mix.heFraction)
-                )
+            if let label = currentLabel {
+                gasLook[s.tSec] = label
             }
         }
         self.gasSwitchMarkers = markers
@@ -291,19 +284,28 @@ struct ReplayChartData {
         return depthPoints[lo]
     }
 
-    /// Find nearest sample tSec to a given time in minutes.
+    /// Binary search for the nearest sample tSec to a given time in minutes.
     func nearestTSec(to timeMinutes: Float, in samples: [SampleInput]) -> Int32? {
-        let targetSec = timeMinutes * 60.0
-        var bestIdx = 0
-        var bestDist: Float = .greatestFiniteMagnitude
-        for (i, s) in samples.enumerated() {
-            let dist = abs(Float(s.tSec) - targetSec)
-            if dist < bestDist {
-                bestDist = dist
-                bestIdx = i
+        guard !samples.isEmpty else { return nil }
+        let targetSec = Int32((timeMinutes * 60.0).rounded())
+        var lo = 0
+        var hi = samples.count - 1
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if samples[mid].tSec < targetSec {
+                lo = mid + 1
+            } else {
+                hi = mid
             }
         }
-        return samples.isEmpty ? nil : samples[bestIdx].tSec
+        if lo > 0 {
+            let prev = samples[lo - 1].tSec
+            let curr = samples[lo].tSec
+            if abs(prev - targetSec) < abs(curr - targetSec) {
+                return prev
+            }
+        }
+        return samples[lo].tSec
     }
 
     /// Denormalize a negative Y chart value back to GF99 percentage.
@@ -397,7 +399,7 @@ enum AnimationSpeed: Float, CaseIterable, Identifiable {
 
 // MARK: - Animation controller
 
-@Observable
+@MainActor @Observable
 final class ReplayAnimationController {
     var visibleTimeSec: Float = 0
     var isPlaying: Bool = false
@@ -444,11 +446,6 @@ final class ReplayAnimationController {
         visibleTimeSec = min(max(time, 0), totalTimeSec)
     }
 
-    func skipToEnd() {
-        pause()
-        visibleTimeSec = totalTimeSec
-    }
-
     private func startPlaying() {
         isPlaying = true
         let interval: TimeInterval = 1.0 / 30.0
@@ -466,7 +463,8 @@ final class ReplayAnimationController {
     }
 
     deinit {
-        timer?.invalidate()
+        // Timer is already invalidated by pause() in onDisappear;
+        // MainActor isolation prevents direct access here.
     }
 }
 
@@ -642,13 +640,14 @@ struct ReplayChart: View {
 
     @ChartContentBuilder
     private var decoStopContent: some ChartContent {
+        let bandHalfHeight: Float = depthUnit == .feet ? 1.0 : 0.3
         ForEach(data.decoStopBands.filter({ $0.startTimeMinutes <= visibleTimeMinutes })) { band in
             let visibleEnd = min(band.endTimeMinutes, visibleTimeMinutes)
             RectangleMark(
                 xStart: .value("Start", band.startTimeMinutes),
                 xEnd: .value("End", visibleEnd),
-                yStart: .value("Top", -(band.depth - 0.3)),
-                yEnd: .value("Bottom", -(band.depth + 0.3))
+                yStart: .value("Top", -(band.depth - bandHalfHeight)),
+                yEnd: .value("Bottom", -(band.depth + bandHalfHeight))
             )
             .foregroundStyle(Color.red.opacity(0.15))
         }
@@ -820,6 +819,9 @@ struct ReplayChartSection: View {
             let data = ReplayChartData(result: result, depthUnit: depthUnit)
             self.chartData = data
             self.controller = ReplayAnimationController(totalTimeSec: Float(result.totalTimeSec))
+        }
+        .onDisappear {
+            controller?.pause()
         }
         #if os(iOS)
         .fullScreenCover(isPresented: $showFullscreen) {

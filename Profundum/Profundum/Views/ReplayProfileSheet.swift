@@ -1,4 +1,3 @@
-import Charts
 import DivelogCore
 import SwiftUI
 
