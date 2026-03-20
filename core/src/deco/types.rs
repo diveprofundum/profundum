@@ -11,7 +11,7 @@
 pub enum DecoModel {
     /// Bühlmann ZHL-16C with gradient factors (Baker method).
     BuhlmannZhl16c,
-    /// Thalmann EL-DCA (stub — not yet implemented).
+    /// Thalmann EL-DCA with asymmetric E-L gas kinetics and MPTT ceilings.
     ThalmannElDca,
 }
 
