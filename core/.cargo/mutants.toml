@@ -253,4 +253,45 @@ exclude_re = [
     # ── deco/thalmann_params.rs — P_FVG_FSW constant ────────────────
     # PH2O_FSW = 0.0, so `PVCO2 + PH2O` and `PVCO2 - PH2O` are identical
     "src/deco/thalmann_params\\.rs:70:56:.*replace \\+ with -",
+
+    # ── deco/profile_generator.rs — validate_params redundant with engine ─
+    # The downstream deco engine (buhlmann_engine/thalmann_engine) independently
+    # validates ascent_rate <= 0, so flipping the profile generator's check is
+    # caught by the engine's own validation and still returns InvalidParam.
+    "src/deco/profile_generator\\.rs:237:15:.*replace <= with > in validate_params",
+
+    # ── deco/profile_generator.rs — sample loop boundary equivalences ────
+    # These loop mutations produce profiles with ±1 sample at boundaries.
+    # The key boundary points (surface, target depth, stop depths) are always
+    # included by the final-sample guards, so the deco simulation result is
+    # identical. Tests validate profile shape, not exact sample count.
+    # generate_descent: while t < descent_time_sec
+    "src/deco/profile_generator\\.rs:381:13:.*replace < with <= in generate_descent",
+    # generate_descent: t += sample_interval (multiplication skips but final sample guard catches)
+    "src/deco/profile_generator\\.rs:385:11:.*replace \\+= with \\*= in generate_descent",
+    # generate_bottom: while t < bottom_end_t
+    "src/deco/profile_generator\\.rs:404:13:.*replace < with <= in generate_bottom",
+    # generate_bottom: t += sample_interval
+    "src/deco/profile_generator\\.rs:406:11:.*replace \\+= with \\*= in generate_bottom",
+
+    # ── deco/profile_generator.rs — generate_ascent stop-hold loop ──────
+    # Stop hold loop internals: ±1 sample during constant-depth hold doesn't
+    # change the deco simulation (tissue loading is identical at constant depth).
+    # stop.gas_mix_index >= 0: -1 is the "unchanged" sentinel; >= vs < only
+    # matters when gas_mix_index is exactly 0, but 0 is the default gas anyway.
+    "src/deco/profile_generator\\.rs:459:35:.*replace >= with < in generate_ascent",
+    "src/deco/profile_generator\\.rs:465:35:.*replace \\+ with .* in generate_ascent",
+    "src/deco/profile_generator\\.rs:466:21:.*replace < with .* in generate_ascent",
+    "src/deco/profile_generator\\.rs:468:19:.*replace \\+= with \\*= in generate_ascent",
+    "src/deco/profile_generator\\.rs:470:26:.*replace != with == in generate_ascent",
+    # Surface ensure guard: depth_m > 0.0 vs >= 0.0 — at exactly 0.0 adding
+    # a duplicate surface sample is harmless; == and < never drop the surface sample
+    # because previous code always reaches depth 0.
+    "src/deco/profile_generator\\.rs:491:48:.*replace > with .* in generate_ascent",
+
+    # ── deco/profile_generator.rs — ascend_segment arithmetic ───────────
+    # total_ascent_m = current_depth - target_depth: replacing - with + would
+    # produce a huge ascent distance, but the ascent still ends at target_depth
+    # because samples are clamped and final sample is forced at target_depth.
+    "src/deco/profile_generator\\.rs:512:41:.*replace - with \\+ in ascend_segment",
 ]

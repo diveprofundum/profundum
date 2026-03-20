@@ -3,6 +3,7 @@
 //! Supports multiple deco models via the internal `DecoEngine` trait,
 //! dispatched by `DecoModel` enum at the FFI boundary.
 
+pub mod profile_generator;
 pub mod shared;
 pub mod types;
 
@@ -10,6 +11,7 @@ mod buhlmann_engine;
 mod thalmann_engine;
 mod thalmann_params;
 
+pub use profile_generator::{GasSwitchPlan, ProfileGenParams, ProfileGenResult};
 pub use types::*;
 
 use buhlmann_engine::BuhlmannEngine;

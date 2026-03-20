@@ -29,6 +29,10 @@ namespace divelog_compute {
     // Multi-model deco simulation — ceilings, stops, TTS, NDL
     [Throws=DecoSimError]
     DecoSimResult compute_deco_simulation(DecoSimParams params);
+
+    // Profile generator — synthetic dive profile with two-pass deco
+    [Throws=DecoSimError]
+    ProfileGenResult generate_dive_profile(ProfileGenParams params);
 };
 
 // ============================================================================
@@ -192,6 +196,41 @@ dictionary DecoStop {
     f32 depth_m;
     i32 duration_sec;
     i32 gas_mix_index;
+};
+
+// ============================================================================
+// Profile Generator Types
+// ============================================================================
+
+dictionary GasSwitchPlan {
+    GasMixInput gas;
+    f64? switch_depth_m;
+};
+
+dictionary ProfileGenParams {
+    f64 target_depth_m;
+    i32 bottom_time_sec;
+    f64? descent_rate_m_min;
+    f64? ascent_rate_m_min;
+    sequence<GasSwitchPlan> gas_plan;
+    DecoModel model;
+    f64? surface_pressure_bar;
+    u8? gf_low;
+    u8? gf_high;
+    f64? last_stop_depth_m;
+    f64? stop_interval_m;
+    f64? setpoint_ppo2;
+    i32? sample_interval_sec;
+    f32? temp_c;
+};
+
+dictionary ProfileGenResult {
+    sequence<SampleInput> samples;
+    sequence<GasMixInput> gas_mixes;
+    DecoSimResult deco_result;
+    i32 descent_end_t_sec;
+    i32 bottom_end_t_sec;
+    i32 total_time_sec;
 };
 
 dictionary DecoSimResult {
