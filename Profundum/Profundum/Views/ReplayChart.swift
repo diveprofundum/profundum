@@ -194,63 +194,55 @@ struct ReplayChartData {
         self.gasSwitchMarkers = markers
         self.gasLookup = gasLook
 
-        // -- Deco stop bands --
+        // -- Deco stop bands from pass-1 planned stops --
+        // Match each planned stop to its time range in the sample profile.
         var bands: [DecoStopBand] = []
-        let stops = result.decoResult.decoStops
-        if !stops.isEmpty {
-            // Walk samples from bottomEndTSec forward, matching stop depths
-            var stopIdx = 0
+        let plannedStops = result.plannedStops
+        if !plannedStops.isEmpty {
+            let bottomEnd = result.bottomEndTSec
+            var stopQueue = plannedStops[...]
             var bandStart: Int32?
             var bandDepthM: Float = 0
-            let bottomEnd = result.bottomEndTSec
+
             for s in samples where s.tSec >= bottomEnd {
-                if stopIdx < stops.count {
-                    let stopDepth = stops[stopIdx].depthM
-                    if abs(s.depthM - stopDepth) < 0.5 {
-                        if bandStart == nil {
-                            bandStart = s.tSec
-                            bandDepthM = stopDepth
-                        }
-                    } else if let start = bandStart {
-                        // End of this stop band
-                        let gasLabel: String? = {
-                            let gi = stops[stopIdx].gasMixIndex
-                            guard gi >= 0, let mix = gasMixes.first(where: { $0.mixIndex == gi }) else { return nil }
-                            return DepthProfileChartData.gasLabel(
-                                o2: Float(mix.o2Fraction), he: Float(mix.heFraction)
-                            )
-                        }()
-                        let durSec = s.tSec - start
-                        bands.append(DecoStopBand(
-                            id: bands.count,
-                            startTimeMinutes: Float(start) / 60.0,
-                            endTimeMinutes: Float(s.tSec) / 60.0,
-                            depth: UnitFormatter.depth(bandDepthM, unit: depthUnit),
-                            gasLabel: gasLabel,
-                            durationLabel: "\(durSec / 60) min"
-                        ))
-                        bandStart = nil
-                        stopIdx += 1
+                guard let nextStop = stopQueue.first else { break }
+                if abs(s.depthM - nextStop.depthM) < 0.5 {
+                    if bandStart == nil {
+                        bandStart = s.tSec
+                        bandDepthM = nextStop.depthM
                     }
+                } else if let start = bandStart {
+                    let durSec = s.tSec - start
+                    let gasLabel = mixLabels[nextStop.gasMixIndex]
+                    let durLabel = durSec >= 60
+                        ? "\(durSec / 60) min"
+                        : "\(durSec) sec"
+                    bands.append(DecoStopBand(
+                        id: bands.count,
+                        startTimeMinutes: Float(start) / 60.0,
+                        endTimeMinutes: Float(s.tSec) / 60.0,
+                        depth: UnitFormatter.depth(bandDepthM, unit: depthUnit),
+                        gasLabel: gasLabel,
+                        durationLabel: durLabel
+                    ))
+                    bandStart = nil
+                    stopQueue = stopQueue.dropFirst()
                 }
             }
             // Close any open band at end of dive
-            if let start = bandStart, stopIdx < stops.count, let lastSample = samples.last {
-                let gasLabel: String? = {
-                    let gi = stops[stopIdx].gasMixIndex
-                    guard gi >= 0, let mix = gasMixes.first(where: { $0.mixIndex == gi }) else { return nil }
-                    return DepthProfileChartData.gasLabel(
-                        o2: Float(mix.o2Fraction), he: Float(mix.heFraction)
-                    )
-                }()
+            if let start = bandStart, let nextStop = stopQueue.first, let lastSample = samples.last {
                 let durSec = lastSample.tSec - start
+                let gasLabel = mixLabels[nextStop.gasMixIndex]
+                let durLabel = durSec >= 60
+                    ? "\(durSec / 60) min"
+                    : "\(durSec) sec"
                 bands.append(DecoStopBand(
                     id: bands.count,
                     startTimeMinutes: Float(start) / 60.0,
                     endTimeMinutes: Float(lastSample.tSec) / 60.0,
                     depth: UnitFormatter.depth(bandDepthM, unit: depthUnit),
                     gasLabel: gasLabel,
-                    durationLabel: "\(durSec / 60) min"
+                    durationLabel: durLabel
                 ))
             }
         }
@@ -423,6 +415,7 @@ final class ReplayAnimationController {
     }
 
     func play() {
+        guard totalTimeSec > 0 else { return }
         guard !isAtEnd else {
             reset()
             return startPlaying()
@@ -449,7 +442,7 @@ final class ReplayAnimationController {
     private func startPlaying() {
         isPlaying = true
         let interval: TimeInterval = 1.0 / 30.0
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        let t = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             guard let self else { return }
             self.visibleTimeSec += self.speed.rawValue * Float(interval)
             if self.visibleTimeSec >= self.totalTimeSec {
@@ -460,6 +453,8 @@ final class ReplayAnimationController {
                 #endif
             }
         }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     deinit {
@@ -561,7 +556,7 @@ struct ReplayChart: View {
                                 let origin = geometry[proxy.plotAreaFrame].origin
                                 let x = value.location.x - origin.x
                                 if let time: Float = proxy.value(atX: x) {
-                                    selectedTime = min(time, visibleTimeMinutes)
+                                    selectedTime = max(0, min(time, visibleTimeMinutes))
                                 }
                             }
                             .onEnded { _ in
@@ -822,6 +817,9 @@ struct ReplayChartSection: View {
         }
         .onDisappear {
             controller?.pause()
+        }
+        .onChange(of: depthUnit) { _, newUnit in
+            chartData = ReplayChartData(result: result, depthUnit: newUnit)
         }
         #if os(iOS)
         .fullScreenCover(isPresented: $showFullscreen) {

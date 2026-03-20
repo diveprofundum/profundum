@@ -72,8 +72,11 @@ pub struct ProfileGenResult {
     pub gas_mixes: Vec<GasMixInput>,
     /// Full deco simulation result (pass 2) with per-point overlay data.
     /// Note: `deco_result.deco_stops` is empty because pass 2 uses `plan_ascent: false`.
-    /// The deco stop schedule is baked into the sample profile shape (ascent holds).
+    /// Use `planned_stops` for the deco stop schedule.
     pub deco_result: DecoSimResult,
+    /// Deco stops from pass-1 planning (depth, duration, gas index).
+    /// These are the stops used to build the ascent profile.
+    pub planned_stops: Vec<DecoStop>,
     /// Time at end of descent phase (seconds).
     pub descent_end_t_sec: i32,
     /// Time at end of bottom phase (seconds).
@@ -210,6 +213,7 @@ pub fn generate_dive_profile(params: ProfileGenParams) -> Result<ProfileGenResul
         samples,
         gas_mixes,
         deco_result,
+        planned_stops: pass1_result.deco_stops,
         descent_end_t_sec: descent_end_t,
         bottom_end_t_sec: bottom_end_t,
         total_time_sec,

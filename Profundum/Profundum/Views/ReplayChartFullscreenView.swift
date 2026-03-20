@@ -74,6 +74,9 @@ struct ReplayChartFullscreenView: View {
             fullscreenControls
                 .padding()
         }
+        .onDisappear {
+            controller.pause()
+        }
         #if os(iOS)
         .background(Color(.systemBackground))
         .onAppear {
