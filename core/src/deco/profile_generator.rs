@@ -71,6 +71,8 @@ pub struct ProfileGenResult {
     /// Gas mixes used in the profile.
     pub gas_mixes: Vec<GasMixInput>,
     /// Full deco simulation result (pass 2) with per-point overlay data.
+    /// Note: `deco_result.deco_stops` is empty because pass 2 uses `plan_ascent: false`.
+    /// The deco stop schedule is baked into the sample profile shape (ascent holds).
     pub deco_result: DecoSimResult,
     /// Time at end of descent phase (seconds).
     pub descent_end_t_sec: i32,
@@ -268,6 +270,13 @@ fn validate_params(params: &ProfileGenParams) -> Result<(), DecoSimError> {
             });
         }
     }
+    if let Some(si) = params.sample_interval_sec {
+        if si <= 0 {
+            return Err(DecoSimError::InvalidParam {
+                msg: format!("sample_interval_sec ({si}) must be > 0"),
+            });
+        }
+    }
 
     // Validate gas plan: at most one gas with switch_depth_m == None (bottom gas)
     let bottom_gas_count = params
@@ -291,6 +300,9 @@ fn validate_params(params: &ProfileGenParams) -> Result<(), DecoSimError> {
 // ============================================================================
 
 /// Build gas mix list and switch schedule from user's gas plan.
+///
+/// Gas mixes are re-indexed by their position in the plan (0, 1, 2, ...),
+/// so `GasSwitchPlan.gas.mix_index` is ignored in favour of positional order.
 ///
 /// Returns `(gas_mixes, bottom_gas_index, switch_schedule)` where
 /// `switch_schedule` is sorted by switch depth descending (deepest first).
@@ -681,6 +693,22 @@ mod tests {
         params.gf_high = Some(85);
         let result = generate_dive_profile(params);
         assert!(result.is_ok(), "Equal GF low/high should be valid");
+    }
+
+    #[test]
+    fn test_zero_sample_interval_rejected() {
+        let mut params = air_params(30.0, 600);
+        params.sample_interval_sec = Some(0);
+        let result = generate_dive_profile(params);
+        assert!(matches!(result, Err(DecoSimError::InvalidParam { .. })));
+    }
+
+    #[test]
+    fn test_negative_sample_interval_rejected() {
+        let mut params = air_params(30.0, 600);
+        params.sample_interval_sec = Some(-5);
+        let result = generate_dive_profile(params);
+        assert!(matches!(result, Err(DecoSimError::InvalidParam { .. })));
     }
 
     #[test]
