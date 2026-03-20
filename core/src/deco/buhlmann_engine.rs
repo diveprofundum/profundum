@@ -44,6 +44,15 @@ impl BuhlmannEngine {
         let last_stop_depth = params.last_stop_depth_m.unwrap_or(3.0);
         let stop_interval = params.stop_interval_m.unwrap_or(3.0);
 
+        if ascent_rate <= 0.0 || stop_interval <= 0.0 || last_stop_depth <= 0.0 {
+            return Err(DecoSimError::InvalidParam {
+                msg: format!(
+                    "ascent_rate ({ascent_rate}), stop_interval ({stop_interval}), \
+                     and last_stop_depth ({last_stop_depth}) must be > 0"
+                ),
+            });
+        }
+
         // Build gas mix lookup
         let mut gas_lookup: std::collections::HashMap<i32, (f64, f64)> =
             std::collections::HashMap::new();
@@ -1115,6 +1124,46 @@ mod tests {
 
         let result = engine.simulate(&params);
         assert!(matches!(result, Err(DecoSimError::InvalidParam { .. })));
+    }
+
+    #[test]
+    fn test_invalid_negative_params() {
+        let engine = BuhlmannEngine;
+        // Negative ascent rate
+        let params = DecoSimParams {
+            model: DecoModel::BuhlmannZhl16c,
+            samples: vec![sample(0, 0.0)],
+            gas_mixes: vec![],
+            surface_pressure_bar: None,
+            ascent_rate_m_min: Some(-1.0),
+            last_stop_depth_m: None,
+            stop_interval_m: None,
+            gf_low: None,
+            gf_high: None,
+            plan_ascent: false,
+        };
+        assert!(matches!(
+            engine.simulate(&params),
+            Err(DecoSimError::InvalidParam { .. })
+        ));
+
+        // Zero stop interval
+        let params = DecoSimParams {
+            model: DecoModel::BuhlmannZhl16c,
+            samples: vec![sample(0, 0.0)],
+            gas_mixes: vec![],
+            surface_pressure_bar: None,
+            ascent_rate_m_min: None,
+            last_stop_depth_m: None,
+            stop_interval_m: Some(0.0),
+            gf_low: None,
+            gf_high: None,
+            plan_ascent: false,
+        };
+        assert!(matches!(
+            engine.simulate(&params),
+            Err(DecoSimError::InvalidParam { .. })
+        ));
     }
 
     // ── CCR PPO2 test ─────────────────────────────────────────────────────

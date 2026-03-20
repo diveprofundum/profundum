@@ -68,10 +68,11 @@ Single version for the entire monorepo. Source of truth: `VERSION` file at root.
 │  ├── Native Models (Codable, FetchableRecord)               │
 │  └── CoreBluetooth (platform BLE)                           │
 ├─────────────────────────────────────────────────────────────┤
-│  Rust Compute Core (~500 lines, stateless)                  │
+│  Rust Compute Core (stateless)                              │
 │  ├── Formula parser (nom-based)                             │
 │  ├── Formula evaluator                                      │
-│  └── Metrics computation (DiveStats, SegmentStats)          │
+│  ├── Metrics computation (DiveStats, SegmentStats)          │
+│  └── Deco engine (Bühlmann ceilings/stops/TTS/NDL)         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -82,11 +83,18 @@ The Rust layer is a minimal, stateless compute library:
 - **lib.rs**: FFI entry point, re-exports public API via `uniffi::include_scaffolding!`
 - **error.rs**: `FormulaError` type for formula-related errors
 - **metrics.rs**: `DiveStats` and `SegmentStats` computation from pure input types
+- **buhlmann.rs**: Bühlmann ZHL-16C tissue sim for SurfGF/GF99 (existing API)
 - **formula/**: Formula parsing and evaluation engine
   - **ast.rs**: Abstract syntax tree types
   - **parser.rs**: nom-based expression parser
   - **evaluator.rs**: Expression evaluation with function support
   - **mod.rs**: Public API (`validate`, `compute`, `validate_with_variables`)
+- **deco/**: Multi-model decompression simulation engine
+  - **mod.rs**: `DecoEngine` trait, `DecoModel` enum dispatch, public `compute_deco_simulation`
+  - **types.rs**: `DecoSimParams`, `DecoSimResult`, `DecoSimPoint`, `DecoStop`, `DecoSimError`
+  - **buhlmann_engine.rs**: Bühlmann ZHL-16C + Baker GF (ceilings, stops, TTS, NDL)
+  - **thalmann_engine.rs**: Thalmann EL-DCA stub (returns `UnsupportedModel`)
+  - **shared.rs**: Shared physics constants and helpers (used by both `buhlmann.rs` and deco engine)
 
 ### Swift Storage Layer (apple/DivelogCore/)
 
@@ -126,6 +134,7 @@ namespace divelog_compute {
     DiveStats compute_dive_stats(DiveInput dive, sequence<SampleInput> samples);
     SegmentStats compute_segment_stats(i32 start_t_sec, i32 end_t_sec, sequence<SampleInput> samples, i32 dive_bottom_end_t, i32 dive_deco_start_t);
     sequence<FunctionInfo> supported_functions();
+    DecoSimResult compute_deco_simulation(DecoSimParams params);
 }
 ```
 
