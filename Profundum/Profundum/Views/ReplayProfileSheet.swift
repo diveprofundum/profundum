@@ -189,7 +189,8 @@ struct ReplayProfileSheet: View {
             }
             HStack(spacing: 12) {
                 Stepper("He: \(gasPlanEntries[index].hePercent)%",
-                        value: $gasPlanEntries[index].hePercent, in: 0...95)
+                        value: $gasPlanEntries[index].hePercent,
+                        in: 0...(100 - gasPlanEntries[index].o2Percent))
                     .frame(maxWidth: 200)
             }
             if index > 0 {
@@ -422,8 +423,8 @@ struct ReplayProfileSheet: View {
         } else {
             targetDepthText = String(format: "%.1f", UnitFormatter.depth(dive.maxDepthM, unit: du))
             bottomTimeMinutes = max(1, Int(dive.bottomTimeSec / 60))
-            descentRateText = "18"
-            ascentRateText = "9"
+            descentRateText = String(format: "%.0f", UnitFormatter.depth(18.0, unit: du))
+            ascentRateText = String(format: "%.0f", UnitFormatter.depth(9.0, unit: du))
             tempText = ""
         }
 
@@ -460,7 +461,7 @@ struct ReplayProfileSheet: View {
 
         // Surface pressure
         if let sp = dive.surfacePressureBar {
-            surfacePressureText = String(format: "%.5f", sp)
+            surfacePressureText = String(format: "%.3f", sp)
         }
     }
 
@@ -540,18 +541,16 @@ struct ReplayProfileSheet: View {
             return
         }
 
-        Task.detached {
+        Task {
             do {
-                let genResult = try DivelogCompute.generateDiveProfile(params: params)
-                await MainActor.run {
-                    result = genResult
-                    isGenerating = false
-                }
+                let genResult = try await Task.detached {
+                    try DivelogCompute.generateDiveProfile(params: params)
+                }.value
+                result = genResult
+                isGenerating = false
             } catch {
-                await MainActor.run {
-                    errorMessage = error.localizedDescription
-                    isGenerating = false
-                }
+                errorMessage = error.localizedDescription
+                isGenerating = false
             }
         }
     }
@@ -569,7 +568,7 @@ private enum ReplayError: Error {
     }
 }
 
-struct GasPlanEntry: Identifiable {
+private struct GasPlanEntry: Identifiable {
     let id = UUID()
     var o2Percent: Int
     var hePercent: Int
