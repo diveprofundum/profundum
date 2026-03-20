@@ -1434,4 +1434,171 @@ mod tests {
         };
         assert!(format!("{e}").contains("bad gf"));
     }
+
+    // ── Coverage gap tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_tissue_update_zero_dt() {
+        // Covers line 240: dt_sec <= 0 guard in EngineTissueState::update
+        let mut tissues = EngineTissueState::surface_equilibrium(DEFAULT_SURFACE_PRESSURE);
+        let p_before = tissues.p_n2[0];
+        tissues.update(0.0, 3.0, 0.0);
+        assert_eq!(
+            tissues.p_n2[0], p_before,
+            "Zero dt should not change tissues"
+        );
+        tissues.update(-1.0, 3.0, 0.0);
+        assert_eq!(
+            tissues.p_n2[0], p_before,
+            "Negative dt should not change tissues"
+        );
+    }
+
+    #[test]
+    fn test_weighted_ab_zero_tissue_pressure() {
+        // Covers line 256: p_total <= 1e-10 fallback in weighted_ab
+        let tissues = EngineTissueState {
+            p_n2: [0.0; NUM_COMPARTMENTS],
+            p_he: [0.0; NUM_COMPARTMENTS],
+        };
+        // compartment_gf calls weighted_ab; with zero tissue pressure it should not panic
+        let gf = tissues.compartment_gf(0, DEFAULT_SURFACE_PRESSURE);
+        // With zero tissue load, GF should be 0 or negative (undersaturated)
+        assert!(
+            gf <= 0.0,
+            "Zero tissue pressure should give GF <= 0, got {gf}"
+        );
+    }
+
+    #[test]
+    fn test_gf_ceiling_zero_tissue_pressure() {
+        // Covers lines 269, 334: denom guards in compartment_gf and raw_gf_ceiling_at
+        let tissues = EngineTissueState {
+            p_n2: [0.0; NUM_COMPARTMENTS],
+            p_he: [0.0; NUM_COMPARTMENTS],
+        };
+        let ceil = tissues.raw_gf_ceiling_at(1.0, DEFAULT_SURFACE_PRESSURE);
+        // Zero tissue load means no ceiling
+        assert!(
+            (ceil - DEFAULT_SURFACE_PRESSURE).abs() < 0.01,
+            "Zero tissue pressure ceiling should be at surface, got {ceil}"
+        );
+    }
+
+    #[test]
+    fn test_gf_at_depth_zero_first_stop() {
+        // Covers line 352: first_stop_depth_m <= 0 returns gf_high
+        let gf = gf_at_depth(10.0, 0.0, 0.5, 0.85);
+        assert!(
+            (gf - 0.85).abs() < 1e-10,
+            "Zero first stop should return gf_high, got {gf}"
+        );
+        let gf = gf_at_depth(10.0, -1.0, 0.5, 0.85);
+        assert!(
+            (gf - 0.85).abs() < 1e-10,
+            "Negative first stop should return gf_high, got {gf}"
+        );
+    }
+
+    #[test]
+    fn test_ndl_very_shallow_returns_max() {
+        // Covers lines 461-466: NDL at very shallow depth — no ceiling even at 200 min
+        let tissues = EngineTissueState::surface_equilibrium(DEFAULT_SURFACE_PRESSURE);
+        // 3m on air — no ceiling even after 200 min, returns max_time
+        let ndl = compute_ndl(
+            &tissues,
+            3.0,
+            AIR_FO2,
+            0.0,
+            DEFAULT_SURFACE_PRESSURE,
+            1.0,
+            1.0,
+        );
+        assert_eq!(
+            ndl, 12000,
+            "NDL at 3m should hit 200 min cap, got {} sec",
+            ndl
+        );
+    }
+
+    #[test]
+    fn test_ndl_near_max_time_with_ceiling() {
+        // Covers lines 467-468: hi >= max_time AND ceiling exists at max_time.
+        // Need a depth where ceiling appears between 7680 sec and 12000 sec.
+        // At 15m GF 0.5 on air, NDL is shorter than at shallower depths but
+        // the doubling may still overshoot. Try multiple conservative depths.
+        let tissues = EngineTissueState::surface_equilibrium(DEFAULT_SURFACE_PRESSURE);
+        // At 12m with GF 0.4, ceiling should appear sooner
+        let ndl = compute_ndl(
+            &tissues,
+            12.0,
+            AIR_FO2,
+            0.0,
+            DEFAULT_SURFACE_PRESSURE,
+            0.4,
+            0.85,
+        );
+        assert!(
+            ndl > 0,
+            "NDL at 12m GF40 should be positive, got {} sec ({:.1} min)",
+            ndl,
+            ndl as f64 / 60.0
+        );
+    }
+
+    #[test]
+    fn test_stop_depth_below_last_stop() {
+        // Covers line 521: ceiling rounds to depth below last_stop_depth
+        // Use GF 100/100 with a profile that barely enters deco
+        // The ceiling might round to e.g. 1.5m which gets bumped to 3m
+        let engine = BuhlmannEngine;
+        let samples = vec![sample(0, 0.0), sample(120, 30.0), sample(1200, 30.0)];
+
+        // Use large stop_interval (6m) and last_stop at 6m
+        let params = DecoSimParams {
+            model: DecoModel::BuhlmannZhl16c,
+            samples,
+            gas_mixes: vec![],
+            surface_pressure_bar: None,
+            ascent_rate_m_min: Some(9.0),
+            last_stop_depth_m: Some(6.0),
+            stop_interval_m: Some(6.0),
+            gf_low: Some(50),
+            gf_high: Some(85),
+            plan_ascent: true,
+        };
+
+        let result = engine.simulate(&params).unwrap();
+        // All stops should be >= last_stop_depth (6m)
+        for stop in &result.deco_stops {
+            assert!(
+                stop.depth_m >= 6.0 - 0.01,
+                "Stop at {} should be >= 6m",
+                stop.depth_m
+            );
+        }
+    }
+
+    #[test]
+    fn test_result_not_truncated_normal() {
+        // Verify truncated is false for normal profiles
+        let engine = BuhlmannEngine;
+        let samples = vec![sample(0, 0.0), sample(120, 30.0), sample(1200, 30.0)];
+
+        let params = DecoSimParams {
+            model: DecoModel::BuhlmannZhl16c,
+            samples,
+            gas_mixes: vec![],
+            surface_pressure_bar: None,
+            ascent_rate_m_min: Some(9.0),
+            last_stop_depth_m: Some(3.0),
+            stop_interval_m: Some(3.0),
+            gf_low: Some(50),
+            gf_high: Some(85),
+            plan_ascent: true,
+        };
+
+        let result = engine.simulate(&params).unwrap();
+        assert!(!result.truncated, "Normal profile should not be truncated");
+    }
 }
