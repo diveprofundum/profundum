@@ -1431,6 +1431,59 @@ mod tests {
     }
 
     #[test]
+    fn smoke_diag_oc_150ft_gf_comparison() {
+        // Compare deco times across GF settings for OC 150ft/40min Tx21/35+Nx50
+        for (gf_lo, gf_hi) in [(20, 85), (30, 85), (50, 85), (50, 90)] {
+            let params = ProfileGenParams {
+                target_depth_m: 45.72,
+                bottom_time_sec: 40 * 60,
+                descent_rate_m_min: Some(18.0),
+                ascent_rate_m_min: Some(9.0),
+                gas_plan: vec![
+                    GasSwitchPlan {
+                        gas: GasMixInput { mix_index: 0, o2_fraction: 0.21, he_fraction: 0.35 },
+                        switch_depth_m: None,
+                    },
+                    GasSwitchPlan {
+                        gas: GasMixInput { mix_index: 1, o2_fraction: 0.50, he_fraction: 0.0 },
+                        switch_depth_m: Some(21.0),
+                    },
+                ],
+                model: DecoModel::BuhlmannZhl16c,
+                surface_pressure_bar: None,
+                gf_low: Some(gf_lo),
+                gf_high: Some(gf_hi),
+                last_stop_depth_m: None,
+                stop_interval_m: None,
+                setpoint_ppo2: None,
+                thalmann_pdcs: None,
+                sample_interval_sec: None,
+                temp_c: None,
+            };
+            let result = generate_dive_profile(params).unwrap();
+            let total_min = result.total_time_sec / 60;
+            let deco_min = (result.total_time_sec - result.bottom_end_t_sec) / 60;
+            eprintln!("GF {gf_lo}/{gf_hi}: total={total_min} min, deco={deco_min} min, truncated={}", result.truncated);
+            if gf_lo == 50 && gf_hi == 85 {
+                // Dump stop-by-stop for diagnosis
+                let mut prev_d: f32 = 99.0;
+                let mut hold_start = 0i32;
+                for s in &result.samples {
+                    if s.t_sec >= result.bottom_end_t_sec {
+                        if (s.depth_m - prev_d).abs() > 0.3 {
+                            if hold_start > 0 && prev_d > 0.1 {
+                                eprintln!("  HOLD {:.0}m: {} sec ({:.1} min)", prev_d, s.t_sec - hold_start, (s.t_sec - hold_start) as f64 / 60.0);
+                            }
+                            prev_d = s.depth_m;
+                            hold_start = s.t_sec;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     #[ignore] // Known: single-gas deco with GF20 produces very long stops; needs gas-switch-aware planner
     fn smoke_diag_trimix_46m_40min_gf20_85() {
         // 46m/40min on Tx 21/35 with GF 20/85 — NO deco gas, single gas dive
@@ -1501,8 +1554,23 @@ mod tests {
         let deco_min = (result.total_time_sec - result.bottom_end_t_sec) / 60;
         eprintln!("=== OC Tx21/35+Nx50 150ft/40min GF20/85 ===");
         eprintln!("Total: {total_min} min, Deco: {deco_min} min");
+        eprintln!("Bottom end: {}s, Descent end: {}s", result.bottom_end_t_sec, result.descent_end_t_sec);
         eprintln!("Max ceiling: {}m, Max TTS: {}s", result.deco_result.max_ceiling_m, result.deco_result.max_tts_sec);
         eprintln!("Truncated: {}", result.truncated);
+        // Print the actual ascent profile to see where time is spent
+        let mut prev_depth: f32 = 99.0;
+        for s in &result.samples {
+            if s.t_sec >= result.bottom_end_t_sec && (s.depth_m - prev_depth).abs() > 0.5 {
+                eprintln!("  t={}s depth={:.1}m gas={:?} ceil={:?} tts={:?}",
+                    s.t_sec, s.depth_m, s.gasmix_index, s.ceiling_m, s.tts_sec);
+                prev_depth = s.depth_m;
+            }
+        }
+        // Count samples at each depth during ascent
+        let ascent_samples: Vec<_> = result.samples.iter()
+            .filter(|s| s.t_sec >= result.bottom_end_t_sec)
+            .collect();
+        eprintln!("Ascent samples: {}", ascent_samples.len());
         assert!(
             total_min < 250,
             "OC 150ft/40min GF20/85: total {total_min} min is unreasonable (expected <250)"
