@@ -664,9 +664,11 @@ fn plan_deco_stops(
 
         let mut stop_time_sec: f64 = 0.0;
 
-        // Simulate 1-minute increments until ceiling clears to next stop
+        // Simulate 1-minute increments until ceiling clears to next stop.
+        // Use GF at the NEXT stop depth (Baker method): to ascend from D to D',
+        // the ceiling at GF(D') must be ≤ D'.
         loop {
-            let gf = gf_at_depth(current_stop, first_stop, pp.gf_low, pp.gf_high);
+            let gf = gf_at_depth(next_stop, first_stop, pp.gf_low, pp.gf_high);
             let ceil_p = tissues.raw_gf_ceiling_at(gf, pp.surface_p);
             let ceil_depth = pressure_to_depth(ceil_p, pp.surface_p);
 
@@ -1745,3 +1747,110 @@ mod tests {
         assert!(!result.truncated, "Normal profile should not be truncated");
     }
 }
+
+    #[test]
+    fn diag_tissue_loading_150ft_40min_trimix() {
+        // Reproduce DecoPlanner 4 scenario exactly
+        // 150ft = 45.72m, 40 min bottom, Tx 21/35, descent 60ft/min, ascent 30ft/min
+        // Descent: 150ft at 60ft/min = 2.5 min = 150 sec
+        // Bottom: 40 min at 150ft on Tx 21/35
+        let surface_p = DEFAULT_SURFACE_PRESSURE;
+        let depth_m = 45.72;
+        let ambient_p = depth_to_pressure(depth_m, surface_p);
+        
+        // Descent: model as avg depth for 150 sec
+        let mut tissues = EngineTissueState::surface_equilibrium(surface_p);
+        let avg_descent_depth = depth_m / 2.0;
+        let avg_descent_p = depth_to_pressure(avg_descent_depth, surface_p);
+        let (fn2_d, fhe_d) = inspired_fractions(0.21, 0.35, None, avg_descent_p);
+        let pin2_d = (avg_descent_p - P_WATER_VAPOR) * fn2_d;
+        let pihe_d = (avg_descent_p - P_WATER_VAPOR) * fhe_d;
+        tissues.update(150.0, pin2_d, pihe_d);
+        
+        // Bottom: 40 min at 150ft on Tx 21/35
+        let (fn2_b, fhe_b) = inspired_fractions(0.21, 0.35, None, ambient_p);
+        let pin2_b = (ambient_p - P_WATER_VAPOR) * fn2_b;
+        let pihe_b = (ambient_p - P_WATER_VAPOR) * fhe_b;
+        tissues.update(40.0 * 60.0, pin2_b, pihe_b);
+        
+        eprintln!("=== Tissue state after 150ft/40min on Tx21/35 ===");
+        eprintln!("Ambient: {ambient_p:.4} bar, FN2: {fn2_b:.4}, FHe: {fhe_b:.4}");
+        eprintln!("Inspired N2: {pin2_b:.4} bar, Inspired He: {pihe_b:.4} bar");
+        for i in 0..NUM_COMPARTMENTS {
+            let p_total = tissues.p_n2[i] + tissues.p_he[i];
+            let (a, b) = tissues.weighted_ab(i);
+            let m_surf = a + surface_p / b;
+            let gf_surf = if m_surf > surface_p {
+                (p_total - surface_p) / (m_surf - surface_p)
+            } else { 0.0 };
+            if i < 8 { // only print fast/medium compartments
+                eprintln!("  C{:2}: N2={:.3} He={:.3} Total={:.3} M_surf={:.3} GF_surf={:.1}%",
+                    i+1, tissues.p_n2[i], tissues.p_he[i], p_total, m_surf, gf_surf * 100.0);
+            }
+        }
+        
+        // Now compute ceiling with GF 20/85
+        let ceil_p_20 = tissues.raw_gf_ceiling_at(0.20, surface_p);
+        let ceil_depth_20 = pressure_to_depth(ceil_p_20, surface_p);
+        let ceil_p_85 = tissues.raw_gf_ceiling_at(0.85, surface_p);
+        let ceil_depth_85 = pressure_to_depth(ceil_p_85, surface_p);
+        eprintln!("Ceiling at GF20: {:.1}m, at GF85: {:.1}m", ceil_depth_20, ceil_depth_85);
+    }
+
+    #[test]
+    fn diag_stop_time_at_3m_on_nx50() {
+        // After a full 150ft/40min dive + ascent to 3m, how long at 3m on Nx50?
+        // Simulate the full dive first, then measure time at 3m
+        let surface_p = DEFAULT_SURFACE_PRESSURE;
+        let depth_m = 45.72;
+        
+        let mut tissues = EngineTissueState::surface_equilibrium(surface_p);
+        
+        // Descent 150 sec at avg depth
+        let avg_p = depth_to_pressure(depth_m / 2.0, surface_p);
+        let (fn2, fhe) = inspired_fractions(0.21, 0.35, None, avg_p);
+        tissues.update(150.0, (avg_p - P_WATER_VAPOR) * fn2, (avg_p - P_WATER_VAPOR) * fhe);
+        
+        // Bottom 40 min
+        let bottom_p = depth_to_pressure(depth_m, surface_p);
+        let (fn2, fhe) = inspired_fractions(0.21, 0.35, None, bottom_p);
+        tissues.update(2400.0, (bottom_p - P_WATER_VAPOR) * fn2, (bottom_p - P_WATER_VAPOR) * fhe);
+        
+        // Ascent to 21m on Tx 21/35 (about 82 sec at 18 m/min... wait, 9 m/min)
+        // 45.72 - 21 = 24.72m at 9 m/min = 165 sec
+        let avg_p = depth_to_pressure(33.0, surface_p);
+        let (fn2, fhe) = inspired_fractions(0.21, 0.35, None, avg_p);
+        tissues.update(165.0, (avg_p - P_WATER_VAPOR) * fn2, (avg_p - P_WATER_VAPOR) * fhe);
+        
+        // Simulate stops from 21m to 3m on Nx50 (quick approximation - 20 min)
+        // This is a rough simulation - just off-gas for 20 min at avg 12m on Nx50
+        let avg_p = depth_to_pressure(12.0, surface_p);
+        let (fn2, fhe) = inspired_fractions(0.50, 0.0, None, avg_p);
+        tissues.update(1200.0, (avg_p - P_WATER_VAPOR) * fn2, (avg_p - P_WATER_VAPOR) * fhe);
+        
+        // Now at 3m on Nx50 - how long to clear at GF 77.8%?
+        let stop_depth = 3.0;
+        let stop_p = depth_to_pressure(stop_depth, surface_p);
+        let (fn2_stop, fhe_stop) = inspired_fractions(0.50, 0.0, None, stop_p);
+        let pin2 = (stop_p - P_WATER_VAPOR) * fn2_stop;
+        let pihe = (stop_p - P_WATER_VAPOR) * fhe_stop;
+        
+        let gf = 0.778; // GF at 3m with first_stop=27m, GF 20/85
+        
+        let mut t = tissues.clone();
+        let mut seconds = 0;
+        loop {
+            let ceil_p = t.raw_gf_ceiling_at(gf, surface_p);
+            let ceil_depth = pressure_to_depth(ceil_p, surface_p);
+            if ceil_depth <= 0.0 {
+                break;
+            }
+            t.update(60.0, pin2, pihe);
+            seconds += 60;
+            if seconds > 7200 { break; }
+        }
+        
+        eprintln!("=== Time at 3m on Nx50 at GF 77.8% ===");
+        eprintln!("Stop time: {} sec ({} min)", seconds, seconds / 60);
+        // For reference, DP4 gives 22 min at 10ft
+    }
