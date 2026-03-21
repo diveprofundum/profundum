@@ -368,17 +368,29 @@ struct ThalmannPlanParams<'a> {
 
 impl ThalmannPlanParams<'_> {
     fn gas_at_depth(&self, depth_m: f64) -> &ThalPlanGas {
+        // Find the shallowest deco gas whose switch depth is >= current depth.
+        // This gives the richest available gas at this depth.
+        let mut best: Option<&ThalPlanGas> = None;
         for gas in &self.gases {
             if let Some(switch_depth) = gas.switch_depth_m {
                 if depth_m <= switch_depth {
-                    return gas;
+                    match best {
+                        None => best = Some(gas),
+                        Some(prev) => {
+                            if switch_depth < prev.switch_depth_m.unwrap_or(f64::MAX) {
+                                best = Some(gas);
+                            }
+                        }
+                    }
                 }
             }
         }
-        self.gases.last().unwrap_or(&ThalPlanGas {
-            fo2: 0.21,
-            fhe: 0.0,
-            switch_depth_m: None,
+        best.unwrap_or_else(|| {
+            self.gases.last().unwrap_or(&ThalPlanGas {
+                fo2: 0.21,
+                fhe: 0.0,
+                switch_depth_m: None,
+            })
         })
     }
 
@@ -576,8 +588,9 @@ fn plan_deco_stops_thalmann(
         return (stops, false);
     }
 
-    // Ascend to first stop
-    ascend_to_thalmann(&mut tissues, &mut depth, stop_depth, pp);
+    // Ascend to first stop, segmenting at gas switch boundaries for correct
+    // tissue loading.
+    ascend_with_gas_switches_thalmann(&mut tissues, &mut depth, stop_depth, pp);
 
     // Process stops
     let mut current_stop = stop_depth;
@@ -623,13 +636,35 @@ fn plan_deco_stops_thalmann(
             }
         }
 
-        if stop_time_sec > 0.0 {
-            stops.push(DecoStop {
-                depth_m: current_stop as f32,
-                duration_sec: stop_time_sec as i32,
-                gas_mix_index: -1,
-            });
+        // Enforce minimum 1-minute stop at each depth (standard practice:
+        // the diver pauses at each stop increment during ascent).
+        if stop_time_sec < 60.0 {
+            let gas = pp.gas_at_depth(current_stop);
+            let ambient_p = depth_to_pressure(current_stop, pp.surface_p);
+            let ambient_fsw = bar_to_fsw(ambient_p);
+            let (fn2, fhe_pad) = inspired_fractions(
+                gas.fo2,
+                gas.fhe,
+                pp.ppo2.map(|sp| sp.min(ambient_p)),
+                ambient_p,
+            );
+            let f_inert = fn2 + fhe_pad;
+            let p_inspired_fsw = (ambient_fsw - PACO2_FSW) * f_inert;
+            tissues.update(
+                60.0 - stop_time_sec,
+                p_inspired_fsw,
+                ambient_fsw,
+                0.0,
+                0.0,
+                pp.thal_params,
+            );
+            stop_time_sec = 60.0;
         }
+        stops.push(DecoStop {
+            depth_m: current_stop as f32,
+            duration_sec: stop_time_sec as i32,
+            gas_mix_index: -1,
+        });
 
         if current_stop <= pp.last_stop_depth {
             break;
@@ -640,6 +675,29 @@ fn plan_deco_stops_thalmann(
     }
 
     (stops, truncated)
+}
+
+/// Ascend from current depth to target, segmenting at gas switch boundaries.
+/// This ensures correct tissue loading when passing through switch depths.
+fn ascend_with_gas_switches_thalmann(
+    tissues: &mut ThalmannTissueState,
+    current_depth: &mut f64,
+    target_depth: f64,
+    pp: &ThalmannPlanParams,
+) {
+    // Collect switch depths between current and target (descending order)
+    let mut waypoints: Vec<f64> = pp
+        .gases
+        .iter()
+        .filter_map(|g| g.switch_depth_m)
+        .filter(|&d| d < *current_depth && d > target_depth)
+        .collect();
+    waypoints.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    waypoints.push(target_depth);
+
+    for wp in waypoints {
+        ascend_to_thalmann(tissues, current_depth, wp, pp);
+    }
 }
 
 /// Simulate ascent between two depths, updating tissue state during travel.
@@ -1342,5 +1400,62 @@ mod tests {
             pbovp_fsw: 0.0,
         };
         assert!(bad_params.validate().is_err());
+    }
+
+    #[test]
+    fn test_gas_at_depth_multi_gas_selects_shallowest() {
+        use crate::deco::thalmann_params::XVAL_HE_9_023;
+
+        // Setup: bottom gas (air), Nx50 @ 21m, O2 @ 6m
+        let params = ThalmannPlanParams {
+            gases: vec![
+                ThalPlanGas {
+                    fo2: 0.50,
+                    fhe: 0.0,
+                    switch_depth_m: Some(21.0),
+                },
+                ThalPlanGas {
+                    fo2: 1.0,
+                    fhe: 0.0,
+                    switch_depth_m: Some(6.0),
+                },
+                ThalPlanGas {
+                    fo2: 0.21,
+                    fhe: 0.0,
+                    switch_depth_m: None,
+                },
+            ],
+            ppo2: None,
+            surface_p: 1.013,
+            ascent_rate_m_min: 9.0,
+            last_stop_depth: 3.0,
+            stop_interval: 3.0,
+            thal_params: &XVAL_HE_9_023,
+        };
+
+        // At 30m: deeper than all switch depths → bottom gas (air)
+        let gas = params.gas_at_depth(30.0);
+        assert!(gas.switch_depth_m.is_none(), "30m should use bottom gas");
+        assert!((gas.fo2 - 0.21).abs() < 1e-6);
+
+        // At 15m: within Nx50 range (15 <= 21) but not O2 (15 > 6) → Nx50
+        let gas = params.gas_at_depth(15.0);
+        assert_eq!(gas.switch_depth_m, Some(21.0));
+        assert!((gas.fo2 - 0.50).abs() < 1e-6);
+
+        // At 5m: within both Nx50 (5 <= 21) and O2 (5 <= 6) → O2 (shallowest)
+        let gas = params.gas_at_depth(5.0);
+        assert_eq!(gas.switch_depth_m, Some(6.0));
+        assert!((gas.fo2 - 1.0).abs() < 1e-6);
+
+        // At 6m: exactly at O2 switch depth → O2
+        let gas = params.gas_at_depth(6.0);
+        assert_eq!(gas.switch_depth_m, Some(6.0));
+        assert!((gas.fo2 - 1.0).abs() < 1e-6);
+
+        // At 21m: exactly at Nx50 switch depth, 21 > 6 so O2 not valid → Nx50
+        let gas = params.gas_at_depth(21.0);
+        assert_eq!(gas.switch_depth_m, Some(21.0));
+        assert!((gas.fo2 - 0.50).abs() < 1e-6);
     }
 }

@@ -1784,7 +1784,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Known: ascent planner doesn't switch to deco gas; plans entire ascent on bottom gas
     fn smoke_oc_150ft_40min_trimix_buhlmann() {
         // OC dive: 150ft, 40 min, Tx 21/35 bottom, Nx50 deco at 70ft
         let params = ProfileGenParams {
