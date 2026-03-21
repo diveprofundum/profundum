@@ -35,7 +35,7 @@ pub struct GasSwitchPlan {
 pub struct ProfileGenParams {
     /// Target depth in metres.
     pub target_depth_m: f64,
-    /// Bottom time in seconds (time at target depth, excluding descent).
+    /// Bottom time in seconds (total time from surface to end of bottom phase, including descent).
     pub bottom_time_sec: i32,
     /// Descent rate in m/min (default 18.0).
     pub descent_rate_m_min: Option<f64>,
@@ -151,17 +151,18 @@ pub fn generate_dive_profile(params: ProfileGenParams) -> Result<ProfileGenResul
 
     let descent_end_t = descent_time_sec;
 
-    // Bottom samples
+    // Bottom samples (bottom_time_sec includes descent, so time at depth = total - descent)
+    let time_at_depth_sec = (params.bottom_time_sec - descent_time_sec).max(0);
     generate_bottom(
         &mut samples,
         params.target_depth_m,
         descent_end_t,
-        params.bottom_time_sec,
+        time_at_depth_sec,
         bottom_gas_index,
         &ctx,
     );
 
-    let bottom_end_t = descent_end_t + params.bottom_time_sec;
+    let bottom_end_t = descent_end_t + time_at_depth_sec;
 
     // ── Pass 1: Plan the ascent ─────────────────────────────────────────
     let pass1_params = DecoSimParams {
@@ -786,7 +787,8 @@ mod tests {
     fn test_bottom_end_time() {
         let params = air_params(30.0, 600);
         let result = generate_dive_profile(params).unwrap();
-        assert_eq!(result.bottom_end_t_sec, result.descent_end_t_sec + 600);
+        // bottom_time_sec=600 includes descent, so bottom_end = 600
+        assert_eq!(result.bottom_end_t_sec, 600);
     }
 
     #[test]
@@ -1245,13 +1247,13 @@ mod tests {
         // Descent: 30m at 18 m/min = 100s
         assert_eq!(result.descent_end_t_sec, 100);
 
-        // Bottom end: 100 + 1200 = 1300s
-        assert_eq!(result.bottom_end_t_sec, 1300);
+        // Bottom end: bottom_time_sec=1200 includes descent, so bottom_end = 1200
+        assert_eq!(result.bottom_end_t_sec, 1200);
 
-        // Total should be reasonable (30-40 min range = 1800-2400s)
+        // Total should be reasonable
         assert!(
-            result.total_time_sec > 1300,
-            "Total time ({}) should be > bottom end (1300)",
+            result.total_time_sec > 1200,
+            "Total time ({}) should be > bottom end (1200)",
             result.total_time_sec
         );
         assert!(
@@ -1283,10 +1285,12 @@ mod tests {
 
     #[test]
     fn smoke_ccr_150ft_40min_buhlmann_gf50_90() {
-        // CCR dive: 150ft (45.7m), 40 min bottom, Tx 15/15 diluent, SP 1.2, GF 50/90
-        // Expected: ~60-90 min total, ~20-50 min deco
+        // CCR dive: 150ft (45.7m), 40 min bottom (including descent), Tx 15/15 diluent, SP 1.2, GF 50/90
+        // At 18 m/min descent, descent takes ~2.5 min → ~37.5 min at depth.
+        // DP4 with ~9 m/min descent gives 5 min descent → 35 min at depth → 77 min total.
+        // Faster descent = more time at depth = slightly more deco than DP4.
         let params = ProfileGenParams {
-            target_depth_m: 45.72, // 150 ft
+            target_depth_m: 45.72,
             bottom_time_sec: 40 * 60,
             descent_rate_m_min: Some(18.0),
             ascent_rate_m_min: Some(9.0),
@@ -1311,14 +1315,9 @@ mod tests {
         };
         let result = generate_dive_profile(params).unwrap();
         let total_min = result.total_time_sec / 60;
-        let deco_min = (result.total_time_sec - result.bottom_end_t_sec) / 60;
         assert!(
-            total_min < 180,
-            "CCR 150ft/40min GF50/90: total {total_min} min is unreasonable (expected <180)"
-        );
-        assert!(
-            deco_min < 120,
-            "CCR 150ft/40min GF50/90: deco {deco_min} min is unreasonable (expected <120)"
+            (70..=100).contains(&total_min),
+            "CCR 150ft/40min GF50/90: total {total_min} min (expected 70-100)"
         );
         assert!(
             result.deco_result.max_tts_sec > 0,
@@ -1328,10 +1327,11 @@ mod tests {
 
     #[test]
     fn smoke_ccr_200ft_29min_buhlmann_gf50_90() {
-        // CCR dive: 200ft (61m), 29 min bottom, Tx 18/25 diluent, SP 1.2, GF 50/90
-        // This is the user's actual dive that produced 671 min total (wrong)
+        // CCR dive: 200ft (61m), 29 min bottom (including descent), Tx 18/25 diluent, SP 1.2, GF 50/90
+        // At 18 m/min descent, descent takes ~3.4 min → ~25.6 min at depth.
+        // DP4 with ~8.7 m/min descent gives 7 min descent → 22 min at depth → 76 min total.
         let params = ProfileGenParams {
-            target_depth_m: 60.96, // 200 ft
+            target_depth_m: 60.96,
             bottom_time_sec: 29 * 60,
             descent_rate_m_min: Some(18.0),
             ascent_rate_m_min: Some(9.0),
@@ -1356,14 +1356,9 @@ mod tests {
         };
         let result = generate_dive_profile(params).unwrap();
         let total_min = result.total_time_sec / 60;
-        let deco_min = (result.total_time_sec - result.bottom_end_t_sec) / 60;
         assert!(
-            total_min < 180,
-            "CCR 200ft/29min GF50/90: total {total_min} min is unreasonable (expected <180)"
-        );
-        assert!(
-            deco_min < 120,
-            "CCR 200ft/29min GF50/90: deco {deco_min} min is unreasonable (expected <120)"
+            (75..=110).contains(&total_min),
+            "CCR 200ft/29min GF50/90: total {total_min} min (expected 75-110)"
         );
     }
 
@@ -1536,6 +1531,201 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn smoke_diag_oc_vs_dp4() {
+        // OC 150ft/40min Tx21/35 + Nx50 at 70ft, compared to Decoplanner 4.
+        // DP4 descent: 3 min (150ft at ~50 ft/min = 15.24 m/min)
+        // DP4 bottom time = 40 min from surface = 3 min descent + 37 min at depth.
+        //
+        // DP4 GF 20/85: total 94 min
+        //   Stops: 90ft(1), 80ft(1), 70ft(1), 60ft(2), 50ft(3), 40ft(4), 30ft(6), 20ft(11), 10ft(22)
+        // DP4 GF 50/90: total 88 min
+
+        fn print_profile(label: &str, r: &ProfileGenResult) {
+            let total = r.total_time_sec / 60;
+            let deco = (r.total_time_sec - r.bottom_end_t_sec) / 60;
+            eprintln!("\n=== {label} ===");
+            eprintln!("Total: {total} min, Deco phase: {deco} min");
+            let mut prev_d: f32 = 99.0;
+            let mut hold_start = 0i32;
+            for s in &r.samples {
+                if s.t_sec >= r.bottom_end_t_sec && (s.depth_m - prev_d).abs() > 0.3 {
+                    if hold_start > 0 && prev_d > 0.1 {
+                        let dur = s.t_sec - hold_start;
+                        if dur > 30 {
+                            eprintln!(
+                                "  {:.0}ft ({:.0}m): {:.1} min",
+                                prev_d * 3.28084,
+                                prev_d,
+                                dur as f64 / 60.0
+                            );
+                        }
+                    }
+                    prev_d = s.depth_m;
+                    hold_start = s.t_sec;
+                }
+            }
+        }
+
+        let make_oc_params = |gf_lo, gf_hi, bottom_sec, descent_rate| ProfileGenParams {
+            target_depth_m: 45.72,
+            bottom_time_sec: bottom_sec,
+            descent_rate_m_min: Some(descent_rate),
+            ascent_rate_m_min: Some(9.0),
+            gas_plan: vec![
+                GasSwitchPlan {
+                    gas: GasMixInput {
+                        mix_index: 0,
+                        o2_fraction: 0.21,
+                        he_fraction: 0.35,
+                    },
+                    switch_depth_m: None,
+                },
+                GasSwitchPlan {
+                    gas: GasMixInput {
+                        mix_index: 1,
+                        o2_fraction: 0.50,
+                        he_fraction: 0.0,
+                    },
+                    switch_depth_m: Some(21.0),
+                },
+            ],
+            model: DecoModel::BuhlmannZhl16c,
+            surface_pressure_bar: None,
+            gf_low: Some(gf_lo),
+            gf_high: Some(gf_hi),
+            last_stop_depth_m: None,
+            stop_interval_m: None,
+            setpoint_ppo2: None,
+            thalmann_pdcs: None,
+            sample_interval_sec: None,
+            temp_c: None,
+        };
+
+        // DP4 uses 40 min bottom time (including descent), descent ~15.24 m/min
+        let r1 = generate_dive_profile(make_oc_params(20, 85, 40 * 60, 15.24)).unwrap();
+        print_profile("OC 150ft Tx21/35+Nx50 GF20/85 (DP4 ref: 94 min)", &r1);
+        let total1 = r1.total_time_sec / 60;
+        assert!(
+            (total1 - 94).unsigned_abs() <= 5,
+            "OC GF20/85: total {total1} min, expected ~94 (DP4), tolerance ±5"
+        );
+
+        let r2 = generate_dive_profile(make_oc_params(50, 90, 40 * 60, 15.24)).unwrap();
+        print_profile("OC 150ft Tx21/35+Nx50 GF50/90 (DP4 ref: 88 min)", &r2);
+        let total2 = r2.total_time_sec / 60;
+        assert!(
+            (total2 - 88).unsigned_abs() <= 5,
+            "OC GF50/90: total {total2} min, expected ~88 (DP4), tolerance ±5"
+        );
+    }
+
+    #[test]
+    fn smoke_diag_ccr_vs_dp4() {
+        // Compare against Decoplanner 4 reference values.
+        // bottom_time_sec includes descent (matching DP4 convention).
+        //
+        // DP4 Profile 1: CCR 150ft/40min, Tx 15/15 dil, SP 1.2, GF 50/90
+        //   Total: 77 min, stops: 60ft(1), 50ft(3), 40ft(3), 30ft(6), 20ft(7), 10ft(13)
+        //   Descent: 5 min (~30 ft/min = 9.14 m/min)
+        //
+        // DP4 Profile 2: CCR 200ft/29min, Tx 16/25 dil, SP 1.2, GF 50/90
+        //   Total: 76 min, stops: 90ft(1), 80ft(1), 70ft(2), 60ft(3), 50ft(3), 40ft(4), 30ft(6), 20ft(9), 10ft(14)
+        //   Descent: 7 min (~28.6 ft/min = 8.7 m/min)
+
+        fn print_profile(label: &str, r: &ProfileGenResult) {
+            let total = r.total_time_sec / 60;
+            let deco = (r.total_time_sec - r.bottom_end_t_sec) / 60;
+            eprintln!("\n=== {label} ===");
+            eprintln!("Total: {total} min, Deco phase: {deco} min");
+            let mut prev_d: f32 = 99.0;
+            let mut hold_start = 0i32;
+            for s in &r.samples {
+                if s.t_sec >= r.bottom_end_t_sec && (s.depth_m - prev_d).abs() > 0.3 {
+                    if hold_start > 0 && prev_d > 0.1 {
+                        let dur = s.t_sec - hold_start;
+                        if dur > 30 {
+                            eprintln!(
+                                "  {:.0}ft ({:.0}m): {:.1} min",
+                                prev_d * 3.28084,
+                                prev_d,
+                                dur as f64 / 60.0
+                            );
+                        }
+                    }
+                    prev_d = s.depth_m;
+                    hold_start = s.t_sec;
+                }
+            }
+        }
+
+        // --- Profile 1: CCR 150ft, 40 min bottom time (including descent) ---
+        let r1 = generate_dive_profile(ProfileGenParams {
+            target_depth_m: 45.72,
+            bottom_time_sec: 40 * 60,
+            descent_rate_m_min: Some(9.14),
+            ascent_rate_m_min: Some(9.0),
+            gas_plan: vec![GasSwitchPlan {
+                gas: GasMixInput {
+                    mix_index: 0,
+                    o2_fraction: 0.15,
+                    he_fraction: 0.15,
+                },
+                switch_depth_m: None,
+            }],
+            model: DecoModel::BuhlmannZhl16c,
+            surface_pressure_bar: None,
+            gf_low: Some(50),
+            gf_high: Some(90),
+            last_stop_depth_m: None,
+            stop_interval_m: None,
+            setpoint_ppo2: Some(1.2),
+            thalmann_pdcs: None,
+            sample_interval_sec: None,
+            temp_c: None,
+        })
+        .unwrap();
+        print_profile("CCR 150ft/40min GF50/90 (DP4 ref: 77 min)", &r1);
+        let total1 = r1.total_time_sec / 60;
+        assert!(
+            (total1 - 77).unsigned_abs() <= 5,
+            "CCR 150ft: total {total1} min, expected ~77 (DP4), tolerance ±5"
+        );
+
+        // --- Profile 2: CCR 200ft, 29 min bottom time (including descent) ---
+        let r2 = generate_dive_profile(ProfileGenParams {
+            target_depth_m: 60.96,
+            bottom_time_sec: 29 * 60,
+            descent_rate_m_min: Some(8.7),
+            ascent_rate_m_min: Some(9.0),
+            gas_plan: vec![GasSwitchPlan {
+                gas: GasMixInput {
+                    mix_index: 0,
+                    o2_fraction: 0.16,
+                    he_fraction: 0.25,
+                },
+                switch_depth_m: None,
+            }],
+            model: DecoModel::BuhlmannZhl16c,
+            surface_pressure_bar: None,
+            gf_low: Some(50),
+            gf_high: Some(90),
+            last_stop_depth_m: None,
+            stop_interval_m: None,
+            setpoint_ppo2: Some(1.2),
+            thalmann_pdcs: None,
+            sample_interval_sec: None,
+            temp_c: None,
+        })
+        .unwrap();
+        print_profile("CCR 200ft/22min-at-depth GF50/90 (DP4 ref: 76 min)", &r2);
+        let total2 = r2.total_time_sec / 60;
+        assert!(
+            (total2 - 76).unsigned_abs() <= 5,
+            "CCR 200ft: total {total2} min, expected ~76 (DP4), tolerance ±5"
+        );
     }
 
     #[test]
