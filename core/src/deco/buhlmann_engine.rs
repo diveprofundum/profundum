@@ -1986,4 +1986,49 @@ mod tests {
         assert_eq!(gas.switch_depth_m, Some(21.0));
         assert!((gas.fo2 - 0.50).abs() < 1e-6);
     }
+
+    // ── Coverage: truncation safety limit (lines 693-694) ────────────────
+
+    #[test]
+    fn test_truncation_extreme_tissue_loading() {
+        // Create extreme tissue loading by directly constructing a tissue
+        // state with very high N2 pressure, then running the planner.
+        // With GF 1/1 (extremely conservative), a massively loaded tissue
+        // will require a stop exceeding the 10-hour safety limit.
+        let surface_p = DEFAULT_SURFACE_PRESSURE;
+        let mut tissues = EngineTissueState {
+            p_n2: [0.0; NUM_COMPARTMENTS],
+            p_he: [0.0; NUM_COMPARTMENTS],
+        };
+        // Load ALL compartments to extremely high pressure (20 bar N2).
+        // Even the slowest compartments (HT > 600 min) would need many
+        // hours to off-gas from 20 bar back below M-value at 3m.
+        for i in 0..NUM_COMPARTMENTS {
+            tissues.p_n2[i] = 20.0;
+        }
+
+        let pp = PlanParams {
+            gases: vec![PlanGas {
+                fo2: AIR_FO2,
+                fhe: 0.0,
+                switch_depth_m: None,
+            }],
+            ppo2: None,
+            surface_p,
+            ascent_rate_m_min: 9.0,
+            last_stop_depth: 3.0,
+            stop_interval: 3.0,
+            gf_low: 0.01,  // Extremely conservative GF low
+            gf_high: 0.01, // Extremely conservative GF high
+        };
+
+        let (stops, truncated) = plan_deco_stops(&tissues, 100.0, &pp);
+
+        assert!(
+            truncated,
+            "Extreme tissue loading with GF 1/1 should trigger truncation"
+        );
+        // Should still produce stops even when truncated
+        assert!(!stops.is_empty(), "Truncated plan should still have stops");
+    }
 }
