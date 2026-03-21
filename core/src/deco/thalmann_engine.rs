@@ -382,6 +382,7 @@ impl ThalmannPlanParams<'_> {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn from_engine<'a>(
         gas_lookup: &std::collections::HashMap<i32, (f64, f64)>,
         current_gas_index: i32,
@@ -397,7 +398,11 @@ impl ThalmannPlanParams<'_> {
 
         for (&mix_idx, &(fo2, fhe)) in gas_lookup {
             if mix_idx == current_gas_index || mix_idx == 0 {
-                bottom_gas = Some(ThalPlanGas { fo2, fhe, switch_depth_m: None });
+                bottom_gas = Some(ThalPlanGas {
+                    fo2,
+                    fhe,
+                    switch_depth_m: None,
+                });
             } else if fo2 > 0.0 {
                 let mod_m = (MAX_PPO2_SWITCH / fo2 - 1.0) * 10.0;
                 gases.push(ThalPlanGas {
@@ -409,7 +414,8 @@ impl ThalmannPlanParams<'_> {
         }
 
         gases.sort_by(|a, b| {
-            b.switch_depth_m.unwrap_or(0.0)
+            b.switch_depth_m
+                .unwrap_or(0.0)
                 .partial_cmp(&a.switch_depth_m.unwrap_or(0.0))
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
@@ -417,7 +423,11 @@ impl ThalmannPlanParams<'_> {
         if let Some(bg) = bottom_gas {
             gases.push(bg);
         } else {
-            gases.push(ThalPlanGas { fo2: 0.21, fhe: 0.0, switch_depth_m: None });
+            gases.push(ThalPlanGas {
+                fo2: 0.21,
+                fhe: 0.0,
+                switch_depth_m: None,
+            });
         }
 
         ThalmannPlanParams {
@@ -479,7 +489,12 @@ fn compute_ndl_thalmann(
     let gas = pp.gas_at_depth(current_depth_m);
     let ambient_p = depth_to_pressure(current_depth_m, pp.surface_p);
     let ambient_fsw = bar_to_fsw(ambient_p);
-    let (fn2, fhe) = inspired_fractions(gas.fo2, gas.fhe, pp.ppo2.map(|sp| sp.min(ambient_p)), ambient_p);
+    let (fn2, fhe) = inspired_fractions(
+        gas.fo2,
+        gas.fhe,
+        pp.ppo2.map(|sp| sp.min(ambient_p)),
+        ambient_p,
+    );
     let f_inert = fn2 + fhe;
     let p_inspired_fsw = (ambient_fsw - PACO2_FSW) * f_inert;
 
@@ -590,7 +605,12 @@ fn plan_deco_stops_thalmann(
             let gas = pp.gas_at_depth(current_stop);
             let ambient_p = depth_to_pressure(current_stop, pp.surface_p);
             let ambient_fsw = bar_to_fsw(ambient_p);
-            let (fn2, fhe) = inspired_fractions(gas.fo2, gas.fhe, pp.ppo2.map(|sp| sp.min(ambient_p)), ambient_p);
+            let (fn2, fhe) = inspired_fractions(
+                gas.fo2,
+                gas.fhe,
+                pp.ppo2.map(|sp| sp.min(ambient_p)),
+                ambient_p,
+            );
             let f_inert = fn2 + fhe;
             let p_inspired_fsw = (ambient_fsw - PACO2_FSW) * f_inert;
 
@@ -641,7 +661,12 @@ fn ascend_to_thalmann(
     let ambient_fsw = bar_to_fsw(ambient_p);
 
     let gas = pp.gas_at_depth(target_depth);
-    let (fn2, fhe_frac) = inspired_fractions(gas.fo2, gas.fhe, pp.ppo2.map(|sp| sp.min(ambient_p)), ambient_p);
+    let (fn2, fhe_frac) = inspired_fractions(
+        gas.fo2,
+        gas.fhe,
+        pp.ppo2.map(|sp| sp.min(ambient_p)),
+        ambient_p,
+    );
     let f_inert = fn2 + fhe_frac;
     let p_inspired_fsw = (ambient_fsw - PACO2_FSW) * f_inert;
 

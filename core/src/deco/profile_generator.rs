@@ -1286,12 +1286,16 @@ mod tests {
         // CCR dive: 150ft (45.7m), 40 min bottom, Tx 15/15 diluent, SP 1.2, GF 50/90
         // Expected: ~60-90 min total, ~20-50 min deco
         let params = ProfileGenParams {
-            target_depth_m: 45.72,  // 150 ft
+            target_depth_m: 45.72, // 150 ft
             bottom_time_sec: 40 * 60,
             descent_rate_m_min: Some(18.0),
             ascent_rate_m_min: Some(9.0),
             gas_plan: vec![GasSwitchPlan {
-                gas: GasMixInput { mix_index: 0, o2_fraction: 0.15, he_fraction: 0.15 },
+                gas: GasMixInput {
+                    mix_index: 0,
+                    o2_fraction: 0.15,
+                    he_fraction: 0.15,
+                },
                 switch_depth_m: None,
             }],
             model: DecoModel::BuhlmannZhl16c,
@@ -1327,12 +1331,16 @@ mod tests {
         // CCR dive: 200ft (61m), 29 min bottom, Tx 18/25 diluent, SP 1.2, GF 50/90
         // This is the user's actual dive that produced 671 min total (wrong)
         let params = ProfileGenParams {
-            target_depth_m: 60.96,  // 200 ft
+            target_depth_m: 60.96, // 200 ft
             bottom_time_sec: 29 * 60,
             descent_rate_m_min: Some(18.0),
             ascent_rate_m_min: Some(9.0),
             gas_plan: vec![GasSwitchPlan {
-                gas: GasMixInput { mix_index: 0, o2_fraction: 0.18, he_fraction: 0.25 },
+                gas: GasMixInput {
+                    mix_index: 0,
+                    o2_fraction: 0.18,
+                    he_fraction: 0.25,
+                },
                 switch_depth_m: None,
             }],
             model: DecoModel::BuhlmannZhl16c,
@@ -1368,7 +1376,11 @@ mod tests {
             descent_rate_m_min: Some(18.0),
             ascent_rate_m_min: Some(9.0),
             gas_plan: vec![GasSwitchPlan {
-                gas: GasMixInput { mix_index: 0, o2_fraction: 0.15, he_fraction: 0.15 },
+                gas: GasMixInput {
+                    mix_index: 0,
+                    o2_fraction: 0.15,
+                    he_fraction: 0.15,
+                },
                 switch_depth_m: None,
             }],
             model: DecoModel::ThalmannElDca,
@@ -1400,9 +1412,23 @@ mod tests {
         let total_min = result.total_time_sec / 60;
         let deco_stops = &result.deco_result.deco_stops;
         eprintln!("=== Air 30m/20min GF100/100 ===");
-        eprintln!("Total: {} min, Bottom end: {} sec", total_min, result.bottom_end_t_sec);
-        eprintln!("Stops: {:?}", deco_stops.iter().map(|s| format!("{}m {}s", s.depth_m, s.duration_sec)).collect::<Vec<_>>());
-        eprintln!("Max ceiling: {}m, Max GF99: {}, Max TTS: {}s", result.deco_result.max_ceiling_m, result.deco_result.max_gf99, result.deco_result.max_tts_sec);
+        eprintln!(
+            "Total: {} min, Bottom end: {} sec",
+            total_min, result.bottom_end_t_sec
+        );
+        eprintln!(
+            "Stops: {:?}",
+            deco_stops
+                .iter()
+                .map(|s| format!("{}m {}s", s.depth_m, s.duration_sec))
+                .collect::<Vec<_>>()
+        );
+        eprintln!(
+            "Max ceiling: {}m, Max GF99: {}, Max TTS: {}s",
+            result.deco_result.max_ceiling_m,
+            result.deco_result.max_gf99,
+            result.deco_result.max_tts_sec
+        );
         eprintln!("Truncated: {}", result.truncated);
         eprintln!("Sample count: {}", result.samples.len());
         // 30m/20min on air at GF 100/100 should be within NDL or have minimal deco
@@ -1422,12 +1448,27 @@ mod tests {
         let total_min = result.total_time_sec / 60;
         let deco_stops = &result.deco_result.deco_stops;
         eprintln!("=== Air 40m/20min GF50/80 ===");
-        eprintln!("Total: {} min, Bottom end: {} sec", total_min, result.bottom_end_t_sec);
-        eprintln!("Stops: {:?}", deco_stops.iter().map(|s| format!("{}m {}s", s.depth_m, s.duration_sec)).collect::<Vec<_>>());
-        eprintln!("Max ceiling: {}m, Max TTS: {}s", result.deco_result.max_ceiling_m, result.deco_result.max_tts_sec);
+        eprintln!(
+            "Total: {} min, Bottom end: {} sec",
+            total_min, result.bottom_end_t_sec
+        );
+        eprintln!(
+            "Stops: {:?}",
+            deco_stops
+                .iter()
+                .map(|s| format!("{}m {}s", s.depth_m, s.duration_sec))
+                .collect::<Vec<_>>()
+        );
+        eprintln!(
+            "Max ceiling: {}m, Max TTS: {}s",
+            result.deco_result.max_ceiling_m, result.deco_result.max_tts_sec
+        );
         eprintln!("Truncated: {}", result.truncated);
         // 88 min is plausible for air at 40m with conservative GF 50/80 (single gas deco)
-        assert!(total_min < 120, "Air 40m/20min GF50/80: total {total_min} min unreasonable");
+        assert!(
+            total_min < 120,
+            "Air 40m/20min GF50/80: total {total_min} min unreasonable"
+        );
     }
 
     #[test]
@@ -1441,11 +1482,19 @@ mod tests {
                 ascent_rate_m_min: Some(9.0),
                 gas_plan: vec![
                     GasSwitchPlan {
-                        gas: GasMixInput { mix_index: 0, o2_fraction: 0.21, he_fraction: 0.35 },
+                        gas: GasMixInput {
+                            mix_index: 0,
+                            o2_fraction: 0.21,
+                            he_fraction: 0.35,
+                        },
                         switch_depth_m: None,
                     },
                     GasSwitchPlan {
-                        gas: GasMixInput { mix_index: 1, o2_fraction: 0.50, he_fraction: 0.0 },
+                        gas: GasMixInput {
+                            mix_index: 1,
+                            o2_fraction: 0.50,
+                            he_fraction: 0.0,
+                        },
                         switch_depth_m: Some(21.0),
                     },
                 ],
@@ -1463,20 +1512,26 @@ mod tests {
             let result = generate_dive_profile(params).unwrap();
             let total_min = result.total_time_sec / 60;
             let deco_min = (result.total_time_sec - result.bottom_end_t_sec) / 60;
-            eprintln!("GF {gf_lo}/{gf_hi}: total={total_min} min, deco={deco_min} min, truncated={}", result.truncated);
+            eprintln!(
+                "GF {gf_lo}/{gf_hi}: total={total_min} min, deco={deco_min} min, truncated={}",
+                result.truncated
+            );
             if gf_lo == 50 && gf_hi == 85 {
                 // Dump stop-by-stop for diagnosis
                 let mut prev_d: f32 = 99.0;
                 let mut hold_start = 0i32;
                 for s in &result.samples {
-                    if s.t_sec >= result.bottom_end_t_sec {
-                        if (s.depth_m - prev_d).abs() > 0.3 {
-                            if hold_start > 0 && prev_d > 0.1 {
-                                eprintln!("  HOLD {:.0}m: {} sec ({:.1} min)", prev_d, s.t_sec - hold_start, (s.t_sec - hold_start) as f64 / 60.0);
-                            }
-                            prev_d = s.depth_m;
-                            hold_start = s.t_sec;
+                    if s.t_sec >= result.bottom_end_t_sec && (s.depth_m - prev_d).abs() > 0.3 {
+                        if hold_start > 0 && prev_d > 0.1 {
+                            eprintln!(
+                                "  HOLD {:.0}m: {} sec ({:.1} min)",
+                                prev_d,
+                                s.t_sec - hold_start,
+                                (s.t_sec - hold_start) as f64 / 60.0
+                            );
                         }
+                        prev_d = s.depth_m;
+                        hold_start = s.t_sec;
                     }
                 }
             }
@@ -1493,7 +1548,11 @@ mod tests {
             descent_rate_m_min: Some(18.0),
             ascent_rate_m_min: Some(9.0),
             gas_plan: vec![GasSwitchPlan {
-                gas: GasMixInput { mix_index: 0, o2_fraction: 0.21, he_fraction: 0.35 },
+                gas: GasMixInput {
+                    mix_index: 0,
+                    o2_fraction: 0.21,
+                    he_fraction: 0.35,
+                },
                 switch_depth_m: None,
             }],
             model: DecoModel::BuhlmannZhl16c,
@@ -1511,12 +1570,27 @@ mod tests {
         let total_min = result.total_time_sec / 60;
         let deco_stops = &result.deco_result.deco_stops;
         eprintln!("=== Tx21/35 46m/40min GF20/85 (single gas, no deco gas) ===");
-        eprintln!("Total: {} min, Bottom end: {} sec", total_min, result.bottom_end_t_sec);
-        eprintln!("Stops: {:?}", deco_stops.iter().map(|s| format!("{}m {}s", s.depth_m, s.duration_sec)).collect::<Vec<_>>());
-        eprintln!("Max ceiling: {}m, Max TTS: {}s", result.deco_result.max_ceiling_m, result.deco_result.max_tts_sec);
+        eprintln!(
+            "Total: {} min, Bottom end: {} sec",
+            total_min, result.bottom_end_t_sec
+        );
+        eprintln!(
+            "Stops: {:?}",
+            deco_stops
+                .iter()
+                .map(|s| format!("{}m {}s", s.depth_m, s.duration_sec))
+                .collect::<Vec<_>>()
+        );
+        eprintln!(
+            "Max ceiling: {}m, Max TTS: {}s",
+            result.deco_result.max_ceiling_m, result.deco_result.max_tts_sec
+        );
         eprintln!("Truncated: {}", result.truncated);
         // Single gas deco on 21% O2 will be long but should still be under 200 min total
-        assert!(total_min < 200, "Tx21/35 46m/40min GF20/85: total {total_min} min unreasonable");
+        assert!(
+            total_min < 200,
+            "Tx21/35 46m/40min GF20/85: total {total_min} min unreasonable"
+        );
     }
 
     #[test]
@@ -1530,11 +1604,19 @@ mod tests {
             ascent_rate_m_min: Some(9.0),
             gas_plan: vec![
                 GasSwitchPlan {
-                    gas: GasMixInput { mix_index: 0, o2_fraction: 0.21, he_fraction: 0.35 },
+                    gas: GasMixInput {
+                        mix_index: 0,
+                        o2_fraction: 0.21,
+                        he_fraction: 0.35,
+                    },
                     switch_depth_m: None,
                 },
                 GasSwitchPlan {
-                    gas: GasMixInput { mix_index: 1, o2_fraction: 0.50, he_fraction: 0.0 },
+                    gas: GasMixInput {
+                        mix_index: 1,
+                        o2_fraction: 0.50,
+                        he_fraction: 0.0,
+                    },
                     switch_depth_m: Some(21.0), // ~70ft
                 },
             ],
@@ -1554,20 +1636,30 @@ mod tests {
         let deco_min = (result.total_time_sec - result.bottom_end_t_sec) / 60;
         eprintln!("=== OC Tx21/35+Nx50 150ft/40min GF20/85 ===");
         eprintln!("Total: {total_min} min, Deco: {deco_min} min");
-        eprintln!("Bottom end: {}s, Descent end: {}s", result.bottom_end_t_sec, result.descent_end_t_sec);
-        eprintln!("Max ceiling: {}m, Max TTS: {}s", result.deco_result.max_ceiling_m, result.deco_result.max_tts_sec);
+        eprintln!(
+            "Bottom end: {}s, Descent end: {}s",
+            result.bottom_end_t_sec, result.descent_end_t_sec
+        );
+        eprintln!(
+            "Max ceiling: {}m, Max TTS: {}s",
+            result.deco_result.max_ceiling_m, result.deco_result.max_tts_sec
+        );
         eprintln!("Truncated: {}", result.truncated);
         // Print the actual ascent profile to see where time is spent
         let mut prev_depth: f32 = 99.0;
         for s in &result.samples {
             if s.t_sec >= result.bottom_end_t_sec && (s.depth_m - prev_depth).abs() > 0.5 {
-                eprintln!("  t={}s depth={:.1}m gas={:?} ceil={:?} tts={:?}",
-                    s.t_sec, s.depth_m, s.gasmix_index, s.ceiling_m, s.tts_sec);
+                eprintln!(
+                    "  t={}s depth={:.1}m gas={:?} ceil={:?} tts={:?}",
+                    s.t_sec, s.depth_m, s.gasmix_index, s.ceiling_m, s.tts_sec
+                );
                 prev_depth = s.depth_m;
             }
         }
         // Count samples at each depth during ascent
-        let ascent_samples: Vec<_> = result.samples.iter()
+        let ascent_samples: Vec<_> = result
+            .samples
+            .iter()
             .filter(|s| s.t_sec >= result.bottom_end_t_sec)
             .collect();
         eprintln!("Ascent samples: {}", ascent_samples.len());

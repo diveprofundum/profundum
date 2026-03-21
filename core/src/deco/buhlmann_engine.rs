@@ -418,6 +418,7 @@ impl PlanParams {
     }
 
     /// Build a PlanParams from the engine's current state and gas mixes.
+    #[allow(clippy::too_many_arguments)]
     fn from_engine(
         gas_mixes: &std::collections::HashMap<i32, (f64, f64)>,
         current_gas_index: i32,
@@ -436,7 +437,11 @@ impl PlanParams {
         for (&mix_idx, &(fo2, fhe)) in gas_mixes {
             if mix_idx == current_gas_index || mix_idx == 0 {
                 // Bottom gas or current gas — no switch depth
-                bottom_gas = Some(PlanGas { fo2, fhe, switch_depth_m: None });
+                bottom_gas = Some(PlanGas {
+                    fo2,
+                    fhe,
+                    switch_depth_m: None,
+                });
             } else if fo2 > 0.0 {
                 // Deco gas — compute MOD at 1.6 PPO2 as default switch depth
                 let mod_m = (MAX_PPO2_SWITCH / fo2 - 1.0) * 10.0;
@@ -460,7 +465,11 @@ impl PlanParams {
         if let Some(bg) = bottom_gas {
             gases.push(bg);
         } else {
-            gases.push(PlanGas { fo2: AIR_FO2, fhe: 0.0, switch_depth_m: None });
+            gases.push(PlanGas {
+                fo2: AIR_FO2,
+                fhe: 0.0,
+                switch_depth_m: None,
+            });
         }
 
         PlanParams {
@@ -517,6 +526,7 @@ fn compute_tts(tissues: &EngineTissueState, current_depth_m: f64, pp: &PlanParam
 /// Finds the time (seconds) the diver can stay at current depth before
 /// a GF-adjusted ceiling appears. Returns 0 if already in deco.
 /// Precision: +/- 5 seconds.
+#[allow(clippy::too_many_arguments)]
 fn compute_ndl(
     tissues: &EngineTissueState,
     current_depth_m: f64,
@@ -711,6 +721,7 @@ fn plan_deco_stops(
 }
 
 /// Simulate ascent between two depths, updating tissue state during travel.
+#[allow(clippy::too_many_arguments)]
 fn ascend_to(
     tissues: &mut EngineTissueState,
     current_depth: &mut f64,
