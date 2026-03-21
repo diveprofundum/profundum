@@ -119,28 +119,29 @@ impl BuhlmannEngine {
             let (surface_gf, leading) = tissues.surface_gf_and_leading(surface_p);
 
             // TTS and NDL
+            let pp = PlanParams::from_engine(
+                &gas_lookup,
+                sample.gasmix_index.unwrap_or(0),
+                sample.ppo2.map(|v| v as f64),
+                surface_p,
+                ascent_rate,
+                last_stop_depth,
+                stop_interval,
+                gf_low,
+                gf_high,
+                first_stop_depth_m,
+            );
             let (tts_sec, ndl_sec) = if ceiling_m > 0.0 {
-                let pp = PlanParams {
-                    fo2: current_fo2,
-                    fhe: current_fhe,
-                    ppo2: sample.ppo2.map(|v| v as f64),
-                    surface_p,
-                    ascent_rate_m_min: ascent_rate,
-                    last_stop_depth,
-                    stop_interval,
-                    gf_low,
-                    gf_high,
-                    first_stop_depth_m,
-                };
                 let tts = compute_tts(&tissues, current_depth_m, &pp);
                 (tts, 0)
             } else {
+                let gas = pp.gas_at_depth(current_depth_m);
                 let ndl = compute_ndl(
                     &tissues,
                     current_depth_m,
-                    current_fo2,
-                    current_fhe,
-                    sample.ppo2.map(|v| v as f64),
+                    gas.fo2,
+                    gas.fhe,
+                    pp.ppo2,
                     surface_p,
                     gf_low,
                     gf_high,
@@ -177,19 +178,18 @@ impl BuhlmannEngine {
         let (deco_stops, truncated) = if params.plan_ascent {
             let last_sample = params.samples.last().unwrap();
             let current_depth_m = (last_sample.depth_m as f64).max(0.0);
-            let last_ppo2 = last_sample.ppo2.map(|v| v as f64);
-            let pp = PlanParams {
-                fo2: current_fo2,
-                fhe: current_fhe,
-                ppo2: last_ppo2,
+            let pp = PlanParams::from_engine(
+                &gas_lookup,
+                last_sample.gasmix_index.unwrap_or(0),
+                last_sample.ppo2.map(|v| v as f64),
                 surface_p,
-                ascent_rate_m_min: ascent_rate,
+                ascent_rate,
                 last_stop_depth,
                 stop_interval,
                 gf_low,
                 gf_high,
                 first_stop_depth_m,
-            };
+            );
             plan_deco_stops(&tissues, current_depth_m, &pp)
         } else {
             (Vec::new(), false)
@@ -371,10 +371,19 @@ fn round_up_to_stop(depth_m: f64, stop_interval: f64) -> f64 {
 // Planner Parameters
 // ============================================================================
 
-/// Bundled parameters for the deco stop planner and TTS computation.
-struct PlanParams {
+/// A gas available for breathing during ascent planning.
+#[derive(Clone)]
+struct PlanGas {
     fo2: f64,
     fhe: f64,
+    /// Switch to this gas at or above this depth (metres). `None` = bottom gas.
+    switch_depth_m: Option<f64>,
+}
+
+/// Bundled parameters for the deco stop planner and TTS computation.
+struct PlanParams {
+    /// Available gases sorted by switch depth descending (deepest switch first, bottom gas last).
+    gases: Vec<PlanGas>,
     /// CCR setpoint PPO2 in bar. `None` = open circuit.
     ppo2: Option<f64>,
     surface_p: f64,
@@ -384,6 +393,88 @@ struct PlanParams {
     gf_low: f64,
     gf_high: f64,
     first_stop_depth_m: Option<f64>,
+}
+
+/// Maximum PPO2 for computing default switch depths (MOD).
+const MAX_PPO2_SWITCH: f64 = 1.6;
+
+impl PlanParams {
+    /// Get the gas to breathe at a given depth. Uses the richest available
+    /// gas whose switch depth is at or above the current depth.
+    fn gas_at_depth(&self, depth_m: f64) -> &PlanGas {
+        for gas in &self.gases {
+            if let Some(switch_depth) = gas.switch_depth_m {
+                if depth_m <= switch_depth {
+                    return gas;
+                }
+            }
+        }
+        // Bottom gas (no switch depth) is always last
+        self.gases.last().unwrap_or(&PlanGas {
+            fo2: AIR_FO2,
+            fhe: 0.0,
+            switch_depth_m: None,
+        })
+    }
+
+    /// Build a PlanParams from the engine's current state and gas mixes.
+    fn from_engine(
+        gas_mixes: &std::collections::HashMap<i32, (f64, f64)>,
+        current_gas_index: i32,
+        ppo2: Option<f64>,
+        surface_p: f64,
+        ascent_rate: f64,
+        last_stop_depth: f64,
+        stop_interval: f64,
+        gf_low: f64,
+        gf_high: f64,
+        first_stop_depth_m: Option<f64>,
+    ) -> Self {
+        let mut gases: Vec<PlanGas> = Vec::new();
+        let mut bottom_gas: Option<PlanGas> = None;
+
+        for (&mix_idx, &(fo2, fhe)) in gas_mixes {
+            if mix_idx == current_gas_index || mix_idx == 0 {
+                // Bottom gas or current gas — no switch depth
+                bottom_gas = Some(PlanGas { fo2, fhe, switch_depth_m: None });
+            } else if fo2 > 0.0 {
+                // Deco gas — compute MOD at 1.6 PPO2 as default switch depth
+                let mod_m = (MAX_PPO2_SWITCH / fo2 - 1.0) * 10.0;
+                gases.push(PlanGas {
+                    fo2,
+                    fhe,
+                    switch_depth_m: Some(mod_m.max(0.0)),
+                });
+            }
+        }
+
+        // Sort deco gases by switch depth descending (deepest first)
+        gases.sort_by(|a, b| {
+            b.switch_depth_m
+                .unwrap_or(0.0)
+                .partial_cmp(&a.switch_depth_m.unwrap_or(0.0))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Bottom gas goes last
+        if let Some(bg) = bottom_gas {
+            gases.push(bg);
+        } else {
+            gases.push(PlanGas { fo2: AIR_FO2, fhe: 0.0, switch_depth_m: None });
+        }
+
+        PlanParams {
+            gases,
+            ppo2,
+            surface_p,
+            ascent_rate_m_min: ascent_rate,
+            last_stop_depth,
+            stop_interval,
+            gf_low,
+            gf_high,
+            first_stop_depth_m,
+        }
+    }
 }
 
 // ============================================================================
@@ -536,16 +627,19 @@ fn plan_deco_stops(
     }
 
     // Ascend to first stop, updating tissues during travel
-    ascend_to(
-        &mut tissues,
-        &mut depth,
-        stop_depth,
-        pp.fo2,
-        pp.fhe,
-        pp.ppo2,
-        pp.surface_p,
-        pp.ascent_rate_m_min,
-    );
+    {
+        let gas = pp.gas_at_depth(stop_depth);
+        ascend_to(
+            &mut tissues,
+            &mut depth,
+            stop_depth,
+            gas.fo2,
+            gas.fhe,
+            pp.ppo2,
+            pp.surface_p,
+            pp.ascent_rate_m_min,
+        );
+    }
 
     // Process stops from deep to shallow
     let mut current_stop = stop_depth;
@@ -570,10 +664,11 @@ fn plan_deco_stops(
                 break;
             }
 
-            // Wait 60 seconds at this stop
+            // Wait 60 seconds at this stop (using the gas available at this depth)
+            let gas = pp.gas_at_depth(current_stop);
             let ambient_p = depth_to_pressure(current_stop, pp.surface_p);
             let ppo2_at_stop = pp.ppo2.map(|sp| sp.min(ambient_p));
-            let (fn2, fhe_frac) = inspired_fractions(pp.fo2, pp.fhe, ppo2_at_stop, ambient_p);
+            let (fn2, fhe_frac) = inspired_fractions(gas.fo2, gas.fhe, ppo2_at_stop, ambient_p);
             let p_inspired_n2 = (ambient_p - P_WATER_VAPOR) * fn2;
             let p_inspired_he = (ambient_p - P_WATER_VAPOR) * fhe_frac;
             tissues.update(60.0, p_inspired_n2, p_inspired_he);
@@ -597,13 +692,14 @@ fn plan_deco_stops(
             break;
         }
 
-        // Ascend to next stop
+        // Ascend to next stop (using gas available at the shallower depth)
+        let next_gas = pp.gas_at_depth(next_stop);
         ascend_to(
             &mut tissues,
             &mut depth,
             next_stop,
-            pp.fo2,
-            pp.fhe,
+            next_gas.fo2,
+            next_gas.fhe,
             pp.ppo2,
             pp.surface_p,
             pp.ascent_rate_m_min,
