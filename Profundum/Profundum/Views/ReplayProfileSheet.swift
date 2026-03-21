@@ -17,10 +17,16 @@ struct ReplayProfileSheet: View {
     @State private var descentRateText: String = ""
     @State private var ascentRateText: String = ""
     @State private var selectedModel: DecoModel = .buhlmannZhl16c
+    @State private var thalmannPdcs: ThalmannPdcs = .pdcs23
     @State private var gfLow: Int = 30
     @State private var gfHigh: Int = 70
+    @State private var gfLowText: String = "30"
+    @State private var gfHighText: String = "70"
     @State private var gasPlanEntries: [GasPlanEntry] = []
+    @State private var diluentO2Percent: Int = 21
+    @State private var diluentHePercent: Int = 35
     @State private var setpointText: String = "1.3"
+    @FocusState private var focusedField: Bool
     @State private var surfacePressureText: String = "1.01325"
     @State private var tempText: String = ""
     @State private var lastStopDepthText: String = ""
@@ -42,10 +48,13 @@ struct ReplayProfileSheet: View {
                     decoModelSection
                     if selectedModel == .buhlmannZhl16c {
                         gradientFactorsSection
+                    } else {
+                        thalmannConservatismSection
                     }
-                    gasPlanSection
                     if dive.isCcr {
-                        ccrSetpointSection
+                        ccrDiluentSection
+                    } else {
+                        gasPlanSection
                     }
                     advancedSection
                     generateButton
@@ -60,6 +69,7 @@ struct ReplayProfileSheet: View {
             }
             .navigationTitle("Replay Profile")
             #if os(iOS)
+            .scrollDismissesKeyboard(.interactively)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -90,6 +100,7 @@ struct ReplayProfileSheet: View {
                 TextField("Target depth", text: $targetDepthText)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 100)
+                    .focused($focusedField)
                     .accessibilityLabel("Target depth in \(depthLabel)")
                     #if os(iOS)
                     .keyboardType(.decimalPad)
@@ -103,6 +114,7 @@ struct ReplayProfileSheet: View {
                 TextField("Descent rate", text: $descentRateText)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 100)
+                    .focused($focusedField)
                     .accessibilityLabel("Descent rate in \(depthLabel) per minute")
                     #if os(iOS)
                     .keyboardType(.decimalPad)
@@ -114,6 +126,7 @@ struct ReplayProfileSheet: View {
                 TextField("Ascent rate", text: $ascentRateText)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 100)
+                    .focused($focusedField)
                     .accessibilityLabel("Ascent rate in \(depthLabel) per minute")
                     #if os(iOS)
                     .keyboardType(.decimalPad)
@@ -141,10 +154,63 @@ struct ReplayProfileSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Gradient Factors")
                 .font(.headline)
-            Stepper("GF Low: \(gfLow)", value: $gfLow, in: 1...100)
-                .accessibilityLabel("Gradient factor low \(gfLow)")
-            Stepper("GF High: \(gfHigh)", value: $gfHigh, in: 1...100)
-                .accessibilityLabel("Gradient factor high \(gfHigh)")
+            HStack {
+                Text("GF Low:")
+                TextField("GF Low", text: $gfLowText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 60)
+                    .focused($focusedField)
+                    #if os(iOS)
+                    .keyboardType(.numberPad)
+                    #endif
+                    .onChange(of: gfLowText) { _, newVal in
+                        if let v = Int(newVal), (1...100).contains(v), gfLow != v { gfLow = v }
+                    }
+                Stepper("", value: $gfLow, in: 1...100)
+                    .labelsHidden()
+                    .onChange(of: gfLow) { _, newVal in
+                        let s = "\(newVal)"
+                        if gfLowText != s { gfLowText = s }
+                    }
+            }
+            .accessibilityLabel("Gradient factor low \(gfLow)")
+            HStack {
+                Text("GF High:")
+                TextField("GF High", text: $gfHighText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 60)
+                    .focused($focusedField)
+                    #if os(iOS)
+                    .keyboardType(.numberPad)
+                    #endif
+                    .onChange(of: gfHighText) { _, newVal in
+                        if let v = Int(newVal), (1...100).contains(v), gfHigh != v { gfHigh = v }
+                    }
+                Stepper("", value: $gfHigh, in: 1...100)
+                    .labelsHidden()
+                    .onChange(of: gfHigh) { _, newVal in
+                        let s = "\(newVal)"
+                        if gfHighText != s { gfHighText = s }
+                    }
+            }
+            .accessibilityLabel("Gradient factor high \(gfHigh)")
+        }
+    }
+
+    private var thalmannConservatismSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("DCS Risk Target")
+                .font(.headline)
+            Picker("P_DCS", selection: $thalmannPdcs) {
+                Text("2.3%").tag(ThalmannPdcs.pdcs23)
+                Text("4.0%").tag(ThalmannPdcs.pdcs40)
+                Text("5.0%").tag(ThalmannPdcs.pdcs50)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityLabel("Target probability of DCS")
+            Text("XVal-He-9 parameter sets from NEDU TR 18-05. Lower is more conservative.")
+                .font(.caption)
+                .foregroundColor(.secondary)
         }
     }
 
@@ -198,6 +264,7 @@ struct ReplayProfileSheet: View {
                     TextField("Switch depth", text: $gasPlanEntries[index].switchDepthText)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 80)
+                        .focused($focusedField)
                         .accessibilityLabel("Switch depth in \(depthLabel)")
                         #if os(iOS)
                         .keyboardType(.decimalPad)
@@ -215,14 +282,35 @@ struct ReplayProfileSheet: View {
         .cornerRadius(8)
     }
 
-    private var ccrSetpointSection: some View {
+    private var ccrDiluentSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("CCR Setpoint")
+            Text("Diluent & Setpoint")
                 .font(.headline)
+
+            // Diluent card
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Diluent").font(.subheadline.bold())
+                Stepper("O₂: \(diluentO2Percent)%",
+                        value: $diluentO2Percent, in: 5...100)
+                    .frame(maxWidth: 200)
+                Stepper("He: \(diluentHePercent)%",
+                        value: $diluentHePercent,
+                        in: 0...(100 - diluentO2Percent))
+                    .frame(maxWidth: 200)
+                Text(gasLabel(o2: diluentO2Percent, he: diluentHePercent))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(8)
+            .background(Color.gray.opacity(0.05))
+            .cornerRadius(8)
+
+            // Setpoint
             HStack {
                 TextField("Setpoint", text: $setpointText)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 80)
+                    .focused($focusedField)
                     .accessibilityLabel("CCR setpoint in bar")
                     #if os(iOS)
                     .keyboardType(.decimalPad)
@@ -240,6 +328,7 @@ struct ReplayProfileSheet: View {
                     TextField("Surface pressure", text: $surfacePressureText)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 100)
+                        .focused($focusedField)
                         .accessibilityLabel("Surface pressure in bar")
                         #if os(iOS)
                         .keyboardType(.decimalPad)
@@ -251,6 +340,7 @@ struct ReplayProfileSheet: View {
                     TextField("Temperature", text: $tempText)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 80)
+                        .focused($focusedField)
                         .accessibilityLabel("Water temperature in \(tempLabel)")
                         #if os(iOS)
                         .keyboardType(.decimalPad)
@@ -262,6 +352,7 @@ struct ReplayProfileSheet: View {
                     TextField("Last stop depth", text: $lastStopDepthText)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 80)
+                        .focused($focusedField)
                         .accessibilityLabel("Last stop depth in \(depthLabel)")
                         #if os(iOS)
                         .keyboardType(.decimalPad)
@@ -273,6 +364,7 @@ struct ReplayProfileSheet: View {
                     TextField("Stop interval", text: $stopIntervalText)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 80)
+                        .focused($focusedField)
                         .accessibilityLabel("Deco stop interval in \(depthLabel)")
                         #if os(iOS)
                         .keyboardType(.decimalPad)
@@ -396,6 +488,29 @@ struct ReplayProfileSheet: View {
         r.totalTimeSec - r.bottomEndTSec
     }
 
+    /// Compute ascent rate from the transit phase only (bottom_end → deco_start).
+    /// Falls back to 3 m/min (~10 ft/min) if phase data is unavailable.
+    private func computeTransitAscentRate(stats: DiveStats) -> Float {
+        let ascentTimeSec = stats.ascentTimeSec
+        guard ascentTimeSec > 0 else { return 3.0 }
+
+        // Find depth at bottom_end_t and deco_start_t from samples
+        let bottomEndT = stats.bottomEndT
+        let decoStartT = stats.decoStartT
+        let depthAtBottomEnd = samples.min(by: {
+            abs($0.tSec - bottomEndT) < abs($1.tSec - bottomEndT)
+        })?.depthM ?? stats.maxDepthM
+        let depthAtDecoStart = samples.min(by: {
+            abs($0.tSec - decoStartT) < abs($1.tSec - decoStartT)
+        })?.depthM ?? 0
+
+        let depthChange = depthAtBottomEnd - depthAtDecoStart
+        guard depthChange > 0 else { return 3.0 }
+
+        let ascentTimeMin = Float(ascentTimeSec) / 60.0
+        return depthChange / ascentTimeMin
+    }
+
     // MARK: - Prefill
 
     private func prefill() {
@@ -406,13 +521,16 @@ struct ReplayProfileSheet: View {
             targetDepthText = String(format: "%.1f", UnitFormatter.depth(s.maxDepthM, unit: du))
             bottomTimeMinutes = max(1, Int(s.bottomTimeSec / 60))
             descentRateText = String(format: "%.0f", UnitFormatter.depth(s.descentRateMMin, unit: du))
-            ascentRateText = String(format: "%.0f", UnitFormatter.depth(s.ascentRateMMin, unit: du))
+            // Ascent rate: use transit phase only (bottom_end → deco_start), not overall average
+            let transitAscentRate = computeTransitAscentRate(stats: s)
+            ascentRateText = String(format: "%.0f", UnitFormatter.depth(transitAscentRate, unit: du))
             tempText = String(format: "%.1f", UnitFormatter.temperature(s.avgTempC, unit: tu))
         } else {
             targetDepthText = String(format: "%.1f", UnitFormatter.depth(dive.maxDepthM, unit: du))
             bottomTimeMinutes = max(1, Int(dive.bottomTimeSec / 60))
-            descentRateText = String(format: "%.0f", UnitFormatter.depth(18.0, unit: du))
-            ascentRateText = String(format: "%.0f", UnitFormatter.depth(9.0, unit: du))
+            // Standard planning rates: 9 m/min descent (~30 ft/min), 3 m/min ascent (~10 ft/min)
+            descentRateText = String(format: "%.0f", UnitFormatter.depth(9.0, unit: du))
+            ascentRateText = String(format: "%.0f", UnitFormatter.depth(3.0, unit: du))
             tempText = ""
         }
 
@@ -427,17 +545,36 @@ struct ReplayProfileSheet: View {
 
         gfLow = dive.gfLow ?? 30
         gfHigh = dive.gfHigh ?? 70
+        gfLowText = "\(gfLow)"
+        gfHighText = "\(gfHigh)"
 
-        // Gas plan from gas mixes
-        if gasMixes.isEmpty {
-            gasPlanEntries = [GasPlanEntry(o2Percent: 21, hePercent: 0, switchDepthText: "")]
+        // Gas plan: branch on CCR vs OC
+        if dive.isCcr {
+            // CCR: find diluent gas
+            if let diluent = gasMixes.first(where: { $0.usage == "diluent" }) {
+                diluentO2Percent = max(5, min(100, Int(diluent.o2Fraction * 100)))
+                diluentHePercent = max(0, min(95, Int(diluent.heFraction * 100)))
+            } else if let first = gasMixes.first {
+                diluentO2Percent = max(5, min(100, Int(first.o2Fraction * 100)))
+                diluentHePercent = max(0, min(95, Int(first.heFraction * 100)))
+            }
+            // gasPlanEntries not used for CCR
+            gasPlanEntries = []
         } else {
-            gasPlanEntries = gasMixes.sorted(by: { $0.mixIndex < $1.mixIndex }).map { mix in
-                GasPlanEntry(
-                    o2Percent: max(5, min(100, Int(mix.o2Fraction * 100))),
-                    hePercent: max(0, min(95, Int(mix.heFraction * 100))),
-                    switchDepthText: ""
-                )
+            // OC: populate gas plan, filtering out diluent-usage gases
+            let sorted = gasMixes
+                .filter { $0.usage != "diluent" }
+                .sorted(by: { $0.mixIndex < $1.mixIndex })
+            if sorted.isEmpty {
+                gasPlanEntries = [GasPlanEntry(o2Percent: 21, hePercent: 0, switchDepthText: "")]
+            } else {
+                gasPlanEntries = sorted.map { mix in
+                    GasPlanEntry(
+                        o2Percent: max(5, min(100, Int(mix.o2Fraction * 100))),
+                        hePercent: max(0, min(95, Int(mix.heFraction * 100))),
+                        switchDepthText: ""
+                    )
+                }
             }
         }
 
@@ -474,21 +611,34 @@ struct ReplayProfileSheet: View {
         let descentRate: Double? = Float(descentRateText).map { Double(UnitFormatter.depthToMetric($0, from: du)) }
         let ascentRate: Double? = Float(ascentRateText).map { Double(UnitFormatter.depthToMetric($0, from: du)) }
 
-        let gasPlan: [GasSwitchPlan] = try gasPlanEntries.enumerated().map { index, entry in
-            let o2 = Double(entry.o2Percent) / 100.0
-            let he = Double(entry.hePercent) / 100.0
+        let gasPlan: [GasSwitchPlan]
+        if dive.isCcr {
+            // CCR: single diluent gas, no switches
+            let o2 = Double(diluentO2Percent) / 100.0
+            let he = Double(diluentHePercent) / 100.0
             guard o2 + he <= 1.0 else {
-                throw ReplayError.invalid("Gas \(index + 1): O₂ + He exceeds 100%")
+                throw ReplayError.invalid("Diluent: O₂ + He exceeds 100%")
             }
-            let gas = GasMixInput(mixIndex: Int32(index), o2Fraction: o2, heFraction: he)
-            var switchDepth: Double?
-            if index > 0 {
-                guard let sd = Float(entry.switchDepthText) else {
-                    throw ReplayError.invalid("Deco gas \(index): switch depth is not a valid number")
+            let gas = GasMixInput(mixIndex: 0, o2Fraction: o2, heFraction: he)
+            gasPlan = [GasSwitchPlan(gas: gas, switchDepthM: nil)]
+        } else {
+            // OC: bottom gas + deco gases with switch depths
+            gasPlan = try gasPlanEntries.enumerated().map { index, entry in
+                let o2 = Double(entry.o2Percent) / 100.0
+                let he = Double(entry.hePercent) / 100.0
+                guard o2 + he <= 1.0 else {
+                    throw ReplayError.invalid("Gas \(index + 1): O₂ + He exceeds 100%")
                 }
-                switchDepth = Double(UnitFormatter.depthToMetric(sd, from: du))
+                let gas = GasMixInput(mixIndex: Int32(index), o2Fraction: o2, heFraction: he)
+                var switchDepth: Double?
+                if index > 0 {
+                    guard let sd = Float(entry.switchDepthText) else {
+                        throw ReplayError.invalid("Deco gas \(index): switch depth is not a valid number")
+                    }
+                    switchDepth = Double(UnitFormatter.depthToMetric(sd, from: du))
+                }
+                return GasSwitchPlan(gas: gas, switchDepthM: switchDepth)
             }
-            return GasSwitchPlan(gas: gas, switchDepthM: switchDepth)
         }
 
         let surfacePressure = Double(surfacePressureText)
@@ -510,12 +660,14 @@ struct ReplayProfileSheet: View {
             lastStopDepthM: lastStop,
             stopIntervalM: stopInterval,
             setpointPpo2: sp,
+            thalmannPdcs: selectedModel == .thalmannElDca ? thalmannPdcs : nil,
             sampleIntervalSec: nil,
             tempC: temp
         )
     }
 
     private func generate() {
+        focusedField = false
         errorMessage = nil
         result = nil
         isGenerating = true

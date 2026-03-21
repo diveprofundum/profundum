@@ -61,6 +61,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: None,
             gf_high: None,
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
 
@@ -81,6 +82,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: None,
             gf_high: None,
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
 
@@ -101,6 +103,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: None,
             gf_high: None,
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
 

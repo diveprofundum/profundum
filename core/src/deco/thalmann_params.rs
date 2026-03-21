@@ -142,6 +142,42 @@ pub(crate) static XVAL_HE_9_023: ThalmannParamSet = ThalmannParamSet {
     pbovp_fsw: 0.0,
 };
 
+// ============================================================================
+// XVal-He-9_040 parameter set (TR 18-05, Table 16)
+// ============================================================================
+
+/// XVal-He-9_040: 5-compartment He-O2 parameter set at 4.0% target P_DCS.
+///
+/// Identical to XVal-He-9_023 except for compartment 5 (slowest):
+/// half-time 200 min (vs 210), M0 38.274 (vs 34.165), β1 1.188 (vs 1.0).
+/// Less conservative — shorter shallow stops, faster off-gassing.
+pub(crate) static XVAL_HE_9_040: ThalmannParamSet = ThalmannParamSet {
+    num_compartments: 5,
+    half_times_min: &[10.0, 20.0, 20.0, 120.0, 200.0],
+    sdr: &[1.0, 2.0, 0.67, 1.0, 1.0],
+    m0_fsw: &[85.0, 64.0, 83.0, 41.731, 38.274],
+    beta1: &[1.0, 1.0, 1.0, 2.0, 1.188],
+    pbovp_fsw: 0.0,
+};
+
+// ============================================================================
+// XVal-He-9_050 parameter set (TR 18-05, Table 17)
+// ============================================================================
+
+/// XVal-He-9_050: 5-compartment He-O2 parameter set at 5.0% target P_DCS.
+///
+/// Identical to XVal-He-9_023 except for compartment 5 (slowest):
+/// half-time 190 min (vs 210), M0 40.437 (vs 34.165), β1 1.310 (vs 1.0).
+/// Least conservative of the three — significantly shorter shallow stops.
+pub(crate) static XVAL_HE_9_050: ThalmannParamSet = ThalmannParamSet {
+    num_compartments: 5,
+    half_times_min: &[10.0, 20.0, 20.0, 120.0, 190.0],
+    sdr: &[1.0, 2.0, 0.67, 1.0, 1.0],
+    m0_fsw: &[85.0, 64.0, 83.0, 41.731, 40.437],
+    beta1: &[1.0, 1.0, 1.0, 2.0, 1.310],
+    pbovp_fsw: 0.0,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,6 +231,29 @@ mod tests {
         assert_eq!(XVAL_HE_9_023.m0_fsw.len(), 5);
         assert_eq!(XVAL_HE_9_023.beta1.len(), 5);
         assert!((XVAL_HE_9_023.pbovp_fsw).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_xval_he_9_040_params() {
+        assert_eq!(XVAL_HE_9_040.num_compartments, 5);
+        XVAL_HE_9_040.validate().unwrap();
+        // Compartments 1-4 identical to _023
+        assert_eq!(XVAL_HE_9_040.half_times_min[0], 10.0);
+        assert_eq!(XVAL_HE_9_040.m0_fsw[3], 41.731);
+        // Compartment 5 differs
+        assert_eq!(XVAL_HE_9_040.half_times_min[4], 200.0);
+        assert!((XVAL_HE_9_040.m0_fsw[4] - 38.274).abs() < 1e-6);
+        assert!((XVAL_HE_9_040.beta1[4] - 1.188).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_xval_he_9_050_params() {
+        assert_eq!(XVAL_HE_9_050.num_compartments, 5);
+        XVAL_HE_9_050.validate().unwrap();
+        // Compartment 5 differs
+        assert_eq!(XVAL_HE_9_050.half_times_min[4], 190.0);
+        assert!((XVAL_HE_9_050.m0_fsw[4] - 40.437).abs() < 1e-6);
+        assert!((XVAL_HE_9_050.beta1[4] - 1.310).abs() < 1e-6);
     }
 
     #[test]
