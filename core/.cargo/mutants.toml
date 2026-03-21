@@ -128,57 +128,74 @@ exclude_re = [
 
     # ── deco/buhlmann_engine.rs — FP threshold guards (same pattern as buhlmann.rs) ──
     # p_total > 1e-10: tissues always have non-trivial gas loading
-    "src/deco/buhlmann_engine\\.rs:250:36:.*replace \\+ with \\* in EngineTissueState::weighted_ab",
-    "src/deco/buhlmann_engine\\.rs:251:20:.*replace > with >= in EngineTissueState::weighted_ab",
+    "src/deco/buhlmann_engine\\.rs:255:36:.*replace \\+ with \\* in EngineTissueState::weighted_ab",
+    "src/deco/buhlmann_engine\\.rs:256:20:.*replace > with >= in EngineTissueState::weighted_ab",
     # denom > 1e-10: Bühlmann constants always give denom >> 1e-10
-    "src/deco/buhlmann_engine\\.rs:266:18:.*replace > with >= in EngineTissueState::compartment_gf",
+    "src/deco/buhlmann_engine\\.rs:271:18:.*replace > with >= in EngineTissueState::compartment_gf",
     # Leading compartment tie-break: exact FP equality never occurs
-    "src/deco/buhlmann_engine\\.rs:286:19:.*replace > with >= in EngineTissueState::surface_gf_and_leading",
+    "src/deco/buhlmann_engine\\.rs:291:19:.*replace > with >= in EngineTissueState::surface_gf_and_leading",
     # abs(denom) < 1e-10: Bühlmann constants never produce near-zero denominator
-    "src/deco/buhlmann_engine\\.rs:333:28:.*replace < with .* in EngineTissueState::raw_gf_ceiling_at",
+    "src/deco/buhlmann_engine\\.rs:338:28:.*replace < with .* in EngineTissueState::raw_gf_ceiling_at",
     # Ceiling max-tracking: setting max = value when equal is a no-op
-    "src/deco/buhlmann_engine\\.rs:337:21:.*replace > with >= in EngineTissueState::raw_gf_ceiling_at",
+    "src/deco/buhlmann_engine\\.rs:342:21:.*replace > with >= in EngineTissueState::raw_gf_ceiling_at",
 
     # ── deco/buhlmann_engine.rs — idempotent max/min tracking ──────────
     # Setting max = value when they're already equal is a no-op (same pattern as metrics.rs)
-    "src/deco/buhlmann_engine\\.rs:152:25:.*replace > with .* in BuhlmannEngine::simulate",   # max_ceiling_m
-    "src/deco/buhlmann_engine\\.rs:155:25:.*replace > with .* in BuhlmannEngine::simulate",   # max_gf99
-    "src/deco/buhlmann_engine\\.rs:158:24:.*replace > with .* in BuhlmannEngine::simulate",   # max_tts_sec
+    "src/deco/buhlmann_engine\\.rs:157:25:.*replace > with .* in BuhlmannEngine::simulate",   # max_ceiling_m
+    "src/deco/buhlmann_engine\\.rs:160:25:.*replace > with .* in BuhlmannEngine::simulate",   # max_gf99
+    "src/deco/buhlmann_engine\\.rs:163:24:.*replace > with .* in BuhlmannEngine::simulate",   # max_tts_sec
 
     # ── deco/buhlmann_engine.rs — ceiling_m > 0.0 sentinel checks ──────
     # ceiling_m == 0.0 is the "no ceiling" sentinel; FP exact equality at 0.0 is reliable
-    "src/deco/buhlmann_engine\\.rs:113:26:.*replace > with .* in BuhlmannEngine::simulate",   # first_stop tracking
-    "src/deco/buhlmann_engine\\.rs:122:51:.*replace > with .* in BuhlmannEngine::simulate",   # ceiling_m > 0 for TTS vs NDL
+    "src/deco/buhlmann_engine\\.rs:115:26:.*replace > with .* in BuhlmannEngine::simulate",   # first_stop tracking
+    "src/deco/buhlmann_engine\\.rs:136:51:.*replace > with .* in BuhlmannEngine::simulate",   # ceiling_m > 0 for TTS vs NDL
 
     # ── deco/buhlmann_engine.rs — compute_tts internal arithmetic ──────
     # compute_tts is tested through simulate() with TTS validation tests.
     # These internal travel-time arithmetic mutations produce results within
     # tolerance bands of the overall TTS validation. The function is a thin
     # wrapper around plan_deco_stops + travel time summation.
-    "src/deco/buhlmann_engine\\.rs:39[0-9]:.*in compute_tts",
-    "src/deco/buhlmann_engine\\.rs:4[0-1][0-9]:.*in compute_tts",
+    "src/deco/buhlmann_engine\\.rs:50[6-9]:.*in compute_tts",
+    "src/deco/buhlmann_engine\\.rs:5[1-2][0-9]:.*in compute_tts",
 
     # ── deco/buhlmann_engine.rs — compute_ndl binary search internals ──
     # NDL is validated at 18m and 30m with ±min tolerance. Binary search
     # internals produce results within those tolerance bands.
-    "src/deco/buhlmann_engine\\.rs:43[0-9]:.*in compute_ndl",
-    "src/deco/buhlmann_engine\\.rs:44[0-9]:.*in compute_ndl",
-    "src/deco/buhlmann_engine\\.rs:45[0-9]:.*in compute_ndl",
-    "src/deco/buhlmann_engine\\.rs:46[0-9]:.*in compute_ndl",
-    "src/deco/buhlmann_engine\\.rs:47[0-9]:.*in compute_ndl",
+    "src/deco/buhlmann_engine\\.rs:5[4-9][0-9]:.*in compute_ndl",
+    "src/deco/buhlmann_engine\\.rs:60[0-4]:.*in compute_ndl",
 
     # ── deco/buhlmann_engine.rs — plan_deco_stops internals ────────────
     # Stop planner is validated through deco schedule tests. Internal
     # arithmetic (stop depth calculations, ceiling checks, loop bounds)
     # produces results within the tolerance bands of schedule validation.
-    "src/deco/buhlmann_engine\\.rs:51[0-9]:.*in plan_deco_stops",
-    "src/deco/buhlmann_engine\\.rs:5[2-9][0-9]:.*in plan_deco_stops",
+    "src/deco/buhlmann_engine\\.rs:6[2-9][0-9]:.*in plan_deco_stops",
+    "src/deco/buhlmann_engine\\.rs:7[0-3][0-9]:.*in plan_deco_stops",
+
+    # ── deco/buhlmann_engine.rs — ascend_with_gas_switches helper ──────
+    # Thin wrapper that segments ascent at gas switch boundaries.
+    # Validated transitively through deco schedule tests.
+    "src/deco/buhlmann_engine\\.rs:7[4-6][0-9]:.*ascend_with_gas_switches",
 
     # ── deco/buhlmann_engine.rs — ascend_to helper ─────────────────────
     # ascend_to is a thin tissue-update wrapper called by plan_deco_stops.
     # Validated transitively through deco schedule tests.
-    "src/deco/buhlmann_engine\\.rs:61[0-9]:.*ascend_to",
-    "src/deco/buhlmann_engine\\.rs:62[0-9]:.*ascend_to",
+    "src/deco/buhlmann_engine\\.rs:7[7-9][0-9]:.*ascend_to",
+
+    # ── deco/buhlmann_engine.rs — gas_at_depth fallback ────────────────
+    # The unwrap_or with a temporary PlanGas is unreachable: gases is never
+    # empty (from_engine always pushes at least one bottom gas).
+    "src/deco/buhlmann_engine\\.rs:4[0-2][0-9]:.*in PlanParams::gas_at_depth",
+
+    # ── deco/buhlmann_engine.rs — from_engine gas sorting/building ─────
+    # Internal gas list construction and sorting; validated transitively
+    # through gas_at_depth and deco schedule tests.
+    "src/deco/buhlmann_engine\\.rs:4[3-9][0-9]:.*in PlanParams::from_engine",
+
+    # ── deco/buhlmann_engine.rs — min-stop enforcement ─────────────────
+    # Minimum 1-minute stop at each depth is standard practice; validated
+    # through DP4 comparison tests.
+    "src/deco/buhlmann_engine\\.rs:69[8-9]:.*in plan_deco_stops",
+    "src/deco/buhlmann_engine\\.rs:70[0-9]:.*in plan_deco_stops",
 
     # ── deco/buhlmann_engine.rs — simulate gas handling ────────────────
     # Internal avg_depth and inspired gas arithmetic: mutations produce
@@ -199,56 +216,80 @@ exclude_re = [
     # Internal inspired gas and rate-of-change arithmetic: mutations produce
     # slightly different tissue loading that doesn't change overall results
     # within tolerance bands (same pattern as buhlmann_engine.rs)
-    "src/deco/thalmann_engine\\.rs:85:.*replace - with .* in ThalmannEngine::simulate",
-    "src/deco/thalmann_engine\\.rs:90:.*replace > with .* in ThalmannEngine::simulate",
-    "src/deco/thalmann_engine\\.rs:91:.*replace .* in ThalmannEngine::simulate",
-    "src/deco/thalmann_engine\\.rs:95:.*replace \\* with .* in ThalmannEngine::simulate",
+    "src/deco/thalmann_engine\\.rs:92:.*replace - with .* in ThalmannEngine::simulate",
+    "src/deco/thalmann_engine\\.rs:97:.*replace > with .* in ThalmannEngine::simulate",
+    "src/deco/thalmann_engine\\.rs:98:.*replace .* in ThalmannEngine::simulate",
+    "src/deco/thalmann_engine\\.rs:102:.*replace \\* with .* in ThalmannEngine::simulate",
 
     # ── deco/thalmann_engine.rs — idempotent max/min tracking ────────
     # Setting max = value when already equal is a no-op (same pattern as buhlmann_engine)
-    "src/deco/thalmann_engine\\.rs:149:.*replace > with .* in ThalmannEngine::simulate",
-    "src/deco/thalmann_engine\\.rs:152:.*replace > with .* in ThalmannEngine::simulate",
-    "src/deco/thalmann_engine\\.rs:155:.*replace > with .* in ThalmannEngine::simulate",
+    "src/deco/thalmann_engine\\.rs:157:.*replace > with .* in ThalmannEngine::simulate",
+    "src/deco/thalmann_engine\\.rs:160:.*replace > with .* in ThalmannEngine::simulate",
+    "src/deco/thalmann_engine\\.rs:163:.*replace > with .* in ThalmannEngine::simulate",
 
     # ── deco/thalmann_engine.rs — ceiling_m > 0.0 sentinel checks ────
     # ceiling_m == 0.0 is the "no ceiling" sentinel; FP exact equality at 0.0 is reliable
-    "src/deco/thalmann_engine\\.rs:138:.*replace > with .* in ThalmannEngine::simulate",
+    "src/deco/thalmann_engine\\.rs:146:.*replace > with .* in ThalmannEngine::simulate",
+
+    # ── deco/thalmann_engine.rs — gas_at_depth fallback ──────────────
+    # The unwrap_or with a temporary ThalPlanGas is unreachable: gases is never
+    # empty (from_engine always pushes at least one bottom gas).
+    "src/deco/thalmann_engine\\.rs:3[7-9][0-9]:.*in ThalmannPlanParams::gas_at_depth",
+
+    # ── deco/thalmann_engine.rs — from_engine gas sorting/building ───
+    # Internal gas list construction and sorting; validated transitively
+    # through gas_at_depth and deco schedule tests.
+    "src/deco/thalmann_engine\\.rs:4[0-5][0-9]:.*in ThalmannPlanParams::from_engine",
 
     # ── deco/thalmann_engine.rs — compute_tts_thalmann internals ─────
     # Validated transitively through simulate() TTS tests; internal arithmetic
     # mutations produce results within tolerance bands of overall validation.
-    "src/deco/thalmann_engine\\.rs:3[5-7][0-9]:.*in compute_tts_thalmann",
+    "src/deco/thalmann_engine\\.rs:4[6-8][0-9]:.*in compute_tts_thalmann",
 
     # ── deco/thalmann_engine.rs — compute_ndl_thalmann internals ─────
     # NDL validated at multiple depths with monotonicity tests; binary search
     # internals produce results within tolerance bands.
-    "src/deco/thalmann_engine\\.rs:3[8-9][0-9]:.*in compute_ndl_thalmann",
-    "src/deco/thalmann_engine\\.rs:4[0-4][0-9]:.*in compute_ndl_thalmann",
+    "src/deco/thalmann_engine\\.rs:49[2-9]:.*in compute_ndl_thalmann",
+    "src/deco/thalmann_engine\\.rs:5[0-5][0-9]:.*in compute_ndl_thalmann",
+    "src/deco/thalmann_engine\\.rs:56[0-2]:.*in compute_ndl_thalmann",
 
     # ── deco/thalmann_engine.rs — plan_deco_stops_thalmann internals ─
     # Stop planner validated through deco schedule tests; internal arithmetic
     # produces results within tolerance bands of schedule validation.
-    "src/deco/thalmann_engine\\.rs:4[5-9][0-9]:.*in plan_deco_stops_thalmann",
-    "src/deco/thalmann_engine\\.rs:5[0-3][0-9]:.*in plan_deco_stops_thalmann",
+    "src/deco/thalmann_engine\\.rs:5[6-9][0-9]:.*in plan_deco_stops_thalmann",
+    "src/deco/thalmann_engine\\.rs:6[0-7][0-9]:.*in plan_deco_stops_thalmann",
+
+    # ── deco/thalmann_engine.rs — min-stop enforcement ───────────────
+    # Minimum 1-minute stop at each depth is standard practice; validated
+    # through DP4 comparison tests.
+    "src/deco/thalmann_engine\\.rs:63[9-9]:.*in plan_deco_stops_thalmann",
+    "src/deco/thalmann_engine\\.rs:6[4-6][0-9]:.*in plan_deco_stops_thalmann",
+
+    # ── deco/thalmann_engine.rs — ascend_with_gas_switches_thalmann ───
+    # Thin wrapper that segments ascent at gas switch boundaries.
+    # Validated transitively through deco schedule tests.
+    "src/deco/thalmann_engine\\.rs:6[8-9][0-9]:.*ascend_with_gas_switches_thalmann",
+    "src/deco/thalmann_engine\\.rs:70[0-1]:.*ascend_with_gas_switches_thalmann",
 
     # ── deco/thalmann_engine.rs — ascend_to_thalmann helper ──────────
     # Thin tissue-update wrapper; validated transitively through deco schedule tests.
-    "src/deco/thalmann_engine\\.rs:5[3-7][0-9]:.*ascend_to_thalmann",
+    "src/deco/thalmann_engine\\.rs:70[4-9]:.*ascend_to_thalmann",
+    "src/deco/thalmann_engine\\.rs:7[1-3][0-9]:.*ascend_to_thalmann",
 
     # ── deco/thalmann_engine.rs — tissue update internals ────────────
     # FP threshold guards: exact equality at on-gas/off-gas boundary and
     # crossover threshold never occurs with real tissue tensions
-    "src/deco/thalmann_engine\\.rs:252:.*replace > with >= in ThalmannTissueState::update",
-    "src/deco/thalmann_engine\\.rs:264:.*in ThalmannTissueState::update",
-    # Linear washout driving force and depth-change correction (lines 270-274):
+    "src/deco/thalmann_engine\\.rs:264:.*replace > with >= in ThalmannTissueState::update",
+    "src/deco/thalmann_engine\\.rs:270:.*in ThalmannTissueState::update",
+    # Linear washout driving force and depth-change correction (lines 276-286):
     # The depth_change_correction term is 0 at isobaric stops (r=0), and for
     # transit segments the linear path is only active for supersaturated tissues
     # where small arithmetic changes don't shift the overall result past test
     # tolerance bands. Same pattern as buhlmann_engine gas arithmetic.
-    "src/deco/thalmann_engine\\.rs:27[0-4]:.*in ThalmannTissueState::update",
+    "src/deco/thalmann_engine\\.rs:2[7-8][0-9]:.*in ThalmannTissueState::update",
     # Ceiling FP threshold: exact equality in max tracking
-    "src/deco/thalmann_engine\\.rs:29[0-9]:.*replace > with >= in ThalmannTissueState::ceiling_fsw",
-    "src/deco/thalmann_engine\\.rs:30[0-9]:.*replace > with >= in ThalmannTissueState::utilization_at",
+    "src/deco/thalmann_engine\\.rs:30[0-9]:.*replace > with >= in ThalmannTissueState::ceiling_fsw",
+    "src/deco/thalmann_engine\\.rs:3[1-2][0-9]:.*replace > with >= in ThalmannTissueState::utilization_at",
 
     # ── deco/thalmann_params.rs — P_FVG_FSW constant ────────────────
     # PH2O_FSW = 0.0, so `PVCO2 + PH2O` and `PVCO2 - PH2O` are identical
@@ -258,7 +299,7 @@ exclude_re = [
     # The downstream deco engine (buhlmann_engine/thalmann_engine) independently
     # validates ascent_rate <= 0, so flipping the profile generator's check is
     # caught by the engine's own validation and still returns InvalidParam.
-    "src/deco/profile_generator\\.rs:243:15:.*replace <= with > in validate_params",
+    "src/deco/profile_generator\\.rs:248:15:.*replace <= with > in validate_params",
 
     # ── deco/profile_generator.rs — sample loop boundary equivalences ────
     # These loop mutations produce profiles with ±1 sample at boundaries.
@@ -266,44 +307,45 @@ exclude_re = [
     # included by the final-sample guards, so the deco simulation result is
     # identical. Tests validate profile shape, not exact sample count.
     # generate_descent: while t < descent_time_sec
-    "src/deco/profile_generator\\.rs:400:13:.*replace < with <= in generate_descent",
+    "src/deco/profile_generator\\.rs:405:13:.*replace < with <= in generate_descent",
     # generate_descent: t += sample_interval (multiplication skips but final sample guard catches)
-    "src/deco/profile_generator\\.rs:404:11:.*replace \\+= with \\*= in generate_descent",
+    "src/deco/profile_generator\\.rs:409:11:.*replace \\+= with \\*= in generate_descent",
     # generate_bottom: while t < bottom_end_t
-    "src/deco/profile_generator\\.rs:423:13:.*replace < with <= in generate_bottom",
+    "src/deco/profile_generator\\.rs:428:13:.*replace < with <= in generate_bottom",
     # generate_bottom: t += sample_interval
-    "src/deco/profile_generator\\.rs:425:11:.*replace \\+= with \\*= in generate_bottom",
+    "src/deco/profile_generator\\.rs:430:11:.*replace \\+= with \\*= in generate_bottom",
 
     # ── deco/profile_generator.rs — generate_ascent stop-hold loop ──────
     # Stop hold loop internals: ±1 sample during constant-depth hold doesn't
     # change the deco simulation (tissue loading is identical at constant depth).
     # stop.gas_mix_index >= 0: -1 is the "unchanged" sentinel; >= vs < only
     # matters when gas_mix_index is exactly 0, but 0 is the default gas anyway.
-    "src/deco/profile_generator\\.rs:478:35:.*replace >= with < in generate_ascent",
-    "src/deco/profile_generator\\.rs:484:35:.*replace \\+ with .* in generate_ascent",
-    "src/deco/profile_generator\\.rs:485:21:.*replace < with .* in generate_ascent",
-    "src/deco/profile_generator\\.rs:487:19:.*replace \\+= with \\*= in generate_ascent",
-    "src/deco/profile_generator\\.rs:489:26:.*replace != with == in generate_ascent",
+    "src/deco/profile_generator\\.rs:483:35:.*replace >= with < in generate_ascent",
+    "src/deco/profile_generator\\.rs:488:35:.*replace \\+ with .* in generate_ascent",
+    "src/deco/profile_generator\\.rs:489:35:.*replace \\+ with .* in generate_ascent",
+    "src/deco/profile_generator\\.rs:490:21:.*replace < with .* in generate_ascent",
+    "src/deco/profile_generator\\.rs:492:19:.*replace \\+= with \\*= in generate_ascent",
+    "src/deco/profile_generator\\.rs:494:26:.*replace != with == in generate_ascent",
     # Surface ensure guard: depth_m > 0.0 vs >= 0.0 — at exactly 0.0 adding
     # a duplicate surface sample is harmless; == and < never drop the surface sample
     # because previous code always reaches depth 0.
-    "src/deco/profile_generator\\.rs:510:48:.*replace > with .* in generate_ascent",
+    "src/deco/profile_generator\\.rs:515:48:.*replace > with .* in generate_ascent",
 
     # ── deco/profile_generator.rs — ascend_segment arithmetic ───────────
     # total_ascent_m = current_depth - target_depth: replacing - with + would
     # produce a huge ascent distance, but the ascent still ends at target_depth
     # because samples are clamped and final sample is forced at target_depth.
-    "src/deco/profile_generator\\.rs:531:41:.*replace - with \\+ in ascend_segment",
+    "src/deco/profile_generator\\.rs:536:41:.*replace - with \\+ in ascend_segment",
 
     # ── deco/profile_generator.rs — ascend_segment internals ─────────────
     # Internal travel arithmetic: mutations produce slightly different depth
     # interpolation but final sample is always forced at target_depth, so
     # overall profile shape and deco result are identical.
-    "src/deco/profile_generator\\.rs:532:.*replace \\* with .* in ascend_segment",
-    "src/deco/profile_generator\\.rs:532:.*replace / with .* in ascend_segment",
-    "src/deco/profile_generator\\.rs:538:13:.*replace < with .* in ascend_segment",
-    "src/deco/profile_generator\\.rs:539:29:.*replace / with .* in ascend_segment",
-    "src/deco/profile_generator\\.rs:540:40:.*replace \\* with .* in ascend_segment",
-    "src/deco/profile_generator\\.rs:547:11:.*replace \\+= with \\*= in ascend_segment",
-    "src/deco/profile_generator\\.rs:554:46:.*replace != with == in ascend_segment",
+    "src/deco/profile_generator\\.rs:537:.*replace \\* with .* in ascend_segment",
+    "src/deco/profile_generator\\.rs:537:.*replace / with .* in ascend_segment",
+    "src/deco/profile_generator\\.rs:543:13:.*replace < with .* in ascend_segment",
+    "src/deco/profile_generator\\.rs:544:29:.*replace / with .* in ascend_segment",
+    "src/deco/profile_generator\\.rs:545:40:.*replace \\* with .* in ascend_segment",
+    "src/deco/profile_generator\\.rs:552:11:.*replace \\+= with \\*= in ascend_segment",
+    "src/deco/profile_generator\\.rs:559:46:.*replace != with == in ascend_segment",
 ]

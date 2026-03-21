@@ -1465,10 +1465,12 @@ mod tests {
     fn test_pdcs_variants_produce_less_conservative_deco() {
         // Pdcs23 (2.3%) is the most conservative, Pdcs40 (4.0%) moderate,
         // Pdcs50 (5.0%) least conservative. Less conservative → shorter deco.
+        // Use a long, deep dive so compartment 5 (slowest) controls the
+        // shallow stops — this is where the P_DCS variants differ.
         let samples = vec![
             sample(0, 0.0),
-            sample(120, 60.0),
-            sample(1200, 60.0), // 20 min at 60m
+            sample(180, 90.0),  // descent to 90m (300 fsw)
+            sample(3780, 90.0), // 60 min at 90m
         ];
 
         let mut params_23 = default_params(samples.clone());
@@ -1503,15 +1505,17 @@ mod tests {
 
         // Less conservative (higher P_DCS target) should produce shorter
         // or equal total deco time.
+        // Strict inequality: each less-conservative variant MUST produce
+        // strictly less deco (not equal), which catches deletion of match arms.
         assert!(
-            result_40.total_deco_time_sec <= result_23.total_deco_time_sec,
-            "Pdcs40 deco ({}) should be <= Pdcs23 deco ({})",
+            result_40.total_deco_time_sec < result_23.total_deco_time_sec,
+            "Pdcs40 deco ({}) should be < Pdcs23 deco ({})",
             result_40.total_deco_time_sec,
             result_23.total_deco_time_sec
         );
         assert!(
-            result_50.total_deco_time_sec <= result_40.total_deco_time_sec,
-            "Pdcs50 deco ({}) should be <= Pdcs40 deco ({})",
+            result_50.total_deco_time_sec < result_40.total_deco_time_sec,
+            "Pdcs50 deco ({}) should be < Pdcs40 deco ({})",
             result_50.total_deco_time_sec,
             result_40.total_deco_time_sec
         );
