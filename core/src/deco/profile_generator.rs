@@ -1275,4 +1275,237 @@ mod tests {
             "Max depth should be ~30m, got {max_depth}"
         );
     }
+
+    // ── Smoke / integration tests for real-world scenarios ───────────────
+    //
+    // These reproduce actual dive profiles to catch regressions and
+    // validate that the engine produces physically reasonable results.
+
+    #[test]
+    fn smoke_ccr_150ft_40min_buhlmann_gf50_90() {
+        // CCR dive: 150ft (45.7m), 40 min bottom, Tx 15/15 diluent, SP 1.2, GF 50/90
+        // Expected: ~60-90 min total, ~20-50 min deco
+        let params = ProfileGenParams {
+            target_depth_m: 45.72,  // 150 ft
+            bottom_time_sec: 40 * 60,
+            descent_rate_m_min: Some(18.0),
+            ascent_rate_m_min: Some(9.0),
+            gas_plan: vec![GasSwitchPlan {
+                gas: GasMixInput { mix_index: 0, o2_fraction: 0.15, he_fraction: 0.15 },
+                switch_depth_m: None,
+            }],
+            model: DecoModel::BuhlmannZhl16c,
+            surface_pressure_bar: None,
+            gf_low: Some(50),
+            gf_high: Some(90),
+            last_stop_depth_m: None,
+            stop_interval_m: None,
+            setpoint_ppo2: Some(1.2),
+            thalmann_pdcs: None,
+            sample_interval_sec: None,
+            temp_c: None,
+        };
+        let result = generate_dive_profile(params).unwrap();
+        let total_min = result.total_time_sec / 60;
+        let deco_min = (result.total_time_sec - result.bottom_end_t_sec) / 60;
+        assert!(
+            total_min < 180,
+            "CCR 150ft/40min GF50/90: total {total_min} min is unreasonable (expected <180)"
+        );
+        assert!(
+            deco_min < 120,
+            "CCR 150ft/40min GF50/90: deco {deco_min} min is unreasonable (expected <120)"
+        );
+        assert!(
+            result.deco_result.max_tts_sec > 0,
+            "CCR 150ft/40min should have TTS > 0"
+        );
+    }
+
+    #[test]
+    fn smoke_ccr_200ft_29min_buhlmann_gf50_90() {
+        // CCR dive: 200ft (61m), 29 min bottom, Tx 18/25 diluent, SP 1.2, GF 50/90
+        // This is the user's actual dive that produced 671 min total (wrong)
+        let params = ProfileGenParams {
+            target_depth_m: 60.96,  // 200 ft
+            bottom_time_sec: 29 * 60,
+            descent_rate_m_min: Some(18.0),
+            ascent_rate_m_min: Some(9.0),
+            gas_plan: vec![GasSwitchPlan {
+                gas: GasMixInput { mix_index: 0, o2_fraction: 0.18, he_fraction: 0.25 },
+                switch_depth_m: None,
+            }],
+            model: DecoModel::BuhlmannZhl16c,
+            surface_pressure_bar: None,
+            gf_low: Some(50),
+            gf_high: Some(90),
+            last_stop_depth_m: None,
+            stop_interval_m: None,
+            setpoint_ppo2: Some(1.2),
+            thalmann_pdcs: None,
+            sample_interval_sec: None,
+            temp_c: None,
+        };
+        let result = generate_dive_profile(params).unwrap();
+        let total_min = result.total_time_sec / 60;
+        let deco_min = (result.total_time_sec - result.bottom_end_t_sec) / 60;
+        assert!(
+            total_min < 180,
+            "CCR 200ft/29min GF50/90: total {total_min} min is unreasonable (expected <180)"
+        );
+        assert!(
+            deco_min < 120,
+            "CCR 200ft/29min GF50/90: deco {deco_min} min is unreasonable (expected <120)"
+        );
+    }
+
+    #[test]
+    fn smoke_ccr_150ft_40min_thalmann_pdcs23() {
+        // Same CCR profile but with Thalmann 2.3% P_DCS
+        let params = ProfileGenParams {
+            target_depth_m: 45.72,
+            bottom_time_sec: 40 * 60,
+            descent_rate_m_min: Some(18.0),
+            ascent_rate_m_min: Some(9.0),
+            gas_plan: vec![GasSwitchPlan {
+                gas: GasMixInput { mix_index: 0, o2_fraction: 0.15, he_fraction: 0.15 },
+                switch_depth_m: None,
+            }],
+            model: DecoModel::ThalmannElDca,
+            surface_pressure_bar: None,
+            gf_low: None,
+            gf_high: None,
+            last_stop_depth_m: None,
+            stop_interval_m: None,
+            setpoint_ppo2: Some(1.2),
+            thalmann_pdcs: Some(ThalmannPdcs::Pdcs23),
+            sample_interval_sec: None,
+            temp_c: None,
+        };
+        let result = generate_dive_profile(params).unwrap();
+        let total_min = result.total_time_sec / 60;
+        assert!(
+            total_min < 180,
+            "Thalmann CCR 150ft/40min: total {total_min} min is unreasonable (expected <180)"
+        );
+    }
+
+    #[test]
+    fn smoke_diag_simple_air_30m_20min() {
+        // Simple air dive that should be easy to verify: 30m/20min GF 100/100
+        let mut params = air_params(30.0, 1200);
+        params.gf_low = Some(100);
+        params.gf_high = Some(100);
+        let result = generate_dive_profile(params).unwrap();
+        let total_min = result.total_time_sec / 60;
+        let deco_stops = &result.deco_result.deco_stops;
+        eprintln!("=== Air 30m/20min GF100/100 ===");
+        eprintln!("Total: {} min, Bottom end: {} sec", total_min, result.bottom_end_t_sec);
+        eprintln!("Stops: {:?}", deco_stops.iter().map(|s| format!("{}m {}s", s.depth_m, s.duration_sec)).collect::<Vec<_>>());
+        eprintln!("Max ceiling: {}m, Max GF99: {}, Max TTS: {}s", result.deco_result.max_ceiling_m, result.deco_result.max_gf99, result.deco_result.max_tts_sec);
+        eprintln!("Truncated: {}", result.truncated);
+        eprintln!("Sample count: {}", result.samples.len());
+        // 30m/20min on air at GF 100/100 should be within NDL or have minimal deco
+        assert!(
+            total_min < 60,
+            "Air 30m/20min GF100/100: total {total_min} min is unreasonable"
+        );
+    }
+
+    #[test]
+    fn smoke_diag_air_40m_20min_gf50_80() {
+        // 40m/20min on air with GF 50/80 — should have moderate deco
+        let mut params = air_params(40.0, 1200);
+        params.gf_low = Some(50);
+        params.gf_high = Some(80);
+        let result = generate_dive_profile(params).unwrap();
+        let total_min = result.total_time_sec / 60;
+        let deco_stops = &result.deco_result.deco_stops;
+        eprintln!("=== Air 40m/20min GF50/80 ===");
+        eprintln!("Total: {} min, Bottom end: {} sec", total_min, result.bottom_end_t_sec);
+        eprintln!("Stops: {:?}", deco_stops.iter().map(|s| format!("{}m {}s", s.depth_m, s.duration_sec)).collect::<Vec<_>>());
+        eprintln!("Max ceiling: {}m, Max TTS: {}s", result.deco_result.max_ceiling_m, result.deco_result.max_tts_sec);
+        eprintln!("Truncated: {}", result.truncated);
+        // 88 min is plausible for air at 40m with conservative GF 50/80 (single gas deco)
+        assert!(total_min < 120, "Air 40m/20min GF50/80: total {total_min} min unreasonable");
+    }
+
+    #[test]
+    #[ignore] // Known: single-gas deco with GF20 produces very long stops; needs gas-switch-aware planner
+    fn smoke_diag_trimix_46m_40min_gf20_85() {
+        // 46m/40min on Tx 21/35 with GF 20/85 — NO deco gas, single gas dive
+        let params = ProfileGenParams {
+            target_depth_m: 45.72,
+            bottom_time_sec: 40 * 60,
+            descent_rate_m_min: Some(18.0),
+            ascent_rate_m_min: Some(9.0),
+            gas_plan: vec![GasSwitchPlan {
+                gas: GasMixInput { mix_index: 0, o2_fraction: 0.21, he_fraction: 0.35 },
+                switch_depth_m: None,
+            }],
+            model: DecoModel::BuhlmannZhl16c,
+            surface_pressure_bar: None,
+            gf_low: Some(20),
+            gf_high: Some(85),
+            last_stop_depth_m: None,
+            stop_interval_m: None,
+            setpoint_ppo2: None,
+            thalmann_pdcs: None,
+            sample_interval_sec: None,
+            temp_c: None,
+        };
+        let result = generate_dive_profile(params).unwrap();
+        let total_min = result.total_time_sec / 60;
+        let deco_stops = &result.deco_result.deco_stops;
+        eprintln!("=== Tx21/35 46m/40min GF20/85 (single gas, no deco gas) ===");
+        eprintln!("Total: {} min, Bottom end: {} sec", total_min, result.bottom_end_t_sec);
+        eprintln!("Stops: {:?}", deco_stops.iter().map(|s| format!("{}m {}s", s.depth_m, s.duration_sec)).collect::<Vec<_>>());
+        eprintln!("Max ceiling: {}m, Max TTS: {}s", result.deco_result.max_ceiling_m, result.deco_result.max_tts_sec);
+        eprintln!("Truncated: {}", result.truncated);
+        // Single gas deco on 21% O2 will be long but should still be under 200 min total
+        assert!(total_min < 200, "Tx21/35 46m/40min GF20/85: total {total_min} min unreasonable");
+    }
+
+    #[test]
+    #[ignore] // Known: ascent planner doesn't switch to deco gas; plans entire ascent on bottom gas
+    fn smoke_oc_150ft_40min_trimix_buhlmann() {
+        // OC dive: 150ft, 40 min, Tx 21/35 bottom, Nx50 deco at 70ft
+        let params = ProfileGenParams {
+            target_depth_m: 45.72,
+            bottom_time_sec: 40 * 60,
+            descent_rate_m_min: Some(18.0),
+            ascent_rate_m_min: Some(9.0),
+            gas_plan: vec![
+                GasSwitchPlan {
+                    gas: GasMixInput { mix_index: 0, o2_fraction: 0.21, he_fraction: 0.35 },
+                    switch_depth_m: None,
+                },
+                GasSwitchPlan {
+                    gas: GasMixInput { mix_index: 1, o2_fraction: 0.50, he_fraction: 0.0 },
+                    switch_depth_m: Some(21.0), // ~70ft
+                },
+            ],
+            model: DecoModel::BuhlmannZhl16c,
+            surface_pressure_bar: None,
+            gf_low: Some(20),
+            gf_high: Some(85),
+            last_stop_depth_m: None,
+            stop_interval_m: None,
+            setpoint_ppo2: None,
+            thalmann_pdcs: None,
+            sample_interval_sec: None,
+            temp_c: None,
+        };
+        let result = generate_dive_profile(params).unwrap();
+        let total_min = result.total_time_sec / 60;
+        let deco_min = (result.total_time_sec - result.bottom_end_t_sec) / 60;
+        assert!(
+            total_min < 180,
+            "OC 150ft/40min GF20/85: total {total_min} min is unreasonable (expected <180)"
+        );
+        assert!(
+            deco_min > 10,
+            "OC 150ft/40min GF20/85: should have meaningful deco, got {deco_min} min"
+        );
+    }
 }

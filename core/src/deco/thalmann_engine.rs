@@ -135,6 +135,7 @@ impl ThalmannEngine {
             let pp = ThalmannPlanParams {
                 fo2: current_fo2,
                 fhe: current_fhe,
+                ppo2: sample.ppo2.map(|v| v as f64),
                 surface_p,
                 ascent_rate_m_min: ascent_rate,
                 last_stop_depth,
@@ -179,9 +180,11 @@ impl ThalmannEngine {
         let (deco_stops, truncated) = if params.plan_ascent {
             let last_sample = params.samples.last().unwrap();
             let current_depth_m = (last_sample.depth_m as f64).max(0.0);
+            let last_ppo2 = last_sample.ppo2.map(|v| v as f64);
             let pp = ThalmannPlanParams {
                 fo2: current_fo2,
                 fhe: current_fhe,
+                ppo2: last_ppo2,
                 surface_p,
                 ascent_rate_m_min: ascent_rate,
                 last_stop_depth,
@@ -343,6 +346,8 @@ fn round_up_to_stop(depth_m: f64, stop_interval: f64) -> f64 {
 struct ThalmannPlanParams<'a> {
     fo2: f64,
     fhe: f64,
+    /// CCR setpoint PPO2 in bar. `None` = open circuit.
+    ppo2: Option<f64>,
     surface_p: f64,
     ascent_rate_m_min: f64,
     last_stop_depth: f64,
@@ -396,7 +401,7 @@ fn compute_ndl_thalmann(
 
     let ambient_p = depth_to_pressure(current_depth_m, pp.surface_p);
     let ambient_fsw = bar_to_fsw(ambient_p);
-    let (fn2, fhe) = inspired_fractions(pp.fo2, pp.fhe, None, ambient_p);
+    let (fn2, fhe) = inspired_fractions(pp.fo2, pp.fhe, pp.ppo2.map(|sp| sp.min(ambient_p)), ambient_p);
     let f_inert = fn2 + fhe;
     let p_inspired_fsw = (ambient_fsw - PACO2_FSW) * f_inert;
 
@@ -506,7 +511,7 @@ fn plan_deco_stops_thalmann(
             // Wait 60 seconds at this stop
             let ambient_p = depth_to_pressure(current_stop, pp.surface_p);
             let ambient_fsw = bar_to_fsw(ambient_p);
-            let (fn2, fhe) = inspired_fractions(pp.fo2, pp.fhe, None, ambient_p);
+            let (fn2, fhe) = inspired_fractions(pp.fo2, pp.fhe, pp.ppo2.map(|sp| sp.min(ambient_p)), ambient_p);
             let f_inert = fn2 + fhe;
             let p_inspired_fsw = (ambient_fsw - PACO2_FSW) * f_inert;
 
@@ -556,7 +561,7 @@ fn ascend_to_thalmann(
     let ambient_p = depth_to_pressure(avg_depth, pp.surface_p);
     let ambient_fsw = bar_to_fsw(ambient_p);
 
-    let (fn2, fhe_frac) = inspired_fractions(pp.fo2, pp.fhe, None, ambient_p);
+    let (fn2, fhe_frac) = inspired_fractions(pp.fo2, pp.fhe, pp.ppo2.map(|sp| sp.min(ambient_p)), ambient_p);
     let f_inert = fn2 + fhe_frac;
     let p_inspired_fsw = (ambient_fsw - PACO2_FSW) * f_inert;
 

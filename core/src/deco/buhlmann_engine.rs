@@ -123,6 +123,7 @@ impl BuhlmannEngine {
                 let pp = PlanParams {
                     fo2: current_fo2,
                     fhe: current_fhe,
+                    ppo2: sample.ppo2.map(|v| v as f64),
                     surface_p,
                     ascent_rate_m_min: ascent_rate,
                     last_stop_depth,
@@ -139,6 +140,7 @@ impl BuhlmannEngine {
                     current_depth_m,
                     current_fo2,
                     current_fhe,
+                    sample.ppo2.map(|v| v as f64),
                     surface_p,
                     gf_low,
                     gf_high,
@@ -175,9 +177,11 @@ impl BuhlmannEngine {
         let (deco_stops, truncated) = if params.plan_ascent {
             let last_sample = params.samples.last().unwrap();
             let current_depth_m = (last_sample.depth_m as f64).max(0.0);
+            let last_ppo2 = last_sample.ppo2.map(|v| v as f64);
             let pp = PlanParams {
                 fo2: current_fo2,
                 fhe: current_fhe,
+                ppo2: last_ppo2,
                 surface_p,
                 ascent_rate_m_min: ascent_rate,
                 last_stop_depth,
@@ -371,6 +375,8 @@ fn round_up_to_stop(depth_m: f64, stop_interval: f64) -> f64 {
 struct PlanParams {
     fo2: f64,
     fhe: f64,
+    /// CCR setpoint PPO2 in bar. `None` = open circuit.
+    ppo2: Option<f64>,
     surface_p: f64,
     ascent_rate_m_min: f64,
     last_stop_depth: f64,
@@ -425,6 +431,7 @@ fn compute_ndl(
     current_depth_m: f64,
     fo2: f64,
     fhe: f64,
+    ppo2: Option<f64>,
     surface_p: f64,
     gf_low: f64,
     _gf_high: f64,
@@ -434,7 +441,7 @@ fn compute_ndl(
     }
 
     let ambient_p = depth_to_pressure(current_depth_m, surface_p);
-    let (fn2, fhe_frac) = inspired_fractions(fo2, fhe, None, ambient_p);
+    let (fn2, fhe_frac) = inspired_fractions(fo2, fhe, ppo2, ambient_p);
     let p_inspired_n2 = (ambient_p - P_WATER_VAPOR) * fn2;
     let p_inspired_he = (ambient_p - P_WATER_VAPOR) * fhe_frac;
 
@@ -535,6 +542,7 @@ fn plan_deco_stops(
         stop_depth,
         pp.fo2,
         pp.fhe,
+        pp.ppo2,
         pp.surface_p,
         pp.ascent_rate_m_min,
     );
@@ -564,7 +572,8 @@ fn plan_deco_stops(
 
             // Wait 60 seconds at this stop
             let ambient_p = depth_to_pressure(current_stop, pp.surface_p);
-            let (fn2, fhe_frac) = inspired_fractions(pp.fo2, pp.fhe, None, ambient_p);
+            let ppo2_at_stop = pp.ppo2.map(|sp| sp.min(ambient_p));
+            let (fn2, fhe_frac) = inspired_fractions(pp.fo2, pp.fhe, ppo2_at_stop, ambient_p);
             let p_inspired_n2 = (ambient_p - P_WATER_VAPOR) * fn2;
             let p_inspired_he = (ambient_p - P_WATER_VAPOR) * fhe_frac;
             tissues.update(60.0, p_inspired_n2, p_inspired_he);
@@ -595,6 +604,7 @@ fn plan_deco_stops(
             next_stop,
             pp.fo2,
             pp.fhe,
+            pp.ppo2,
             pp.surface_p,
             pp.ascent_rate_m_min,
         );
@@ -611,6 +621,7 @@ fn ascend_to(
     target_depth: f64,
     fo2: f64,
     fhe: f64,
+    ppo2: Option<f64>,
     surface_p: f64,
     ascent_rate_m_min: f64,
 ) {
@@ -623,7 +634,8 @@ fn ascend_to(
     let travel_sec = (travel_m / ascent_rate_m_min) * 60.0;
     let avg_depth = (*current_depth + target_depth) / 2.0;
     let ambient_p = depth_to_pressure(avg_depth, surface_p);
-    let (fn2, fhe_frac) = inspired_fractions(fo2, fhe, None, ambient_p);
+    let ppo2_clamped = ppo2.map(|sp| sp.min(ambient_p));
+    let (fn2, fhe_frac) = inspired_fractions(fo2, fhe, ppo2_clamped, ambient_p);
     let p_inspired_n2 = (ambient_p - P_WATER_VAPOR) * fn2;
     let p_inspired_he = (ambient_p - P_WATER_VAPOR) * fhe_frac;
     tissues.update(travel_sec, p_inspired_n2, p_inspired_he);
@@ -773,6 +785,7 @@ mod tests {
             18.0,
             AIR_FO2,
             0.0,
+            None,
             DEFAULT_SURFACE_PRESSURE,
             1.0,
             1.0,
@@ -794,6 +807,7 @@ mod tests {
             30.0,
             AIR_FO2,
             0.0,
+            None,
             DEFAULT_SURFACE_PRESSURE,
             1.0,
             1.0,
@@ -814,6 +828,7 @@ mod tests {
             0.0,
             AIR_FO2,
             0.0,
+            None,
             DEFAULT_SURFACE_PRESSURE,
             1.0,
             1.0,
@@ -1527,6 +1542,7 @@ mod tests {
             3.0,
             AIR_FO2,
             0.0,
+            None,
             DEFAULT_SURFACE_PRESSURE,
             1.0,
             1.0,
@@ -1551,6 +1567,7 @@ mod tests {
             12.0,
             AIR_FO2,
             0.0,
+            None,
             DEFAULT_SURFACE_PRESSURE,
             0.4,
             0.85,
