@@ -10,6 +10,15 @@ struct ReplayProfileSheet: View {
     let stats: DiveStats?
     let samples: [DiveSample]
 
+    // MARK: - Mode
+
+    enum ReplayMode: String, CaseIterable {
+        case actualDive = "Actual Dive"
+        case whatIfPlanning = "What-If Planning"
+    }
+
+    @State private var replayMode: ReplayMode = .actualDive
+
     // MARK: - Form state
 
     @State private var targetDepthText: String = ""
@@ -26,6 +35,7 @@ struct ReplayProfileSheet: View {
     @State private var diluentO2Percent: Int = 21
     @State private var diluentHePercent: Int = 35
     @State private var setpointText: String = "1.3"
+    @State private var originalSetpointText: String = ""
     @FocusState private var focusedField: Bool
     @State private var surfacePressureText: String = "1.01325"
     @State private var tempText: String = ""
@@ -34,7 +44,12 @@ struct ReplayProfileSheet: View {
 
     // MARK: - Result state
 
-    @State private var result: ProfileGenResult?
+    enum ReplayResult {
+        case synthetic(ProfileGenResult)
+        case actual(DecoSimResult)
+    }
+
+    @State private var result: ReplayResult?
     @State private var errorMessage: String?
     @State private var isGenerating = false
 
@@ -44,7 +59,10 @@ struct ReplayProfileSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    depthAndTimeSection
+                    modePicker
+                    if replayMode == .whatIfPlanning {
+                        depthAndTimeSection
+                    }
                     decoModelSection
                     if selectedModel == .buhlmannZhl16c {
                         gradientFactorsSection
@@ -53,7 +71,7 @@ struct ReplayProfileSheet: View {
                     }
                     if dive.isCcr {
                         ccrDiluentSection
-                    } else {
+                    } else if replayMode == .whatIfPlanning {
                         gasPlanSection
                     }
                     advancedSection
@@ -376,6 +394,29 @@ struct ReplayProfileSheet: View {
         }
     }
 
+    private var modePicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Mode", selection: $replayMode) {
+                ForEach(ReplayMode.allCases, id: \.self) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(samples.isEmpty)
+            .accessibilityLabel("Replay mode")
+
+            if replayMode == .actualDive {
+                Text("Runs the deco algorithm on your actual recorded dive profile.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                Text("Generates a synthetic square profile from the parameters below.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
     private var generateButton: some View {
         Button {
             generate()
@@ -385,13 +426,13 @@ struct ReplayProfileSheet: View {
                     ProgressView()
                         .controlSize(.small)
                 }
-                Text("Generate Profile")
+                Text(replayMode == .actualDive ? "Compute Deco Analysis" : "Generate Profile")
             }
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(.borderedProminent)
         .disabled(isGenerating)
-        .accessibilityLabel("Generate dive profile")
+        .accessibilityLabel(replayMode == .actualDive ? "Compute deco analysis" : "Generate dive profile")
         .accessibilityHint("Runs the decompression simulation with current parameters")
     }
 
@@ -408,16 +449,40 @@ struct ReplayProfileSheet: View {
         .accessibilityLabel("Error: \(message)")
     }
 
-    private func resultSummary(_ result: ProfileGenResult) -> some View {
+    private func resultSummary(_ result: ReplayResult) -> some View {
+        let extracted = extractResultData(result)
+        return resultGrid(
+            decoResult: extracted.decoResult,
+            totalTimeSec: extracted.totalTimeSec,
+            decoTimeSec: extracted.decoTimeSec
+        )
+    }
+
+    // swiftlint:disable:next line_length
+    private func extractResultData(_ result: ReplayResult) -> (decoResult: DecoSimResult, totalTimeSec: Int32, decoTimeSec: Int32) {
+        switch result {
+        case .synthetic(let profileResult):
+            return (
+                profileResult.decoResult,
+                profileResult.totalTimeSec,
+                profileResult.totalTimeSec - profileResult.bottomEndTSec
+            )
+        case .actual(let simResult):
+            let totalTime = samples.last.map { $0.tSec } ?? 0
+            return (simResult, totalTime, simResult.totalDecoTimeSec)
+        }
+    }
+
+    private func resultGrid(decoResult: DecoSimResult, totalTimeSec: Int32, decoTimeSec: Int32) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Result")
                 .font(.headline)
 
-            if result.decoResult.truncated {
+            if decoResult.truncated {
                 HStack {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundColor(.orange)
-                    Text("Profile was truncated — ascent may exceed safe limits with these parameters.")
+                    Text("Profile was truncated — results may exceed safe limits with these parameters.")
                         .font(.callout)
                 }
                 .padding(8)
@@ -430,34 +495,32 @@ struct ReplayProfileSheet: View {
             LazyVGrid(columns: columns, spacing: 12) {
                 StatCard(
                     title: "Total Time",
-                    value: "\(result.totalTimeSec / 60) min"
+                    value: "\(totalTimeSec / 60) min"
                 )
                 StatCard(
-                    title: "Deco Time",
-                    value: "\(decoTimeSec(result) / 60) min"
-                )
-                StatCard(
-                    title: "Stops",
-                    value: "\(result.decoResult.decoStops.count)"
+                    title: "Deco Stops",
+                    value: "\(decoTimeSec / 60) min"
                 )
                 StatCard(
                     title: "Max Ceiling",
                     value: UnitFormatter.formatDepth(
-                        result.decoResult.maxCeilingM,
+                        decoResult.maxCeilingM,
                         unit: appState.depthUnit
                     )
                 )
                 StatCard(
                     title: "Max GF99",
-                    value: String(format: "%.0f%%", result.decoResult.maxGf99)
+                    value: String(format: "%.0f%%", decoResult.maxGf99)
                 )
                 StatCard(
                     title: "Max TTS",
-                    value: "\(result.decoResult.maxTtsSec / 60) min"
+                    value: "\(decoResult.maxTtsSec / 60) min"
+                )
+                StatCard(
+                    title: "Model",
+                    value: decoResult.model == .buhlmannZhl16c ? "Bühlmann" : "Thalmann"
                 )
             }
-
-            // Phase 4 placeholder: animated chart will go here
         }
     }
 
@@ -482,10 +545,6 @@ struct ReplayProfileSheet: View {
         } else {
             return "Nitrox \(o2)"
         }
-    }
-
-    private func decoTimeSec(_ r: ProfileGenResult) -> Int32 {
-        r.totalTimeSec - r.bottomEndTSec
     }
 
     /// Compute ascent rate from the transit phase only (bottom_end → deco_start).
@@ -514,6 +573,9 @@ struct ReplayProfileSheet: View {
     // MARK: - Prefill
 
     private func prefill() {
+        // Default to actual dive mode when samples are available
+        replayMode = samples.isEmpty ? .whatIfPlanning : .actualDive
+
         let du = appState.depthUnit
         let tu = appState.temperatureUnit
 
@@ -582,6 +644,7 @@ struct ReplayProfileSheet: View {
         if dive.isCcr {
             let maxSp = samples.compactMap(\.setpointPpo2).max() ?? 1.3
             setpointText = String(format: "%.1f", maxSp)
+            originalSetpointText = setpointText
         }
 
         // Advanced defaults in display units
@@ -672,6 +735,38 @@ struct ReplayProfileSheet: View {
         result = nil
         isGenerating = true
 
+        switch replayMode {
+        case .actualDive:
+            generateFromActualSamples()
+        case .whatIfPlanning:
+            generateSyntheticProfile()
+        }
+    }
+
+    private func generateFromActualSamples() {
+        guard !samples.isEmpty else {
+            errorMessage = "No recorded samples available for this dive."
+            isGenerating = false
+            return
+        }
+
+        let params = buildDecoSimParams()
+
+        Task {
+            do {
+                let decoResult = try await Task.detached {
+                    try DivelogCompute.computeDecoSimulation(params: params)
+                }.value
+                result = .actual(decoResult)
+                isGenerating = false
+            } catch {
+                errorMessage = error.localizedDescription
+                isGenerating = false
+            }
+        }
+    }
+
+    private func generateSyntheticProfile() {
         let params: ProfileGenParams
         do {
             params = try buildParams()
@@ -690,13 +785,83 @@ struct ReplayProfileSheet: View {
                 let genResult = try await Task.detached {
                     try DivelogCompute.generateDiveProfile(params: params)
                 }.value
-                result = genResult
+                result = .synthetic(genResult)
                 isGenerating = false
             } catch {
                 errorMessage = error.localizedDescription
                 isGenerating = false
             }
         }
+    }
+
+    private func buildDecoSimParams() -> DecoSimParams {
+        let du = appState.depthUnit
+        let sorted = samples.sorted(by: { $0.tSec < $1.tSec })
+
+        // Truncate samples at the bottom-end point so the engine plans the ascent
+        // from peak tissue loading (not from the surface after the dive is over).
+        let maxDepth = sorted.map(\.depthM).max() ?? 0
+        let bottomEndIdx = sorted.lastIndex(where: { $0.depthM >= maxDepth * 0.95 }) ?? (sorted.count - 1)
+        let bottomSamples = Array(sorted[...bottomEndIdx])
+
+        var sampleInputs = bottomSamples.toSampleInputs()
+
+        // Only override PPO2 if the user changed the setpoint from the prefilled value.
+        // Otherwise, use the actual recorded per-sample PPO2 values from the dive computer.
+        if dive.isCcr, setpointText != originalSetpointText, let spOverride = Float(setpointText) {
+            for i in sampleInputs.indices {
+                sampleInputs[i] = SampleInput(
+                    tSec: sampleInputs[i].tSec,
+                    depthM: sampleInputs[i].depthM,
+                    tempC: sampleInputs[i].tempC,
+                    setpointPpo2: sampleInputs[i].setpointPpo2,
+                    ceilingM: sampleInputs[i].ceilingM,
+                    gf99: sampleInputs[i].gf99,
+                    gasmixIndex: sampleInputs[i].gasmixIndex,
+                    ppo2: spOverride,
+                    ttsSec: sampleInputs[i].ttsSec,
+                    ndlSec: sampleInputs[i].ndlSec,
+                    decoStopDepthM: sampleInputs[i].decoStopDepthM,
+                    atPlusFiveTtsMin: sampleInputs[i].atPlusFiveTtsMin
+                )
+            }
+        }
+
+        // Gas mixes: for CCR, apply diluent override; for OC, use dive's recorded gases
+        let gasMixInputs: [GasMixInput]
+        if dive.isCcr {
+            let o2 = Double(diluentO2Percent) / 100.0
+            let he = Double(diluentHePercent) / 100.0
+            gasMixInputs = [GasMixInput(mixIndex: 0, o2Fraction: o2, heFraction: he)]
+        } else {
+            gasMixInputs = gasMixes.toGasMixInputs()
+        }
+
+        // Compute ascent rate from the actual dive's transit phase
+        let ascentRate: Double
+        if let s = stats {
+            ascentRate = Double(computeTransitAscentRate(stats: s))
+        } else {
+            ascentRate = 9.0
+        }
+
+        let surfacePressure = Double(surfacePressureText)
+        let lastStop: Double? = Float(lastStopDepthText).map { Double(UnitFormatter.depthToMetric($0, from: du)) }
+        let stopInterval: Double? = Float(stopIntervalText).map { Double(UnitFormatter.depthToMetric($0, from: du)) }
+
+        return DecoSimParams(
+            model: selectedModel,
+            samples: sampleInputs,
+            gasMixes: gasMixInputs,
+            surfacePressureBar: surfacePressure,
+            ascentRateMMin: ascentRate,
+            lastStopDepthM: lastStop,
+            stopIntervalM: stopInterval,
+            gfLow: selectedModel == .buhlmannZhl16c ? UInt8(min(max(gfLow, 1), 100)) : nil,
+            gfHigh: selectedModel == .buhlmannZhl16c ? UInt8(min(max(gfHigh, 1), 100)) : nil,
+            thalmannPdcs: selectedModel == .thalmannElDca ? thalmannPdcs : nil,
+            planAscent: true
+        )
     }
 }
 

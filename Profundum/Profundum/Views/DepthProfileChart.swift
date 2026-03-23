@@ -273,29 +273,8 @@ struct DepthProfileChartData {
 
         // Bühlmann sim overlay (lazy — only run when SurfGF or GF99 overlay is active)
         if needsBuhlmannSim {
-            let sampleInputs = samples.map { s in
-                SampleInput(
-                    tSec: s.tSec,
-                    depthM: s.depthM,
-                    tempC: s.tempC,
-                    setpointPpo2: s.setpointPpo2,
-                    ceilingM: s.ceilingM,
-                    gf99: s.gf99,
-                    gasmixIndex: s.gasmixIndex.map { Int32($0) },
-                    ppo2: s.ppo2_1 ?? s.setpointPpo2,
-                    ttsSec: s.ttsSec.map { Int32($0) },
-                    ndlSec: s.ndlSec.map { Int32($0) },
-                    decoStopDepthM: s.decoStopDepthM,
-                    atPlusFiveTtsMin: s.atPlusFiveTtsMin.map { Int32($0) }
-                )
-            }
-            let gasMixInputs = gasMixes.map { mix in
-                GasMixInput(
-                    mixIndex: Int32(mix.mixIndex),
-                    o2Fraction: Double(mix.o2Fraction),
-                    heFraction: Double(mix.heFraction)
-                )
-            }
+            let sampleInputs = samples.toSampleInputs()
+            let gasMixInputs = gasMixes.toGasMixInputs()
             let simResult = DivelogCompute.computeSurfaceGf(
                 samples: sampleInputs,
                 gasMixes: gasMixInputs
