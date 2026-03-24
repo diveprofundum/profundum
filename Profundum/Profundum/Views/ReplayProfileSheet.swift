@@ -36,6 +36,8 @@ struct ReplayProfileSheet: View {
     @State private var diluentHePercent: Int = 35
     @State private var setpointText: String = "1.3"
     @State private var originalSetpointText: String = ""
+    @State private var originalDiluentO2: Int = 21
+    @State private var originalDiluentHe: Int = 35
     @FocusState private var focusedField: Bool
     @State private var surfacePressureText: String = "1.01325"
     @State private var tempText: String = ""
@@ -451,10 +453,12 @@ struct ReplayProfileSheet: View {
 
     private func resultSummary(_ result: ReplayResult) -> some View {
         let extracted = extractResultData(result)
+        let isActual = if case .actual = result { true } else { false }
         return resultGrid(
             decoResult: extracted.decoResult,
             totalTimeSec: extracted.totalTimeSec,
-            decoTimeSec: extracted.decoTimeSec
+            decoTimeSec: extracted.decoTimeSec,
+            isActualDive: isActual
         )
     }
 
@@ -473,7 +477,8 @@ struct ReplayProfileSheet: View {
         }
     }
 
-    private func resultGrid(decoResult: DecoSimResult, totalTimeSec: Int32, decoTimeSec: Int32) -> some View {
+    // swiftlint:disable:next line_length
+    private func resultGrid(decoResult: DecoSimResult, totalTimeSec: Int32, decoTimeSec: Int32, isActualDive: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Result")
                 .font(.headline)
@@ -494,11 +499,11 @@ struct ReplayProfileSheet: View {
             let columns = [GridItem(.flexible()), GridItem(.flexible())]
             LazyVGrid(columns: columns, spacing: 12) {
                 StatCard(
-                    title: "Total Time",
+                    title: isActualDive ? "Recorded Time" : "Total Time",
                     value: "\(totalTimeSec / 60) min"
                 )
                 StatCard(
-                    title: "Deco Stops",
+                    title: "Deco Stop Time",
                     value: "\(decoTimeSec / 60) min"
                 )
                 StatCard(
@@ -620,6 +625,8 @@ struct ReplayProfileSheet: View {
                 diluentO2Percent = max(5, min(100, Int(first.o2Fraction * 100)))
                 diluentHePercent = max(0, min(95, Int(first.heFraction * 100)))
             }
+            originalDiluentO2 = diluentO2Percent
+            originalDiluentHe = diluentHePercent
             // gasPlanEntries not used for CCR
             gasPlanEntries = []
         } else {
@@ -814,9 +821,21 @@ struct ReplayProfileSheet: View {
 
         var sampleInputs = bottomSamples.toSampleInputs()
 
-        // Only override PPO2 if the user changed the setpoint from the prefilled value.
-        // Otherwise, use the actual recorded per-sample PPO2 values from the dive computer.
-        if dive.isCcr, setpointText != originalSetpointText, let spOverride = Float(setpointText) {
+        // CCR setpoint override: only if user changed it from the prefilled value.
+        // Validate that the override is a valid number.
+        if dive.isCcr, setpointText != originalSetpointText {
+            guard let spOverride = Float(setpointText), spOverride > 0 else {
+                // Will be caught by generateFromActualSamples error handling
+                errorMessage = "Setpoint must be a valid positive number"
+                isGenerating = false
+                return DecoSimParams(
+                    model: selectedModel, samples: [], gasMixes: [],
+                    surfacePressureBar: nil, ascentRateMMin: nil,
+                    lastStopDepthM: nil, stopIntervalM: nil,
+                    gfLow: nil, gfHigh: nil, thalmannPdcs: nil,
+                    planAscent: false
+                )
+            }
             for i in sampleInputs.indices {
                 sampleInputs[i] = SampleInput(
                     tSec: sampleInputs[i].tSec,
@@ -835,9 +854,12 @@ struct ReplayProfileSheet: View {
             }
         }
 
-        // Gas mixes: for CCR, apply diluent override; for OC, use dive's recorded gases
+        // Gas mixes: use the dive's recorded gas table by default.
+        // Only override for CCR if the user changed diluent from prefilled values.
         let gasMixInputs: [GasMixInput]
-        if dive.isCcr {
+        let diluentChanged = dive.isCcr
+            && (diluentO2Percent != originalDiluentO2 || diluentHePercent != originalDiluentHe)
+        if diluentChanged {
             let o2 = Double(diluentO2Percent) / 100.0
             let he = Double(diluentHePercent) / 100.0
             gasMixInputs = [GasMixInput(mixIndex: 0, o2Fraction: o2, heFraction: he)]
