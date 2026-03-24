@@ -800,8 +800,16 @@ struct ReplayProfileSheet: View {
 
         // Truncate samples at the bottom-end point so the engine plans the ascent
         // from peak tissue loading (not from the surface after the dive is over).
-        let maxDepth = sorted.map(\.depthM).max() ?? 0
-        let bottomEndIdx = sorted.lastIndex(where: { $0.depthM >= maxDepth * 0.95 }) ?? (sorted.count - 1)
+        // Use DiveStats.bottomEndT when available (handles multi-level dives correctly),
+        // otherwise fall back to 95% of max depth.
+        let bottomEndT: Int32
+        if let s = stats, s.bottomEndT > 0 {
+            bottomEndT = s.bottomEndT
+        } else {
+            let maxDepth = sorted.map(\.depthM).max() ?? 0
+            bottomEndT = sorted.last(where: { $0.depthM >= maxDepth * 0.95 })?.tSec ?? sorted.last?.tSec ?? 0
+        }
+        let bottomEndIdx = sorted.lastIndex(where: { $0.tSec <= bottomEndT }) ?? (sorted.count - 1)
         let bottomSamples = Array(sorted[...bottomEndIdx])
 
         var sampleInputs = bottomSamples.toSampleInputs()
