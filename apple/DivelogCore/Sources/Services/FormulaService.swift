@@ -137,22 +137,7 @@ public final class FormulaService: Sendable {
     // MARK: - Private Helpers
 
     private func makeSampleInputs(from samples: [DiveSample]) -> [SampleInput] {
-        samples.map { sample in
-            SampleInput(
-                tSec: sample.tSec,
-                depthM: sample.depthM,
-                tempC: sample.tempC,
-                setpointPpo2: sample.setpointPpo2,
-                ceilingM: sample.ceilingM,
-                gf99: sample.gf99,
-                gasmixIndex: sample.gasmixIndex.map { Int32($0) },
-                ppo2: sample.ppo2_1 ?? sample.setpointPpo2,
-                ttsSec: sample.ttsSec.map { Int32($0) },
-                ndlSec: sample.ndlSec.map { Int32($0) },
-                decoStopDepthM: sample.decoStopDepthM,
-                atPlusFiveTtsMin: sample.atPlusFiveTtsMin.map { Int32($0) }
-            )
-        }
+        samples.toSampleInputs()
     }
 
     private func computeDiveStats(dive: Dive, samples: [DiveSample]) -> DiveStats {

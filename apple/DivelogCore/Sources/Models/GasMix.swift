@@ -30,6 +30,21 @@ public struct GasMix: Identifiable, Equatable, Sendable {
     }
 }
 
+// MARK: - Rust Bridge Mapping
+
+extension Array where Element == GasMix {
+    /// Convert gas mixes to Rust GasMixInput array for deco engine computation.
+    public func toGasMixInputs() -> [GasMixInput] {
+        map { mix in
+            GasMixInput(
+                mixIndex: Int32(mix.mixIndex),
+                o2Fraction: Double(mix.o2Fraction),
+                heFraction: Double(mix.heFraction)
+            )
+        }
+    }
+}
+
 // MARK: - GRDB Conformance
 
 extension GasMix: Codable, FetchableRecord, PersistableRecord {
