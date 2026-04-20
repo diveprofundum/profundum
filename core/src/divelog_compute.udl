@@ -236,6 +236,7 @@ dictionary ProfileGenResult {
     sequence<SampleInput> samples;
     sequence<GasMixInput> gas_mixes;
     DecoSimResult deco_result;
+    sequence<DecoStop> planned_stops;
     i32 descent_end_t_sec;
     i32 bottom_end_t_sec;
     i32 total_time_sec;
