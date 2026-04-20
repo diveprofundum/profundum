@@ -223,7 +223,7 @@ Variables available for segment formulas:
 | Step | Action | Notes |
 |------|--------|-------|
 | 7. Self-review | Run `/review-pr` skill | Structured review against project checklist |
-| 8. Second-opinion review | Send diff to Codex MCP | Independent review for bugs, edge cases, improvements |
+| 8. Second-opinion review | Launch a review subagent with a non-primary model (e.g. `gpt-5.3-codex` when working in Claude, or vice versa) | Independent review for bugs, edge cases, improvements. No external MCP required — Cursor's multi-model subagents provide the independent perspective natively. |
 
 All 8 steps are mandatory. Do not skip any step.
 
