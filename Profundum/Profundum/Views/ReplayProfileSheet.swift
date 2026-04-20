@@ -462,10 +462,13 @@ struct ReplayProfileSheet: View {
             switch result {
             case .synthetic(let profileResult):
                 return ReplayChartData(result: profileResult, depthUnit: appState.depthUnit)
-            case .actual(let overlay, _):
+            case .actual(let overlay, let planned):
                 return ReplayChartData(
-                    samples: samples, decoResult: overlay,
-                    gasMixes: gasMixes, depthUnit: appState.depthUnit
+                    samples: samples,
+                    decoResult: overlay,
+                    plannedStops: planned.decoStops,
+                    gasMixes: gasMixes,
+                    depthUnit: appState.depthUnit
                 )
             }
         }()
@@ -796,13 +799,17 @@ struct ReplayProfileSheet: View {
 
         guard !overlayParams.samples.isEmpty, !planParams.samples.isEmpty else { return }
 
+        // Run both engine calls in parallel — they're independent and this
+        // roughly halves perceived latency on larger dives.
         Task {
+            async let overlayTask = Task.detached {
+                try DivelogCompute.computeDecoSimulation(params: overlayParams)
+            }.value
+            async let plannedTask = Task.detached {
+                try DivelogCompute.computeDecoSimulation(params: planParams)
+            }.value
             do {
-                let (overlay, planned) = try await Task.detached {
-                    let o = try DivelogCompute.computeDecoSimulation(params: overlayParams)
-                    let p = try DivelogCompute.computeDecoSimulation(params: planParams)
-                    return (o, p)
-                }.value
+                let (overlay, planned) = try await (overlayTask, plannedTask)
                 result = .actual(overlay: overlay, planned: planned)
                 isGenerating = false
             } catch {

@@ -258,7 +258,17 @@ struct ReplayChartData {
     // MARK: - Actual dive initializer
 
     // swiftlint:disable:next function_body_length
-    init(samples: [DiveSample], decoResult: DecoSimResult, gasMixes: [GasMix], depthUnit: DepthUnit) {
+    init(
+        samples rawSamples: [DiveSample],
+        decoResult: DecoSimResult,
+        plannedStops: [DecoStop],
+        gasMixes: [GasMix],
+        depthUnit: DepthUnit
+    ) {
+        // Defensive sort: binary search / band matching below assume monotonic tSec.
+        // Real imports are ordered, but tolerate out-of-order input without silent
+        // scrub/readout corruption.
+        let samples = rawSamples.sorted { $0.tSec < $1.tSec }
         let decoPoints = decoResult.points
 
         // -- Depth points from DiveSample --
@@ -392,10 +402,68 @@ struct ReplayChartData {
         self.gasSwitchMarkers = markers
         self.gasLookup = gasLook
 
-        // No deco stop bands for actual dives (no planned stops)
-        self.decoStopBands = []
+        // -- Deco stop bands from pass-1 planned stops --
+        // Actual dives have no explicit bottom_end_t; use the max-depth sample index
+        // as a proxy so descent pass-through at stop depths can't open bands.
+        // Tolerance is 1.0 m (vs. 0.5 m for synthetic) because real divers don't
+        // hold stop depths exactly.
+        var bands: [DecoStopBand] = []
+        if !plannedStops.isEmpty, !samples.isEmpty {
+            var maxDepthIdx = 0
+            var maxDepthValue: Float = 0
+            for (i, s) in samples.enumerated() where s.depthM > maxDepthValue {
+                maxDepthValue = s.depthM
+                maxDepthIdx = i
+            }
+            let bottomEnd = samples[maxDepthIdx].tSec
+            var stopQueue = plannedStops[...]
+            var bandStart: Int32?
+            var bandDepthM: Float = 0
 
-        // No phase markers for actual dives
+            for s in samples where s.tSec >= bottomEnd {
+                guard let nextStop = stopQueue.first else { break }
+                if abs(s.depthM - nextStop.depthM) < 1.0 {
+                    if bandStart == nil {
+                        bandStart = s.tSec
+                        bandDepthM = nextStop.depthM
+                    }
+                } else if let start = bandStart {
+                    let durSec = s.tSec - start
+                    let gasLabel = mixLabels[Int(nextStop.gasMixIndex)]
+                    let durLabel = durSec >= 60
+                        ? "\(durSec / 60) min"
+                        : "\(durSec) sec"
+                    bands.append(DecoStopBand(
+                        id: bands.count,
+                        startTimeMinutes: Float(start) / 60.0,
+                        endTimeMinutes: Float(s.tSec) / 60.0,
+                        depth: UnitFormatter.depth(bandDepthM, unit: depthUnit),
+                        gasLabel: gasLabel,
+                        durationLabel: durLabel
+                    ))
+                    bandStart = nil
+                    stopQueue = stopQueue.dropFirst()
+                }
+            }
+            if let start = bandStart, let nextStop = stopQueue.first, let lastSample = samples.last {
+                let durSec = lastSample.tSec - start
+                let gasLabel = mixLabels[Int(nextStop.gasMixIndex)]
+                let durLabel = durSec >= 60
+                    ? "\(durSec / 60) min"
+                    : "\(durSec) sec"
+                bands.append(DecoStopBand(
+                    id: bands.count,
+                    startTimeMinutes: Float(start) / 60.0,
+                    endTimeMinutes: Float(lastSample.tSec) / 60.0,
+                    depth: UnitFormatter.depth(bandDepthM, unit: depthUnit),
+                    gasLabel: gasLabel,
+                    durationLabel: durLabel
+                ))
+            }
+        }
+        self.decoStopBands = bands
+
+        // No explicit phase markers for actual dives.
         self.descentEndTimeMinutes = 0
         self.bottomEndTimeMinutes = 0
     }
