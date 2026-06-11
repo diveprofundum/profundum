@@ -1,7 +1,8 @@
 .PHONY: all test clean rust-test swift-test lint rust-lint swift-lint swift-build \
        xcframework swift-bindings libdivecomputer-xcframework verify help \
        version-check version-sync security audit deny mutants \
-       coverage rust-coverage swift-coverage coverage-report
+       coverage rust-coverage swift-coverage coverage-report \
+       iphone iphone-build iphone-install iphone-launch
 
 # ──────────────────────────────────────────────────────────────
 # Default target
@@ -70,6 +71,39 @@ clean:
 	cd core && cargo clean
 	rm -rf apple/DivelogCore/DivelogComputeFFI.xcframework
 	rm -rf apple/DivelogCore/.build
+
+# ──────────────────────────────────────────────────────────────
+# iPhone deploy (build + install + launch, no Xcode GUI)
+# ──────────────────────────────────────────────────────────────
+
+# Auto-detect the first connected device; override with: make iphone DEVICE=<udid>
+DEVICE ?= $(shell xcrun devicectl list devices 2>/dev/null | grep -E 'connected' | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' | head -1)
+DEVICE_BUILD_DIR := build/device
+APP_PATH := $(DEVICE_BUILD_DIR)/Build/Products/Debug-iphoneos/Profundum.app
+BUNDLE_ID := azlucis.Profundum
+
+# Build, install, and launch on the connected iPhone
+iphone: iphone-install iphone-launch
+
+# Build the app for the connected device (rebuilds xcframework if Rust changed)
+iphone-build: swift-bindings
+	@test -n "$(DEVICE)" || { echo "error: no connected device found (xcrun devicectl list devices)"; exit 1; }
+	xcodebuild build \
+		-project Profundum/Profundum.xcodeproj \
+		-scheme Profundum \
+		-destination 'platform=iOS,id=$(DEVICE)' \
+		-derivedDataPath $(DEVICE_BUILD_DIR) \
+		-allowProvisioningUpdates \
+		-quiet
+
+# Install the built app onto the device
+iphone-install: iphone-build
+	xcrun devicectl device install app --device $(DEVICE) $(APP_PATH)
+
+# Launch the installed app on the device
+iphone-launch:
+	@test -n "$(DEVICE)" || { echo "error: no connected device found (xcrun devicectl list devices)"; exit 1; }
+	xcrun devicectl device process launch --device $(DEVICE) $(BUNDLE_ID)
 
 # ──────────────────────────────────────────────────────────────
 # Security & mutation testing
@@ -141,6 +175,12 @@ help:
 	@echo "  make swift-bindings             Regenerate UniFFI Swift bindings"
 	@echo "  make swift-build                Build DivelogCore Swift package"
 	@echo "  make libdivecomputer-xcframework Build libdivecomputer → XCFramework"
+	@echo ""
+	@echo "Device deploy:"
+	@echo "  make iphone                     Build + install + launch on connected iPhone"
+	@echo "  make iphone-build               Build only (device binary in build/device/)"
+	@echo "  make iphone-install             Build + install (no launch)"
+	@echo "  make iphone DEVICE=<udid>       Target a specific device"
 	@echo ""
 	@echo "Test targets:"
 	@echo "  make test                       Run all tests (Rust + Swift)"
