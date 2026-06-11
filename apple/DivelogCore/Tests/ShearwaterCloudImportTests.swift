@@ -948,6 +948,79 @@ final class ShearwaterCloudImportTests: XCTestCase {
         XCTAssertEqual(fpsAfter.count, 3)
     }
 
+    // MARK: - Metadata Backfill on Re-import (PRO-62)
+
+    /// Dives imported by older app versions can have nil GF/deco metadata.
+    /// Re-importing the same Shearwater DB must backfill the missing fields
+    /// instead of skipping the dive entirely.
+    func testReimportBackfillsMissingMetadata() throws {
+        let path = try createShearwaterDB(dives: [
+            ShearwaterTestDive(
+                diveId: 1, diveDate: "2024-06-15 10:30:00", depthFt: 100,
+                durationSec: 3600, serial: "SN001", endGf99: 42.0
+            ),
+        ])
+
+        let firstImport = try importService.importFromFile(at: path)
+        XCTAssertEqual(firstImport.divesImported, 1)
+        XCTAssertEqual(firstImport.divesBackfilled, 0)
+
+        var dive = try diveService.listDives()[0]
+        XCTAssertEqual(dive.endGf99, 42.0)
+
+        // Simulate a dive imported before metadata extraction existed.
+        try database.dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE dives SET end_gf99 = NULL, gf_low = NULL, gf_high = NULL WHERE id = ?",
+                arguments: [dive.id]
+            )
+        }
+
+        let reimport = try importService.importFromFile(at: path)
+        XCTAssertEqual(reimport.divesImported, 0)
+        XCTAssertEqual(reimport.divesSkipped, 1)
+        XCTAssertEqual(reimport.divesBackfilled, 1, "Re-import should backfill nil metadata")
+
+        dive = try diveService.listDives()[0]
+        XCTAssertEqual(dive.endGf99, 42.0, "endGf99 should be restored from the source row")
+        // GFs stay nil here because the fixture has no parseable binary log —
+        // the point is the dive was updated, not skipped.
+    }
+
+    /// Re-importing fully populated dives must not touch them.
+    func testReimportDoesNotBackfillWhenNothingMissing() throws {
+        let path = try createShearwaterDB(dives: [
+            ShearwaterTestDive(
+                diveId: 1, diveDate: "2024-06-15 10:30:00", depthFt: 100,
+                durationSec: 3600, serial: "SN001", endGf99: 42.0
+            ),
+        ])
+
+        _ = try importService.importFromFile(at: path)
+
+        // Populate every backfill-target field so nothing is missing.
+        let diveId = try diveService.listDives()[0].id
+        try database.dbQueue.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE dives SET gf_low = 50, gf_high = 80, deco_model = 'buhlmann',
+                        salinity = 'salt', surface_pressure_bar = 1.013, end_gf99 = 99.0
+                    WHERE id = ?
+                """,
+                arguments: [diveId]
+            )
+        }
+
+        let reimport = try importService.importFromFile(at: path)
+        XCTAssertEqual(reimport.divesBackfilled, 0)
+
+        // Existing values must never be overwritten by the source row.
+        let dive = try diveService.listDives()[0]
+        XCTAssertEqual(dive.gfLow, 50)
+        XCTAssertEqual(dive.gfHigh, 80)
+        XCTAssertEqual(dive.endGf99, 99.0, "Existing endGf99 must not be overwritten")
+    }
+
     // MARK: - Helper: Create Shearwater Test Database
 
     struct ShearwaterTestDive {
