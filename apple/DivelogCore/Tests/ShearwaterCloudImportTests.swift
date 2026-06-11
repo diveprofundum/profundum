@@ -987,6 +987,73 @@ final class ShearwaterCloudImportTests: XCTestCase {
         // the point is the dive was updated, not skipped.
     }
 
+    /// In a multi-computer group, a later row must still be able to fill
+    /// fields the first row couldn't (first-non-nil-across-rows semantics).
+    func testReimportBackfillsFromSecondComputerRow() throws {
+        let startTime: Int64 = 1718444400
+        let path = try createShearwaterDB(dives: [
+            // Computer A: no EndGF99 data
+            ShearwaterTestDive(
+                diveId: 100, diveDate: "2024-06-15 10:00:00", depthFt: 100,
+                durationSec: 3600, serial: "SERIAL_A",
+                dataBytes2: "{\"DIVE_START_TIME\": \(startTime)}"
+            ),
+            // Computer B: has EndGF99
+            ShearwaterTestDive(
+                diveId: 200, diveDate: "2024-06-15 10:00:30", depthFt: 98,
+                durationSec: 3580, serial: "SERIAL_B",
+                dataBytes2: "{\"DIVE_START_TIME\": \(startTime + 30)}", endGf99: 55.0
+            ),
+        ])
+
+        let firstImport = try importService.importFromFile(at: path)
+        XCTAssertEqual(firstImport.divesImported, 1, "Rows should merge into one dive")
+
+        let diveId = try diveService.listDives()[0].id
+        try database.dbQueue.write { db in
+            try db.execute(sql: "UPDATE dives SET end_gf99 = NULL WHERE id = ?", arguments: [diveId])
+        }
+
+        let reimport = try importService.importFromFile(at: path)
+        XCTAssertEqual(reimport.divesBackfilled, 1)
+
+        let dive = try diveService.listDives()[0]
+        XCTAssertEqual(dive.endGf99, 55.0, "Second computer's row should fill the gap")
+    }
+
+    /// Partial merge (new computer row added to a known dive) must also
+    /// backfill missing metadata on the existing dive.
+    func testPartialMergeBackfillsMissingMetadata() throws {
+        let startTime: Int64 = 1718444400
+        let diveA = ShearwaterTestDive(
+            diveId: 100, diveDate: "2024-06-15 10:00:00", depthFt: 100,
+            durationSec: 3600, serial: "SERIAL_A",
+            dataBytes2: "{\"DIVE_START_TIME\": \(startTime)}"
+        )
+        let diveB = ShearwaterTestDive(
+            diveId: 200, diveDate: "2024-06-15 10:00:30", depthFt: 98,
+            durationSec: 3580, serial: "SERIAL_B",
+            dataBytes2: "{\"DIVE_START_TIME\": \(startTime + 30)}", endGf99: 55.0
+        )
+
+        // First import only computer A (no EndGF99 anywhere).
+        let pathA = try createShearwaterDB(dives: [diveA])
+        let firstImport = try importService.importFromFile(at: pathA)
+        XCTAssertEqual(firstImport.divesImported, 1)
+        XCTAssertNil(try diveService.listDives()[0].endGf99)
+
+        // Re-import with both computers: partial merge adds B's row and must
+        // backfill the existing dive's metadata from it.
+        let pathAB = try createShearwaterDB(dives: [diveA, diveB])
+        let reimport = try importService.importFromFile(at: pathAB)
+        XCTAssertEqual(reimport.divesMerged, 1, "Computer B's row should partial-merge")
+        XCTAssertEqual(reimport.divesBackfilled, 1)
+
+        let dives = try diveService.listDives()
+        XCTAssertEqual(dives.count, 1)
+        XCTAssertEqual(dives[0].endGf99, 55.0, "New computer's row should backfill the existing dive")
+    }
+
     /// Re-importing fully populated dives must not touch them.
     func testReimportDoesNotBackfillWhenNothingMissing() throws {
         let path = try createShearwaterDB(dives: [

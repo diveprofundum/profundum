@@ -417,6 +417,13 @@ public final class ShearwaterCloudImportService: Sendable {
                         divesMerged += 1
                     }
                 }
+                // Backfill metadata the existing dive may be missing (PRO-62).
+                // Runs after the merge write so newly inserted fingerprints also
+                // resolve, letting the new computer's row fill gaps too.
+                divesBackfilled += try backfillMissingMetadata(
+                    rows: group.map { ($0.row, $0.fingerprint) },
+                    dateFormatter: dateFormatter
+                )
                 processedRows += group.count
                 for _ in group {
                     progress?(processedRows, totalDives)
@@ -703,7 +710,11 @@ public final class ShearwaterCloudImportService: Sendable {
                         .filter(Column("fingerprint") == entry.fingerprint)
                         .fetchOne(db)?.id
                 }
-                guard let diveId, !updatedDiveIds.contains(diveId),
+                // Note: a dive already updated by an earlier row in the group is
+                // still re-checked — a second computer's row may fill fields the
+                // first one couldn't (matches "first non-nil across rows" merge
+                // semantics).
+                guard let diveId,
                       var dive = try Dive.fetchOne(db, key: diveId) else { continue }
 
                 // Only parse the binary log when something is actually missing.
@@ -735,9 +746,9 @@ public final class ShearwaterCloudImportService: Sendable {
                 if changed {
                     try dive.update(db)
                     updatedDiveIds.insert(diveId)
-                    updatedCount += 1
                 }
             }
+            updatedCount = updatedDiveIds.count
         }
         return updatedCount
     }
