@@ -478,7 +478,9 @@ struct ReplayProfileSheet: View {
             case .synthetic(let profileResult):
                 return profileResult.samples
             case .actual:
-                return samples.toSampleInputs()
+                // Sort to match ReplayChartData's defensive sort — nearestTSec
+                // binary-searches this array assuming monotonic tSec.
+                return samples.sorted { $0.tSec < $1.tSec }.toSampleInputs()
             }
         }()
 
@@ -506,7 +508,9 @@ struct ReplayProfileSheet: View {
                 profileResult.totalTimeSec - profileResult.bottomEndTSec
             )
         case .actual(let overlay, let planned):
-            let totalTime = samples.last.map { $0.tSec } ?? 0
+            // Max rather than .last — samples may be unsorted (see defensive
+            // sort in buildDecoSimParams / ReplayChartData).
+            let totalTime = samples.map(\.tSec).max() ?? 0
             return (overlay, totalTime, planned.totalDecoTimeSec)
         }
     }
@@ -797,7 +801,11 @@ struct ReplayProfileSheet: View {
         let overlayParams = buildDecoSimParams(truncate: false, planAscent: false)
         let planParams = buildDecoSimParams(truncate: true, planAscent: true)
 
-        guard !overlayParams.samples.isEmpty, !planParams.samples.isEmpty else { return }
+        guard !overlayParams.samples.isEmpty, !planParams.samples.isEmpty else {
+            errorMessage = "No usable samples for deco simulation."
+            isGenerating = false
+            return
+        }
 
         // Run both engine calls in parallel — they're independent and this
         // roughly halves perceived latency on larger dives.
