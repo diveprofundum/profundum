@@ -79,28 +79,10 @@ struct ReplayChartFullscreenView: View {
         }
         #if os(iOS)
         .background(Color(.systemBackground))
-        // fullScreenCover has no built-in swipe-to-dismiss; child gestures
-        // (chart scrub, slider) take precedence over this parent gesture.
-        .gesture(
-            DragGesture(minimumDistance: 30)
-                .onEnded { value in
-                    if value.translation.height > 80 {
-                        controller.pause()
-                        dismiss()
-                    }
-                }
-        )
-        .onAppear {
-            AppDelegate.orientationLock = .landscape
-            requestOrientation(.landscape)
-        }
-        .onDisappear {
-            AppDelegate.orientationLock = .all
-            requestOrientation(.portrait)
-        }
         #else
         .background(Color(.windowBackgroundColor))
         #endif
+        .landscapeFullscreen(onSwipeDismiss: { controller.pause() })
     }
 
     private var fullscreenControls: some View {
@@ -178,14 +160,4 @@ struct ReplayChartFullscreenView: View {
         }
     }
 
-    #if os(iOS)
-    private func requestOrientation(_ orientations: UIInterfaceOrientationMask) {
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
-        windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: orientations))
-        // UIKit caches supportedInterfaceOrientations; without this the
-        // orientationLock reset is never picked up and rotation stays stuck.
-        windowScene.keyWindow?.rootViewController?
-            .setNeedsUpdateOfSupportedInterfaceOrientations()
-    }
-    #endif
 }
