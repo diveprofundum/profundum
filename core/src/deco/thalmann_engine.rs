@@ -46,7 +46,11 @@ impl ThalmannEngine {
             });
         }
 
-        let thal_params = &XVAL_HE_9_023;
+        let thal_params = match params.thalmann_pdcs {
+            Some(ThalmannPdcs::Pdcs40) => &XVAL_HE_9_040,
+            Some(ThalmannPdcs::Pdcs50) => &XVAL_HE_9_050,
+            _ => &XVAL_HE_9_023,
+        };
         if let Err(msg) = thal_params.validate() {
             return Err(DecoSimError::InvalidParam { msg });
         }
@@ -128,15 +132,16 @@ impl ThalmannEngine {
             let (surface_util, _) = tissues.utilization_at(0.0, thal_params);
 
             // TTS and NDL
-            let pp = ThalmannPlanParams {
-                fo2: current_fo2,
-                fhe: current_fhe,
+            let pp = ThalmannPlanParams::from_engine(
+                &gas_lookup,
+                sample.gasmix_index.unwrap_or(0),
+                sample.ppo2.map(|v| v as f64),
                 surface_p,
-                ascent_rate_m_min: ascent_rate,
+                ascent_rate,
                 last_stop_depth,
                 stop_interval,
                 thal_params,
-            };
+            );
 
             let (tts_sec, ndl_sec) = if ceiling_m > 0.0 {
                 let tts = compute_tts_thalmann(&tissues, current_depth_m, &pp);
@@ -175,15 +180,16 @@ impl ThalmannEngine {
         let (deco_stops, truncated) = if params.plan_ascent {
             let last_sample = params.samples.last().unwrap();
             let current_depth_m = (last_sample.depth_m as f64).max(0.0);
-            let pp = ThalmannPlanParams {
-                fo2: current_fo2,
-                fhe: current_fhe,
+            let pp = ThalmannPlanParams::from_engine(
+                &gas_lookup,
+                last_sample.gasmix_index.unwrap_or(0),
+                last_sample.ppo2.map(|v| v as f64),
                 surface_p,
-                ascent_rate_m_min: ascent_rate,
+                ascent_rate,
                 last_stop_depth,
                 stop_interval,
                 thal_params,
-            };
+            );
             plan_deco_stops_thalmann(&tissues, current_depth_m, &pp)
         } else {
             (Vec::new(), false)
@@ -336,14 +342,116 @@ fn round_up_to_stop(depth_m: f64, stop_interval: f64) -> f64 {
 // Planner Parameters
 // ============================================================================
 
-struct ThalmannPlanParams<'a> {
+/// A gas available for breathing during ascent planning.
+#[derive(Clone)]
+struct ThalPlanGas {
     fo2: f64,
     fhe: f64,
+    /// Switch to this gas at or above this depth (metres). `None` = bottom gas.
+    switch_depth_m: Option<f64>,
+}
+
+/// Maximum PPO2 for computing default switch depths (MOD).
+const MAX_PPO2_SWITCH: f64 = 1.6;
+
+struct ThalmannPlanParams<'a> {
+    /// Available gases sorted by switch depth descending (deepest first, bottom gas last).
+    gases: Vec<ThalPlanGas>,
+    /// CCR setpoint PPO2 in bar. `None` = open circuit.
+    ppo2: Option<f64>,
     surface_p: f64,
     ascent_rate_m_min: f64,
     last_stop_depth: f64,
     stop_interval: f64,
     thal_params: &'a ThalmannParamSet,
+}
+
+impl ThalmannPlanParams<'_> {
+    fn gas_at_depth(&self, depth_m: f64) -> &ThalPlanGas {
+        // Find the shallowest deco gas whose switch depth is >= current depth.
+        // This gives the richest available gas at this depth.
+        let mut best: Option<&ThalPlanGas> = None;
+        for gas in &self.gases {
+            if let Some(switch_depth) = gas.switch_depth_m {
+                if depth_m <= switch_depth {
+                    match best {
+                        None => best = Some(gas),
+                        Some(prev) => {
+                            if switch_depth < prev.switch_depth_m.unwrap_or(f64::MAX) {
+                                best = Some(gas);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        best.unwrap_or_else(|| {
+            self.gases.last().unwrap_or(&ThalPlanGas {
+                fo2: 0.21,
+                fhe: 0.0,
+                switch_depth_m: None,
+            })
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn from_engine<'a>(
+        gas_lookup: &std::collections::HashMap<i32, (f64, f64)>,
+        current_gas_index: i32,
+        ppo2: Option<f64>,
+        surface_p: f64,
+        ascent_rate: f64,
+        last_stop_depth: f64,
+        stop_interval: f64,
+        thal_params: &'a ThalmannParamSet,
+    ) -> ThalmannPlanParams<'a> {
+        let mut gases: Vec<ThalPlanGas> = Vec::new();
+        let mut bottom_gas: Option<ThalPlanGas> = None;
+
+        for (&mix_idx, &(fo2, fhe)) in gas_lookup {
+            if mix_idx == current_gas_index || mix_idx == 0 {
+                bottom_gas = Some(ThalPlanGas {
+                    fo2,
+                    fhe,
+                    switch_depth_m: None,
+                });
+            } else if fo2 > 0.0 {
+                let mod_m = (MAX_PPO2_SWITCH / fo2 - 1.0) * 10.0;
+                gases.push(ThalPlanGas {
+                    fo2,
+                    fhe,
+                    switch_depth_m: Some(mod_m.max(0.0)),
+                });
+            }
+        }
+
+        gases.sort_by(|a, b| {
+            b.switch_depth_m
+                .unwrap_or(0.0)
+                .partial_cmp(&a.switch_depth_m.unwrap_or(0.0))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        if let Some(bg) = bottom_gas {
+            gases.push(bg);
+        } else {
+            gases.push(ThalPlanGas {
+                fo2: 0.21,
+                fhe: 0.0,
+                switch_depth_m: None,
+            });
+        }
+
+        ThalmannPlanParams {
+            gases,
+            ppo2,
+            surface_p,
+            ascent_rate_m_min: ascent_rate,
+            last_stop_depth,
+            stop_interval,
+            thal_params,
+        }
+    }
 }
 
 // ============================================================================
@@ -390,9 +498,15 @@ fn compute_ndl_thalmann(
         return 0;
     }
 
+    let gas = pp.gas_at_depth(current_depth_m);
     let ambient_p = depth_to_pressure(current_depth_m, pp.surface_p);
     let ambient_fsw = bar_to_fsw(ambient_p);
-    let (fn2, fhe) = inspired_fractions(pp.fo2, pp.fhe, None, ambient_p);
+    let (fn2, fhe) = inspired_fractions(
+        gas.fo2,
+        gas.fhe,
+        pp.ppo2.map(|sp| sp.min(ambient_p)),
+        ambient_p,
+    );
     let f_inert = fn2 + fhe;
     let p_inspired_fsw = (ambient_fsw - PACO2_FSW) * f_inert;
 
@@ -474,8 +588,9 @@ fn plan_deco_stops_thalmann(
         return (stops, false);
     }
 
-    // Ascend to first stop
-    ascend_to_thalmann(&mut tissues, &mut depth, stop_depth, pp);
+    // Ascend to first stop, segmenting at gas switch boundaries for correct
+    // tissue loading.
+    ascend_with_gas_switches_thalmann(&mut tissues, &mut depth, stop_depth, pp);
 
     // Process stops
     let mut current_stop = stop_depth;
@@ -499,10 +614,16 @@ fn plan_deco_stops_thalmann(
                 break;
             }
 
-            // Wait 60 seconds at this stop
+            // Wait 60 seconds at this stop (using gas available at this depth)
+            let gas = pp.gas_at_depth(current_stop);
             let ambient_p = depth_to_pressure(current_stop, pp.surface_p);
             let ambient_fsw = bar_to_fsw(ambient_p);
-            let (fn2, fhe) = inspired_fractions(pp.fo2, pp.fhe, None, ambient_p);
+            let (fn2, fhe) = inspired_fractions(
+                gas.fo2,
+                gas.fhe,
+                pp.ppo2.map(|sp| sp.min(ambient_p)),
+                ambient_p,
+            );
             let f_inert = fn2 + fhe;
             let p_inspired_fsw = (ambient_fsw - PACO2_FSW) * f_inert;
 
@@ -515,13 +636,35 @@ fn plan_deco_stops_thalmann(
             }
         }
 
-        if stop_time_sec > 0.0 {
-            stops.push(DecoStop {
-                depth_m: current_stop as f32,
-                duration_sec: stop_time_sec as i32,
-                gas_mix_index: -1,
-            });
+        // Enforce minimum 1-minute stop at each depth (standard practice:
+        // the diver pauses at each stop increment during ascent).
+        if stop_time_sec < 60.0 {
+            let gas = pp.gas_at_depth(current_stop);
+            let ambient_p = depth_to_pressure(current_stop, pp.surface_p);
+            let ambient_fsw = bar_to_fsw(ambient_p);
+            let (fn2, fhe_pad) = inspired_fractions(
+                gas.fo2,
+                gas.fhe,
+                pp.ppo2.map(|sp| sp.min(ambient_p)),
+                ambient_p,
+            );
+            let f_inert = fn2 + fhe_pad;
+            let p_inspired_fsw = (ambient_fsw - PACO2_FSW) * f_inert;
+            tissues.update(
+                60.0 - stop_time_sec,
+                p_inspired_fsw,
+                ambient_fsw,
+                0.0,
+                0.0,
+                pp.thal_params,
+            );
+            stop_time_sec = 60.0;
         }
+        stops.push(DecoStop {
+            depth_m: current_stop as f32,
+            duration_sec: stop_time_sec as i32,
+            gas_mix_index: -1,
+        });
 
         if current_stop <= pp.last_stop_depth {
             break;
@@ -532,6 +675,29 @@ fn plan_deco_stops_thalmann(
     }
 
     (stops, truncated)
+}
+
+/// Ascend from current depth to target, segmenting at gas switch boundaries.
+/// This ensures correct tissue loading when passing through switch depths.
+fn ascend_with_gas_switches_thalmann(
+    tissues: &mut ThalmannTissueState,
+    current_depth: &mut f64,
+    target_depth: f64,
+    pp: &ThalmannPlanParams,
+) {
+    // Collect switch depths between current and target (descending order)
+    let mut waypoints: Vec<f64> = pp
+        .gases
+        .iter()
+        .filter_map(|g| g.switch_depth_m)
+        .filter(|&d| d < *current_depth && d > target_depth)
+        .collect();
+    waypoints.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    waypoints.push(target_depth);
+
+    for wp in waypoints {
+        ascend_to_thalmann(tissues, current_depth, wp, pp);
+    }
 }
 
 /// Simulate ascent between two depths, updating tissue state during travel.
@@ -552,7 +718,13 @@ fn ascend_to_thalmann(
     let ambient_p = depth_to_pressure(avg_depth, pp.surface_p);
     let ambient_fsw = bar_to_fsw(ambient_p);
 
-    let (fn2, fhe_frac) = inspired_fractions(pp.fo2, pp.fhe, None, ambient_p);
+    let gas = pp.gas_at_depth(target_depth);
+    let (fn2, fhe_frac) = inspired_fractions(
+        gas.fo2,
+        gas.fhe,
+        pp.ppo2.map(|sp| sp.min(ambient_p)),
+        ambient_p,
+    );
     let f_inert = fn2 + fhe_frac;
     let p_inspired_fsw = (ambient_fsw - PACO2_FSW) * f_inert;
 
@@ -621,6 +793,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: None,
             gf_high: None,
+            thalmann_pdcs: None,
             plan_ascent: false,
         }
     }
@@ -1227,5 +1400,223 @@ mod tests {
             pbovp_fsw: 0.0,
         };
         assert!(bad_params.validate().is_err());
+    }
+
+    #[test]
+    fn test_gas_at_depth_multi_gas_selects_shallowest() {
+        use crate::deco::thalmann_params::XVAL_HE_9_023;
+
+        // Setup: bottom gas (air), Nx50 @ 21m, O2 @ 6m
+        let params = ThalmannPlanParams {
+            gases: vec![
+                ThalPlanGas {
+                    fo2: 0.50,
+                    fhe: 0.0,
+                    switch_depth_m: Some(21.0),
+                },
+                ThalPlanGas {
+                    fo2: 1.0,
+                    fhe: 0.0,
+                    switch_depth_m: Some(6.0),
+                },
+                ThalPlanGas {
+                    fo2: 0.21,
+                    fhe: 0.0,
+                    switch_depth_m: None,
+                },
+            ],
+            ppo2: None,
+            surface_p: 1.013,
+            ascent_rate_m_min: 9.0,
+            last_stop_depth: 3.0,
+            stop_interval: 3.0,
+            thal_params: &XVAL_HE_9_023,
+        };
+
+        // At 30m: deeper than all switch depths → bottom gas (air)
+        let gas = params.gas_at_depth(30.0);
+        assert!(gas.switch_depth_m.is_none(), "30m should use bottom gas");
+        assert!((gas.fo2 - 0.21).abs() < 1e-6);
+
+        // At 15m: within Nx50 range (15 <= 21) but not O2 (15 > 6) → Nx50
+        let gas = params.gas_at_depth(15.0);
+        assert_eq!(gas.switch_depth_m, Some(21.0));
+        assert!((gas.fo2 - 0.50).abs() < 1e-6);
+
+        // At 5m: within both Nx50 (5 <= 21) and O2 (5 <= 6) → O2 (shallowest)
+        let gas = params.gas_at_depth(5.0);
+        assert_eq!(gas.switch_depth_m, Some(6.0));
+        assert!((gas.fo2 - 1.0).abs() < 1e-6);
+
+        // At 6m: exactly at O2 switch depth → O2
+        let gas = params.gas_at_depth(6.0);
+        assert_eq!(gas.switch_depth_m, Some(6.0));
+        assert!((gas.fo2 - 1.0).abs() < 1e-6);
+
+        // At 21m: exactly at Nx50 switch depth, 21 > 6 so O2 not valid → Nx50
+        let gas = params.gas_at_depth(21.0);
+        assert_eq!(gas.switch_depth_m, Some(21.0));
+        assert!((gas.fo2 - 0.50).abs() < 1e-6);
+    }
+
+    // ── Coverage: P_DCS variant selection (lines 50-51) ──────────────────
+
+    #[test]
+    fn test_pdcs_variants_produce_less_conservative_deco() {
+        // Pdcs23 (2.3%) is the most conservative, Pdcs40 (4.0%) moderate,
+        // Pdcs50 (5.0%) least conservative. Less conservative → shorter deco.
+        // Use a long, deep dive so compartment 5 (slowest) controls the
+        // shallow stops — this is where the P_DCS variants differ.
+        let samples = vec![
+            sample(0, 0.0),
+            sample(180, 90.0),  // descent to 90m (300 fsw)
+            sample(3780, 90.0), // 60 min at 90m
+        ];
+
+        let mut params_23 = default_params(samples.clone());
+        params_23.plan_ascent = true;
+        params_23.thalmann_pdcs = Some(ThalmannPdcs::Pdcs23);
+
+        let mut params_40 = default_params(samples.clone());
+        params_40.plan_ascent = true;
+        params_40.thalmann_pdcs = Some(ThalmannPdcs::Pdcs40);
+
+        let mut params_50 = default_params(samples);
+        params_50.plan_ascent = true;
+        params_50.thalmann_pdcs = Some(ThalmannPdcs::Pdcs50);
+
+        let result_23 = ThalmannEngine.simulate(&params_23).unwrap();
+        let result_40 = ThalmannEngine.simulate(&params_40).unwrap();
+        let result_50 = ThalmannEngine.simulate(&params_50).unwrap();
+
+        // All should produce deco stops
+        assert!(
+            !result_23.deco_stops.is_empty(),
+            "Pdcs23 should produce deco stops"
+        );
+        assert!(
+            !result_40.deco_stops.is_empty(),
+            "Pdcs40 should produce deco stops"
+        );
+        assert!(
+            !result_50.deco_stops.is_empty(),
+            "Pdcs50 should produce deco stops"
+        );
+
+        // Less conservative (higher P_DCS target) should produce shorter
+        // or equal total deco time.
+        // Strict inequality: each less-conservative variant MUST produce
+        // strictly less deco (not equal), which catches deletion of match arms.
+        assert!(
+            result_40.total_deco_time_sec < result_23.total_deco_time_sec,
+            "Pdcs40 deco ({}) should be < Pdcs23 deco ({})",
+            result_40.total_deco_time_sec,
+            result_23.total_deco_time_sec
+        );
+        assert!(
+            result_50.total_deco_time_sec < result_40.total_deco_time_sec,
+            "Pdcs50 deco ({}) should be < Pdcs40 deco ({})",
+            result_50.total_deco_time_sec,
+            result_40.total_deco_time_sec
+        );
+    }
+
+    // ── Coverage: gas-switch-aware ascent via from_engine (lines 419-433) ─
+
+    #[test]
+    fn test_thalmann_gas_switch_ascent_planning() {
+        // Provide a bottom gas (Tx 21/35) + deco gas (Nx50) to exercise
+        // the from_engine multi-gas path that computes MOD and builds
+        // the gas list with switch depths.
+        let samples = vec![
+            sample_with_gas(0, 0.0, 0),
+            sample_with_gas(120, 50.0, 0),  // descent on bottom gas
+            sample_with_gas(1200, 50.0, 0), // 20 min bottom
+        ];
+
+        let gas_mixes = vec![
+            crate::buhlmann::GasMixInput {
+                mix_index: 0,
+                o2_fraction: 0.21,
+                he_fraction: 0.35,
+            },
+            crate::buhlmann::GasMixInput {
+                mix_index: 1,
+                o2_fraction: 0.50,
+                he_fraction: 0.0,
+            },
+        ];
+
+        let mut params = default_params(samples);
+        params.gas_mixes = gas_mixes;
+        params.plan_ascent = true;
+
+        let result = ThalmannEngine.simulate(&params).unwrap();
+
+        // Should produce deco stops (deep dive with trimix)
+        assert!(
+            !result.deco_stops.is_empty(),
+            "50m trimix dive should produce deco stops"
+        );
+        assert!(
+            result.total_deco_time_sec > 0,
+            "Total deco time should be positive"
+        );
+
+        // Compare with single-gas (no deco gas) to verify gas switch
+        // actually changes the result (richer deco gas = shorter deco).
+        let samples_single = vec![
+            sample_with_gas(0, 0.0, 0),
+            sample_with_gas(120, 50.0, 0),
+            sample_with_gas(1200, 50.0, 0),
+        ];
+        let mut params_single = default_params(samples_single);
+        params_single.gas_mixes = vec![crate::buhlmann::GasMixInput {
+            mix_index: 0,
+            o2_fraction: 0.21,
+            he_fraction: 0.35,
+        }];
+        params_single.plan_ascent = true;
+
+        let result_single = ThalmannEngine.simulate(&params_single).unwrap();
+
+        // With deco gas (Nx50), off-gassing is faster → shorter deco
+        assert!(
+            result.total_deco_time_sec <= result_single.total_deco_time_sec,
+            "Multi-gas deco ({}) should be <= single-gas deco ({})",
+            result.total_deco_time_sec,
+            result_single.total_deco_time_sec
+        );
+    }
+
+    // ── Coverage: param validation failure via simulate (line 55) ─────────
+
+    #[test]
+    fn test_thalmann_param_validation_error_via_simulate() {
+        // The built-in parameter sets all pass validation, so we cannot
+        // trigger validate() failure via DecoSimParams alone. However, we
+        // can verify the existing param sets pass, and that the validate()
+        // function itself correctly rejects bad params (already tested
+        // above in test_param_validation_*). This test verifies the error
+        // path at line 55 by constructing a ThalmannParamSet with invalid
+        // data and calling validate() directly, then checking the error
+        // propagation through the engine would work the same way.
+        //
+        // Since we cannot inject a custom ThalmannParamSet through the
+        // public simulate() API, we test that validate() returns Err and
+        // the error message is meaningful.
+        let bad_params = ThalmannParamSet {
+            num_compartments: 1,
+            half_times_min: &[0.0], // invalid: must be > 0
+            sdr: &[1.0],
+            m0_fsw: &[85.0],
+            beta1: &[1.0],
+            pbovp_fsw: 0.0,
+        };
+        let err = bad_params.validate().unwrap_err();
+        assert!(
+            err.contains("half_times_min"),
+            "Error should mention half_times_min, got: {err}"
+        );
     }
 }

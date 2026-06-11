@@ -116,6 +116,30 @@ extension DiveSample {
     static let dive = belongsTo(Dive.self)
 }
 
+// MARK: - Rust Bridge Mapping
+
+extension Array where Element == DiveSample {
+    /// Convert dive samples to Rust SampleInput array for deco engine computation.
+    public func toSampleInputs() -> [SampleInput] {
+        map { sample in
+            SampleInput(
+                tSec: sample.tSec,
+                depthM: sample.depthM,
+                tempC: sample.tempC,
+                setpointPpo2: sample.setpointPpo2,
+                ceilingM: sample.ceilingM,
+                gf99: sample.gf99,
+                gasmixIndex: sample.gasmixIndex.map { Int32($0) },
+                ppo2: sample.ppo2_1 ?? sample.setpointPpo2,
+                ttsSec: sample.ttsSec.map { Int32($0) },
+                ndlSec: sample.ndlSec.map { Int32($0) },
+                decoStopDepthM: sample.decoStopDepthM,
+                atPlusFiveTtsMin: sample.atPlusFiveTtsMin.map { Int32($0) }
+            )
+        }
+    }
+}
+
 // MARK: - Cache Key
 
 extension Array where Element == DiveSample {

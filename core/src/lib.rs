@@ -23,7 +23,7 @@ uniffi::include_scaffolding!("divelog_compute");
 pub use buhlmann::{GasMixInput, SurfaceGfPoint};
 pub use deco::{
     DecoModel, DecoSimError, DecoSimParams, DecoSimPoint, DecoSimResult, DecoStop, GasSwitchPlan,
-    ProfileGenParams, ProfileGenResult,
+    ProfileGenParams, ProfileGenResult, ThalmannPdcs,
 };
 pub use error::FormulaError;
 pub use formula::{compute, validate, validate_with_variables, FunctionInfo};

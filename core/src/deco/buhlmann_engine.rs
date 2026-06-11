@@ -109,9 +109,12 @@ impl BuhlmannEngine {
             let ceiling_depth_m = pressure_to_depth(raw_ceiling_p, surface_p);
             let ceiling_m = round_up_to_stop(ceiling_depth_m, stop_interval);
 
-            // Track first stop depth
-            if ceiling_m > 0.0 && first_stop_depth_m.is_none() {
-                first_stop_depth_m = Some(ceiling_m);
+            // Track deepest ceiling (first stop depth for Baker GF interpolation).
+            // During descent/bottom, the ceiling deepens as tissues load; we need
+            // the deepest value for correct GF interpolation in TTS computation.
+            if ceiling_m > 0.0 {
+                first_stop_depth_m =
+                    Some(first_stop_depth_m.map_or(ceiling_m, |prev: f64| prev.max(ceiling_m)));
             }
 
             // GF99 and SurfGF
@@ -119,26 +122,28 @@ impl BuhlmannEngine {
             let (surface_gf, leading) = tissues.surface_gf_and_leading(surface_p);
 
             // TTS and NDL
+            let pp = PlanParams::from_engine(
+                &gas_lookup,
+                sample.gasmix_index.unwrap_or(0),
+                sample.ppo2.map(|v| v as f64),
+                surface_p,
+                ascent_rate,
+                last_stop_depth,
+                stop_interval,
+                gf_low,
+                gf_high,
+            );
             let (tts_sec, ndl_sec) = if ceiling_m > 0.0 {
-                let pp = PlanParams {
-                    fo2: current_fo2,
-                    fhe: current_fhe,
-                    surface_p,
-                    ascent_rate_m_min: ascent_rate,
-                    last_stop_depth,
-                    stop_interval,
-                    gf_low,
-                    gf_high,
-                    first_stop_depth_m,
-                };
                 let tts = compute_tts(&tissues, current_depth_m, &pp);
                 (tts, 0)
             } else {
+                let gas = pp.gas_at_depth(current_depth_m);
                 let ndl = compute_ndl(
                     &tissues,
                     current_depth_m,
-                    current_fo2,
-                    current_fhe,
+                    gas.fo2,
+                    gas.fhe,
+                    pp.ppo2,
                     surface_p,
                     gf_low,
                     gf_high,
@@ -175,17 +180,17 @@ impl BuhlmannEngine {
         let (deco_stops, truncated) = if params.plan_ascent {
             let last_sample = params.samples.last().unwrap();
             let current_depth_m = (last_sample.depth_m as f64).max(0.0);
-            let pp = PlanParams {
-                fo2: current_fo2,
-                fhe: current_fhe,
+            let pp = PlanParams::from_engine(
+                &gas_lookup,
+                last_sample.gasmix_index.unwrap_or(0),
+                last_sample.ppo2.map(|v| v as f64),
                 surface_p,
-                ascent_rate_m_min: ascent_rate,
+                ascent_rate,
                 last_stop_depth,
                 stop_interval,
                 gf_low,
                 gf_high,
-                first_stop_depth_m,
-            };
+            );
             plan_deco_stops(&tissues, current_depth_m, &pp)
         } else {
             (Vec::new(), false)
@@ -367,17 +372,128 @@ fn round_up_to_stop(depth_m: f64, stop_interval: f64) -> f64 {
 // Planner Parameters
 // ============================================================================
 
-/// Bundled parameters for the deco stop planner and TTS computation.
-struct PlanParams {
+/// A gas available for breathing during ascent planning.
+#[derive(Clone)]
+struct PlanGas {
     fo2: f64,
     fhe: f64,
+    /// Switch to this gas at or above this depth (metres). `None` = bottom gas.
+    switch_depth_m: Option<f64>,
+}
+
+/// Bundled parameters for the deco stop planner and TTS computation.
+struct PlanParams {
+    /// Available gases sorted by switch depth descending (deepest switch first, bottom gas last).
+    gases: Vec<PlanGas>,
+    /// CCR setpoint PPO2 in bar. `None` = open circuit.
+    ppo2: Option<f64>,
     surface_p: f64,
     ascent_rate_m_min: f64,
     last_stop_depth: f64,
     stop_interval: f64,
     gf_low: f64,
     gf_high: f64,
-    first_stop_depth_m: Option<f64>,
+}
+
+/// Maximum PPO2 for computing default switch depths (MOD).
+const MAX_PPO2_SWITCH: f64 = 1.6;
+
+impl PlanParams {
+    /// Get the gas to breathe at a given depth. Uses the richest available
+    /// gas whose switch depth is at or above the current depth.
+    fn gas_at_depth(&self, depth_m: f64) -> &PlanGas {
+        // Find the shallowest deco gas whose switch depth is >= current depth.
+        // This gives the richest available gas at this depth.
+        let mut best: Option<&PlanGas> = None;
+        for gas in &self.gases {
+            if let Some(switch_depth) = gas.switch_depth_m {
+                if depth_m <= switch_depth {
+                    match best {
+                        None => best = Some(gas),
+                        Some(prev) => {
+                            if switch_depth < prev.switch_depth_m.unwrap_or(f64::MAX) {
+                                best = Some(gas);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        best.unwrap_or_else(|| {
+            // Bottom gas (no switch depth) is always last
+            self.gases.last().unwrap_or(&PlanGas {
+                fo2: AIR_FO2,
+                fhe: 0.0,
+                switch_depth_m: None,
+            })
+        })
+    }
+
+    /// Build a PlanParams from the engine's current state and gas mixes.
+    #[allow(clippy::too_many_arguments)]
+    fn from_engine(
+        gas_mixes: &std::collections::HashMap<i32, (f64, f64)>,
+        current_gas_index: i32,
+        ppo2: Option<f64>,
+        surface_p: f64,
+        ascent_rate: f64,
+        last_stop_depth: f64,
+        stop_interval: f64,
+        gf_low: f64,
+        gf_high: f64,
+    ) -> Self {
+        let mut gases: Vec<PlanGas> = Vec::new();
+        let mut bottom_gas: Option<PlanGas> = None;
+
+        for (&mix_idx, &(fo2, fhe)) in gas_mixes {
+            if mix_idx == current_gas_index || mix_idx == 0 {
+                // Bottom gas or current gas — no switch depth
+                bottom_gas = Some(PlanGas {
+                    fo2,
+                    fhe,
+                    switch_depth_m: None,
+                });
+            } else if fo2 > 0.0 {
+                // Deco gas — compute MOD at 1.6 PPO2 as default switch depth
+                let mod_m = (MAX_PPO2_SWITCH / fo2 - 1.0) * 10.0;
+                gases.push(PlanGas {
+                    fo2,
+                    fhe,
+                    switch_depth_m: Some(mod_m.max(0.0)),
+                });
+            }
+        }
+
+        // Sort deco gases by switch depth descending (deepest first)
+        gases.sort_by(|a, b| {
+            b.switch_depth_m
+                .unwrap_or(0.0)
+                .partial_cmp(&a.switch_depth_m.unwrap_or(0.0))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Bottom gas goes last
+        if let Some(bg) = bottom_gas {
+            gases.push(bg);
+        } else {
+            gases.push(PlanGas {
+                fo2: AIR_FO2,
+                fhe: 0.0,
+                switch_depth_m: None,
+            });
+        }
+
+        PlanParams {
+            gases,
+            ppo2,
+            surface_p,
+            ascent_rate_m_min: ascent_rate,
+            last_stop_depth,
+            stop_interval,
+            gf_low,
+            gf_high,
+        }
+    }
 }
 
 // ============================================================================
@@ -420,11 +536,13 @@ fn compute_tts(tissues: &EngineTissueState, current_depth_m: f64, pp: &PlanParam
 /// Finds the time (seconds) the diver can stay at current depth before
 /// a GF-adjusted ceiling appears. Returns 0 if already in deco.
 /// Precision: +/- 5 seconds.
+#[allow(clippy::too_many_arguments)]
 fn compute_ndl(
     tissues: &EngineTissueState,
     current_depth_m: f64,
     fo2: f64,
     fhe: f64,
+    ppo2: Option<f64>,
     surface_p: f64,
     gf_low: f64,
     _gf_high: f64,
@@ -434,7 +552,7 @@ fn compute_ndl(
     }
 
     let ambient_p = depth_to_pressure(current_depth_m, surface_p);
-    let (fn2, fhe_frac) = inspired_fractions(fo2, fhe, None, ambient_p);
+    let (fn2, fhe_frac) = inspired_fractions(fo2, fhe, ppo2, ambient_p);
     let p_inspired_n2 = (ambient_p - P_WATER_VAPOR) * fn2;
     let p_inspired_he = (ambient_p - P_WATER_VAPOR) * fhe_frac;
 
@@ -491,13 +609,12 @@ fn compute_ndl(
 
 /// Plan deco stops from current depth/tissue state to the surface.
 ///
-/// NOTE: The planner uses OC gas fractions for ascent computation, even for
-/// CCR profiles. This is the conservative (bailout) assumption — CCR divers
-/// plan for loss-of-loop scenarios. True CCR ascent planning with setpoint
-/// schedules is a future enhancement.
+/// For CCR profiles (ppo2 is Some), inspired gas fractions at each stop
+/// use the setpoint PPO2 and diluent composition, giving true CCR ascent
+/// planning. For OC, raw gas fractions are used directly.
 ///
 /// Algorithm:
-/// 1. Find the first stop (ceiling rounded up to stop_interval)
+/// 1. Find the first stop (ceiling at GF-low, rounded up to stop_interval)
 /// 2. Ascend at ascent_rate, updating tissues during travel
 /// 3. At each stop: simulate 1-minute increments until ceiling clears to next stop
 /// 4. Repeat until surface
@@ -511,8 +628,10 @@ fn plan_deco_stops(
     let mut depth = current_depth_m;
     let mut truncated = false;
 
-    // Determine first stop from ceiling
-    let ceil_p = tissues.gf_ceiling(pp.gf_low, pp.gf_high, pp.first_stop_depth_m, pp.surface_p);
+    // Determine first stop from ceiling.
+    // Use raw GF-low ceiling (not Baker-interpolated) to find the deepest stop.
+    // This is the correct anchor for Baker GF interpolation during the ascent.
+    let ceil_p = tissues.raw_gf_ceiling_at(pp.gf_low, pp.surface_p);
     let ceil_depth = pressure_to_depth(ceil_p, pp.surface_p);
     let mut stop_depth = round_up_to_stop(ceil_depth, pp.stop_interval);
 
@@ -521,23 +640,19 @@ fn plan_deco_stops(
         stop_depth = pp.last_stop_depth;
     }
 
-    // Use actual first stop for GF interpolation if not already set
-    let first_stop = pp.first_stop_depth_m.unwrap_or(stop_depth);
+    // Baker GF interpolation: GF varies linearly from gf_low at first_stop
+    // to gf_high at the surface. The first_stop is determined by the current
+    // tissue state (stop_depth), NOT the per-sample tracking which may have
+    // been set early in the dive when the ceiling was shallow.
+    let first_stop = stop_depth;
 
     if stop_depth <= 0.0 {
         return (stops, false); // No deco obligation
     }
 
-    // Ascend to first stop, updating tissues during travel
-    ascend_to(
-        &mut tissues,
-        &mut depth,
-        stop_depth,
-        pp.fo2,
-        pp.fhe,
-        pp.surface_p,
-        pp.ascent_rate_m_min,
-    );
+    // Ascend to first stop, updating tissues during travel.
+    // Segment the ascent at gas switch boundaries for correct tissue loading.
+    ascend_with_gas_switches(&mut tissues, &mut depth, stop_depth, pp);
 
     // Process stops from deep to shallow
     let mut current_stop = stop_depth;
@@ -552,9 +667,11 @@ fn plan_deco_stops(
 
         let mut stop_time_sec: f64 = 0.0;
 
-        // Simulate 1-minute increments until ceiling clears to next stop
+        // Simulate 1-minute increments until ceiling clears to next stop.
+        // Use GF at the NEXT stop depth (Baker method): to ascend from D to D',
+        // the ceiling at GF(D') must be ≤ D'.
         loop {
-            let gf = gf_at_depth(current_stop, first_stop, pp.gf_low, pp.gf_high);
+            let gf = gf_at_depth(next_stop, first_stop, pp.gf_low, pp.gf_high);
             let ceil_p = tissues.raw_gf_ceiling_at(gf, pp.surface_p);
             let ceil_depth = pressure_to_depth(ceil_p, pp.surface_p);
 
@@ -562,9 +679,11 @@ fn plan_deco_stops(
                 break;
             }
 
-            // Wait 60 seconds at this stop
+            // Wait 60 seconds at this stop (using the gas available at this depth)
+            let gas = pp.gas_at_depth(current_stop);
             let ambient_p = depth_to_pressure(current_stop, pp.surface_p);
-            let (fn2, fhe_frac) = inspired_fractions(pp.fo2, pp.fhe, None, ambient_p);
+            let ppo2_at_stop = pp.ppo2.map(|sp| sp.min(ambient_p));
+            let (fn2, fhe_frac) = inspired_fractions(gas.fo2, gas.fhe, ppo2_at_stop, ambient_p);
             let p_inspired_n2 = (ambient_p - P_WATER_VAPOR) * fn2;
             let p_inspired_he = (ambient_p - P_WATER_VAPOR) * fhe_frac;
             tissues.update(60.0, p_inspired_n2, p_inspired_he);
@@ -576,25 +695,37 @@ fn plan_deco_stops(
             }
         }
 
-        if stop_time_sec > 0.0 {
-            stops.push(DecoStop {
-                depth_m: current_stop as f32,
-                duration_sec: stop_time_sec as i32,
-                gas_mix_index: -1,
-            });
+        // Enforce minimum 1-minute stop at each depth (standard practice:
+        // the diver pauses at each stop increment during ascent).
+        if stop_time_sec < 60.0 {
+            let gas = pp.gas_at_depth(current_stop);
+            let ambient_p = depth_to_pressure(current_stop, pp.surface_p);
+            let ppo2_at_stop = pp.ppo2.map(|sp| sp.min(ambient_p));
+            let (fn2, fhe_frac) = inspired_fractions(gas.fo2, gas.fhe, ppo2_at_stop, ambient_p);
+            let p_inspired_n2 = (ambient_p - P_WATER_VAPOR) * fn2;
+            let p_inspired_he = (ambient_p - P_WATER_VAPOR) * fhe_frac;
+            tissues.update(60.0 - stop_time_sec, p_inspired_n2, p_inspired_he);
+            stop_time_sec = 60.0;
         }
+        stops.push(DecoStop {
+            depth_m: current_stop as f32,
+            duration_sec: stop_time_sec as i32,
+            gas_mix_index: -1,
+        });
 
         if current_stop <= pp.last_stop_depth {
             break;
         }
 
-        // Ascend to next stop
+        // Ascend to next stop (using gas available at the shallower depth)
+        let next_gas = pp.gas_at_depth(next_stop);
         ascend_to(
             &mut tissues,
             &mut depth,
             next_stop,
-            pp.fo2,
-            pp.fhe,
+            next_gas.fo2,
+            next_gas.fhe,
+            pp.ppo2,
             pp.surface_p,
             pp.ascent_rate_m_min,
         );
@@ -604,13 +735,48 @@ fn plan_deco_stops(
     (stops, truncated)
 }
 
+/// Ascend from current depth to target, segmenting at gas switch boundaries.
+/// This ensures correct tissue loading when passing through switch depths.
+fn ascend_with_gas_switches(
+    tissues: &mut EngineTissueState,
+    current_depth: &mut f64,
+    target_depth: f64,
+    pp: &PlanParams,
+) {
+    // Collect switch depths between current and target (descending order)
+    let mut waypoints: Vec<f64> = pp
+        .gases
+        .iter()
+        .filter_map(|g| g.switch_depth_m)
+        .filter(|&d| d < *current_depth && d > target_depth)
+        .collect();
+    waypoints.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    waypoints.push(target_depth);
+
+    for wp in waypoints {
+        let gas = pp.gas_at_depth(*current_depth);
+        ascend_to(
+            tissues,
+            current_depth,
+            wp,
+            gas.fo2,
+            gas.fhe,
+            pp.ppo2,
+            pp.surface_p,
+            pp.ascent_rate_m_min,
+        );
+    }
+}
+
 /// Simulate ascent between two depths, updating tissue state during travel.
+#[allow(clippy::too_many_arguments)]
 fn ascend_to(
     tissues: &mut EngineTissueState,
     current_depth: &mut f64,
     target_depth: f64,
     fo2: f64,
     fhe: f64,
+    ppo2: Option<f64>,
     surface_p: f64,
     ascent_rate_m_min: f64,
 ) {
@@ -623,7 +789,8 @@ fn ascend_to(
     let travel_sec = (travel_m / ascent_rate_m_min) * 60.0;
     let avg_depth = (*current_depth + target_depth) / 2.0;
     let ambient_p = depth_to_pressure(avg_depth, surface_p);
-    let (fn2, fhe_frac) = inspired_fractions(fo2, fhe, None, ambient_p);
+    let ppo2_clamped = ppo2.map(|sp| sp.min(ambient_p));
+    let (fn2, fhe_frac) = inspired_fractions(fo2, fhe, ppo2_clamped, ambient_p);
     let p_inspired_n2 = (ambient_p - P_WATER_VAPOR) * fn2;
     let p_inspired_he = (ambient_p - P_WATER_VAPOR) * fhe_frac;
     tissues.update(travel_sec, p_inspired_n2, p_inspired_he);
@@ -773,6 +940,7 @@ mod tests {
             18.0,
             AIR_FO2,
             0.0,
+            None,
             DEFAULT_SURFACE_PRESSURE,
             1.0,
             1.0,
@@ -794,6 +962,7 @@ mod tests {
             30.0,
             AIR_FO2,
             0.0,
+            None,
             DEFAULT_SURFACE_PRESSURE,
             1.0,
             1.0,
@@ -814,6 +983,7 @@ mod tests {
             0.0,
             AIR_FO2,
             0.0,
+            None,
             DEFAULT_SURFACE_PRESSURE,
             1.0,
             1.0,
@@ -843,6 +1013,7 @@ mod tests {
             stop_interval_m: Some(3.0),
             gf_low: Some(50),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: true,
         };
 
@@ -904,6 +1075,7 @@ mod tests {
             stop_interval_m: Some(3.0),
             gf_low: Some(30),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: true,
         };
 
@@ -946,6 +1118,7 @@ mod tests {
             stop_interval_m: Some(3.0),
             gf_low: Some(100),
             gf_high: Some(100),
+            thalmann_pdcs: None,
             plan_ascent: true,
         };
 
@@ -959,6 +1132,7 @@ mod tests {
             stop_interval_m: Some(3.0),
             gf_low: Some(50),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: true,
         };
 
@@ -1002,6 +1176,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: Some(100),
             gf_high: Some(100),
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
         let result = engine.simulate(&params).unwrap();
@@ -1046,6 +1221,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: Some(50),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
 
@@ -1087,6 +1263,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: None,
             gf_high: None,
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
 
@@ -1107,6 +1284,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: Some(90),
             gf_high: Some(70),
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
 
@@ -1127,6 +1305,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: Some(0),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
 
@@ -1148,6 +1327,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: None,
             gf_high: None,
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
         assert!(matches!(
@@ -1166,6 +1346,7 @@ mod tests {
             stop_interval_m: Some(0.0),
             gf_low: None,
             gf_high: None,
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
         assert!(matches!(
@@ -1239,6 +1420,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: Some(100),
             gf_high: Some(100),
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
 
@@ -1262,6 +1444,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: Some(100),
             gf_high: Some(100),
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
         let oc_result = engine.simulate(&oc_params).unwrap();
@@ -1294,6 +1477,7 @@ mod tests {
             stop_interval_m: Some(3.0),
             gf_low: Some(50),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
 
@@ -1334,6 +1518,7 @@ mod tests {
             stop_interval_m: Some(3.0),
             gf_low: Some(50),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
 
@@ -1365,6 +1550,7 @@ mod tests {
             stop_interval_m: None,
             gf_low: Some(100),
             gf_high: Some(100),
+            thalmann_pdcs: None,
             plan_ascent: false,
         };
 
@@ -1396,6 +1582,7 @@ mod tests {
             stop_interval_m: Some(3.0),
             gf_low: Some(50),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: true,
         };
 
@@ -1510,6 +1697,7 @@ mod tests {
             3.0,
             AIR_FO2,
             0.0,
+            None,
             DEFAULT_SURFACE_PRESSURE,
             1.0,
             1.0,
@@ -1534,6 +1722,7 @@ mod tests {
             12.0,
             AIR_FO2,
             0.0,
+            None,
             DEFAULT_SURFACE_PRESSURE,
             0.4,
             0.85,
@@ -1565,6 +1754,7 @@ mod tests {
             stop_interval_m: Some(6.0),
             gf_low: Some(50),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: true,
         };
 
@@ -1595,10 +1785,250 @@ mod tests {
             stop_interval_m: Some(3.0),
             gf_low: Some(50),
             gf_high: Some(85),
+            thalmann_pdcs: None,
             plan_ascent: true,
         };
 
         let result = engine.simulate(&params).unwrap();
         assert!(!result.truncated, "Normal profile should not be truncated");
+    }
+
+    #[test]
+    fn diag_tissue_loading_150ft_40min_trimix() {
+        // Reproduce DecoPlanner 4 scenario exactly
+        // 150ft = 45.72m, 40 min bottom, Tx 21/35, descent 60ft/min, ascent 30ft/min
+        // Descent: 150ft at 60ft/min = 2.5 min = 150 sec
+        // Bottom: 40 min at 150ft on Tx 21/35
+        let surface_p = DEFAULT_SURFACE_PRESSURE;
+        let depth_m = 45.72;
+        let ambient_p = depth_to_pressure(depth_m, surface_p);
+
+        // Descent: model as avg depth for 150 sec
+        let mut tissues = EngineTissueState::surface_equilibrium(surface_p);
+        let avg_descent_depth = depth_m / 2.0;
+        let avg_descent_p = depth_to_pressure(avg_descent_depth, surface_p);
+        let (fn2_d, fhe_d) = inspired_fractions(0.21, 0.35, None, avg_descent_p);
+        let pin2_d = (avg_descent_p - P_WATER_VAPOR) * fn2_d;
+        let pihe_d = (avg_descent_p - P_WATER_VAPOR) * fhe_d;
+        tissues.update(150.0, pin2_d, pihe_d);
+
+        // Bottom: 40 min at 150ft on Tx 21/35
+        let (fn2_b, fhe_b) = inspired_fractions(0.21, 0.35, None, ambient_p);
+        let pin2_b = (ambient_p - P_WATER_VAPOR) * fn2_b;
+        let pihe_b = (ambient_p - P_WATER_VAPOR) * fhe_b;
+        tissues.update(40.0 * 60.0, pin2_b, pihe_b);
+
+        eprintln!("=== Tissue state after 150ft/40min on Tx21/35 ===");
+        eprintln!("Ambient: {ambient_p:.4} bar, FN2: {fn2_b:.4}, FHe: {fhe_b:.4}");
+        eprintln!("Inspired N2: {pin2_b:.4} bar, Inspired He: {pihe_b:.4} bar");
+        for i in 0..NUM_COMPARTMENTS {
+            let p_total = tissues.p_n2[i] + tissues.p_he[i];
+            let (a, b) = tissues.weighted_ab(i);
+            let m_surf = a + surface_p / b;
+            let gf_surf = if m_surf > surface_p {
+                (p_total - surface_p) / (m_surf - surface_p)
+            } else {
+                0.0
+            };
+            if i < 8 {
+                // only print fast/medium compartments
+                eprintln!(
+                    "  C{:2}: N2={:.3} He={:.3} Total={:.3} M_surf={:.3} GF_surf={:.1}%",
+                    i + 1,
+                    tissues.p_n2[i],
+                    tissues.p_he[i],
+                    p_total,
+                    m_surf,
+                    gf_surf * 100.0
+                );
+            }
+        }
+
+        // Now compute ceiling with GF 20/85
+        let ceil_p_20 = tissues.raw_gf_ceiling_at(0.20, surface_p);
+        let ceil_depth_20 = pressure_to_depth(ceil_p_20, surface_p);
+        let ceil_p_85 = tissues.raw_gf_ceiling_at(0.85, surface_p);
+        let ceil_depth_85 = pressure_to_depth(ceil_p_85, surface_p);
+        eprintln!(
+            "Ceiling at GF20: {:.1}m, at GF85: {:.1}m",
+            ceil_depth_20, ceil_depth_85
+        );
+    }
+
+    #[test]
+    fn diag_stop_time_at_3m_on_nx50() {
+        // After a full 150ft/40min dive + ascent to 3m, how long at 3m on Nx50?
+        // Simulate the full dive first, then measure time at 3m
+        let surface_p = DEFAULT_SURFACE_PRESSURE;
+        let depth_m = 45.72;
+
+        let mut tissues = EngineTissueState::surface_equilibrium(surface_p);
+
+        // Descent 150 sec at avg depth
+        let avg_p = depth_to_pressure(depth_m / 2.0, surface_p);
+        let (fn2, fhe) = inspired_fractions(0.21, 0.35, None, avg_p);
+        tissues.update(
+            150.0,
+            (avg_p - P_WATER_VAPOR) * fn2,
+            (avg_p - P_WATER_VAPOR) * fhe,
+        );
+
+        // Bottom 40 min
+        let bottom_p = depth_to_pressure(depth_m, surface_p);
+        let (fn2, fhe) = inspired_fractions(0.21, 0.35, None, bottom_p);
+        tissues.update(
+            2400.0,
+            (bottom_p - P_WATER_VAPOR) * fn2,
+            (bottom_p - P_WATER_VAPOR) * fhe,
+        );
+
+        // Ascent to 21m on Tx 21/35 (about 82 sec at 18 m/min... wait, 9 m/min)
+        // 45.72 - 21 = 24.72m at 9 m/min = 165 sec
+        let avg_p = depth_to_pressure(33.0, surface_p);
+        let (fn2, fhe) = inspired_fractions(0.21, 0.35, None, avg_p);
+        tissues.update(
+            165.0,
+            (avg_p - P_WATER_VAPOR) * fn2,
+            (avg_p - P_WATER_VAPOR) * fhe,
+        );
+
+        // Simulate stops from 21m to 3m on Nx50 (quick approximation - 20 min)
+        // This is a rough simulation - just off-gas for 20 min at avg 12m on Nx50
+        let avg_p = depth_to_pressure(12.0, surface_p);
+        let (fn2, fhe) = inspired_fractions(0.50, 0.0, None, avg_p);
+        tissues.update(
+            1200.0,
+            (avg_p - P_WATER_VAPOR) * fn2,
+            (avg_p - P_WATER_VAPOR) * fhe,
+        );
+
+        // Now at 3m on Nx50 - how long to clear at GF 77.8%?
+        let stop_depth = 3.0;
+        let stop_p = depth_to_pressure(stop_depth, surface_p);
+        let (fn2_stop, fhe_stop) = inspired_fractions(0.50, 0.0, None, stop_p);
+        let pin2 = (stop_p - P_WATER_VAPOR) * fn2_stop;
+        let pihe = (stop_p - P_WATER_VAPOR) * fhe_stop;
+
+        let gf = 0.778; // GF at 3m with first_stop=27m, GF 20/85
+
+        let mut t = tissues.clone();
+        let mut seconds = 0;
+        loop {
+            let ceil_p = t.raw_gf_ceiling_at(gf, surface_p);
+            let ceil_depth = pressure_to_depth(ceil_p, surface_p);
+            if ceil_depth <= 0.0 {
+                break;
+            }
+            t.update(60.0, pin2, pihe);
+            seconds += 60;
+            if seconds > 7200 {
+                break;
+            }
+        }
+
+        eprintln!("=== Time at 3m on Nx50 at GF 77.8% ===");
+        eprintln!("Stop time: {} sec ({} min)", seconds, seconds / 60);
+        // For reference, DP4 gives 22 min at 10ft
+    }
+
+    #[test]
+    fn test_gas_at_depth_multi_gas_selects_shallowest() {
+        // Setup: bottom gas (air), Nx50 @ 21m, O2 @ 6m
+        let params = PlanParams {
+            gases: vec![
+                PlanGas {
+                    fo2: 0.50,
+                    fhe: 0.0,
+                    switch_depth_m: Some(21.0),
+                },
+                PlanGas {
+                    fo2: 1.0,
+                    fhe: 0.0,
+                    switch_depth_m: Some(6.0),
+                },
+                PlanGas {
+                    fo2: AIR_FO2,
+                    fhe: 0.0,
+                    switch_depth_m: None,
+                },
+            ],
+            ppo2: None,
+            surface_p: 1.013,
+            ascent_rate_m_min: 9.0,
+            last_stop_depth: 3.0,
+            stop_interval: 3.0,
+            gf_low: 0.30,
+            gf_high: 0.85,
+        };
+
+        // At 30m: deeper than all switch depths → bottom gas (air)
+        let gas = params.gas_at_depth(30.0);
+        assert!(gas.switch_depth_m.is_none(), "30m should use bottom gas");
+        assert!((gas.fo2 - AIR_FO2).abs() < 1e-6);
+
+        // At 15m: within Nx50 range (15 <= 21) but not O2 (15 > 6) → Nx50
+        let gas = params.gas_at_depth(15.0);
+        assert_eq!(gas.switch_depth_m, Some(21.0));
+        assert!((gas.fo2 - 0.50).abs() < 1e-6);
+
+        // At 5m: within both Nx50 (5 <= 21) and O2 (5 <= 6) → O2 (shallowest)
+        let gas = params.gas_at_depth(5.0);
+        assert_eq!(gas.switch_depth_m, Some(6.0));
+        assert!((gas.fo2 - 1.0).abs() < 1e-6);
+
+        // At 6m: exactly at O2 switch depth → O2
+        let gas = params.gas_at_depth(6.0);
+        assert_eq!(gas.switch_depth_m, Some(6.0));
+        assert!((gas.fo2 - 1.0).abs() < 1e-6);
+
+        // At 21m: exactly at Nx50 switch depth, also within O2? No, 21 > 6 → Nx50
+        let gas = params.gas_at_depth(21.0);
+        assert_eq!(gas.switch_depth_m, Some(21.0));
+        assert!((gas.fo2 - 0.50).abs() < 1e-6);
+    }
+
+    // ── Coverage: truncation safety limit (lines 693-694) ────────────────
+
+    #[test]
+    fn test_truncation_extreme_tissue_loading() {
+        // Create extreme tissue loading by directly constructing a tissue
+        // state with very high N2 pressure, then running the planner.
+        // With GF 1/1 (extremely conservative), a massively loaded tissue
+        // will require a stop exceeding the 10-hour safety limit.
+        let surface_p = DEFAULT_SURFACE_PRESSURE;
+        let mut tissues = EngineTissueState {
+            p_n2: [0.0; NUM_COMPARTMENTS],
+            p_he: [0.0; NUM_COMPARTMENTS],
+        };
+        // Load ALL compartments to extremely high pressure (20 bar N2).
+        // Even the slowest compartments (HT > 600 min) would need many
+        // hours to off-gas from 20 bar back below M-value at 3m.
+        for i in 0..NUM_COMPARTMENTS {
+            tissues.p_n2[i] = 20.0;
+        }
+
+        let pp = PlanParams {
+            gases: vec![PlanGas {
+                fo2: AIR_FO2,
+                fhe: 0.0,
+                switch_depth_m: None,
+            }],
+            ppo2: None,
+            surface_p,
+            ascent_rate_m_min: 9.0,
+            last_stop_depth: 3.0,
+            stop_interval: 3.0,
+            gf_low: 0.01,  // Extremely conservative GF low
+            gf_high: 0.01, // Extremely conservative GF high
+        };
+
+        let (stops, truncated) = plan_deco_stops(&tissues, 100.0, &pp);
+
+        assert!(
+            truncated,
+            "Extreme tissue loading with GF 1/1 should trigger truncation"
+        );
+        // Should still produce stops even when truncated
+        assert!(!stops.is_empty(), "Truncated plan should still have stops");
     }
 }

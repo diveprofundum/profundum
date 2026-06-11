@@ -15,6 +15,20 @@ pub enum DecoModel {
     ThalmannElDca,
 }
 
+/// Target probability of DCS for the Thalmann algorithm.
+///
+/// Selects the XVal-He-9 parameter set from NEDU TR 18-05.
+/// Lower percentages are more conservative (longer deco).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThalmannPdcs {
+    /// 2.3% target P_DCS — most conservative (NEDU TR 18-05, Table 10).
+    Pdcs23,
+    /// 4.0% target P_DCS — moderate (NEDU TR 18-05, Table 16).
+    Pdcs40,
+    /// 5.0% target P_DCS — least conservative (NEDU TR 18-05, Table 17).
+    Pdcs50,
+}
+
 /// Parameters for a deco simulation run.
 #[derive(Debug, Clone)]
 pub struct DecoSimParams {
@@ -36,6 +50,8 @@ pub struct DecoSimParams {
     pub gf_low: Option<u8>,
     /// Gradient factor high (0–100, Bühlmann only, default 100).
     pub gf_high: Option<u8>,
+    /// Thalmann P_DCS target (Thalmann only, default Pdcs23).
+    pub thalmann_pdcs: Option<ThalmannPdcs>,
     /// If true, compute a deco schedule from the last sample to the surface.
     pub plan_ascent: bool,
 }
