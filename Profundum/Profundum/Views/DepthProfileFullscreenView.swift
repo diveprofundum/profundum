@@ -170,22 +170,9 @@ struct DepthProfileFullscreenView: View {
         }
         #if os(iOS)
         .background(Color(.systemBackground))
-        .onAppear {
-            AppDelegate.orientationLock = .landscape
-            requestOrientation(.landscape)
-        }
-        .onDisappear {
-            AppDelegate.orientationLock = .all
-        }
         #else
         .background(Color(.windowBackgroundColor))
         #endif
+        .landscapeFullscreen()
     }
-
-    #if os(iOS)
-    private func requestOrientation(_ orientations: UIInterfaceOrientationMask) {
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
-        windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: orientations))
-    }
-    #endif
 }
