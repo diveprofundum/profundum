@@ -140,4 +140,73 @@ final class RustBridgeMappingTests: XCTestCase {
         XCTAssertEqual(result[0].o2Fraction, Double(Float(0.18)), accuracy: 1e-6)
         XCTAssertEqual(result[0].heFraction, Double(Float(0.45)), accuracy: 1e-6)
     }
+
+    // MARK: - ProfileGenResult.plannedStops (PRO-51)
+
+    /// A shallow NDL dive must round-trip through the FFI with an empty
+    /// `plannedStops` array — exercising the new field on the no-deco path.
+    func testGenerateDiveProfileShallowHasNoPlannedStops() throws {
+        let params = ProfileGenParams(
+            targetDepthM: 12.0,
+            bottomTimeSec: 1800,
+            descentRateMMin: nil,
+            ascentRateMMin: nil,
+            gasPlan: [],
+            model: .buhlmannZhl16c,
+            surfacePressureBar: nil,
+            gfLow: nil,
+            gfHigh: nil,
+            lastStopDepthM: nil,
+            stopIntervalM: nil,
+            setpointPpo2: nil,
+            thalmannPdcs: nil,
+            sampleIntervalSec: nil,
+            tempC: nil
+        )
+        let result = try DivelogCompute.generateDiveProfile(params: params)
+        XCTAssertTrue(result.plannedStops.isEmpty,
+                      "Shallow NDL dive should produce no planned stops")
+    }
+
+    /// A deep air dive with conservative GFs must populate `plannedStops`
+    /// across the FFI boundary with valid depth/duration and deepest-first
+    /// ordering — guards against regressions in the UniFFI field mapping
+    /// introduced in PRO-51.
+    func testGenerateDiveProfilePlannedStopsRoundTrip() throws {
+        let params = ProfileGenParams(
+            targetDepthM: 40.0,
+            bottomTimeSec: 1200,
+            descentRateMMin: nil,
+            ascentRateMMin: nil,
+            gasPlan: [],
+            model: .buhlmannZhl16c,
+            surfacePressureBar: nil,
+            gfLow: 50,
+            gfHigh: 80,
+            lastStopDepthM: nil,
+            stopIntervalM: nil,
+            setpointPpo2: nil,
+            thalmannPdcs: nil,
+            sampleIntervalSec: nil,
+            tempC: nil
+        )
+        let result = try DivelogCompute.generateDiveProfile(params: params)
+
+        XCTAssertFalse(result.plannedStops.isEmpty,
+                       "Deep dive with conservative GFs should produce planned stops")
+
+        for pair in zip(result.plannedStops, result.plannedStops.dropFirst()) {
+            XCTAssertGreaterThanOrEqual(pair.0.depthM, pair.1.depthM,
+                                        "plannedStops must be sorted deepest-first")
+        }
+
+        for stop in result.plannedStops {
+            XCTAssertGreaterThan(stop.durationSec, 0,
+                                 "Each planned stop must have a positive duration")
+            XCTAssertGreaterThan(stop.depthM, 0,
+                                 "Stop depth must be > 0")
+            XCTAssertLessThan(stop.depthM, 40.0,
+                              "Stop depth must be shallower than bottom")
+        }
+    }
 }

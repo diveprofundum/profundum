@@ -48,7 +48,8 @@ struct ReplayProfileSheet: View {
 
     enum ReplayResult {
         case synthetic(ProfileGenResult)
-        case actual(DecoSimResult)
+        /// Actual-dive result: overlay (full profile) + planned stops (from bottom-end)
+        case actual(overlay: DecoSimResult, planned: DecoSimResult)
     }
 
     @State private var result: ReplayResult?
@@ -451,10 +452,45 @@ struct ReplayProfileSheet: View {
         .accessibilityLabel("Error: \(message)")
     }
 
+    @ViewBuilder
     private func resultSummary(_ result: ReplayResult) -> some View {
         let extracted = extractResultData(result)
         let isActual = if case .actual = result { true } else { false }
-        return resultGrid(
+
+        // Chart section
+        let chartData: ReplayChartData = {
+            switch result {
+            case .synthetic(let profileResult):
+                return ReplayChartData(result: profileResult, depthUnit: appState.depthUnit)
+            case .actual(let overlay, let planned):
+                return ReplayChartData(
+                    samples: samples,
+                    decoResult: overlay,
+                    plannedStops: planned.decoStops,
+                    gasMixes: gasMixes,
+                    depthUnit: appState.depthUnit
+                )
+            }
+        }()
+
+        let sampleInputs: [SampleInput] = {
+            switch result {
+            case .synthetic(let profileResult):
+                return profileResult.samples
+            case .actual:
+                // Sort to match ReplayChartData's defensive sort — nearestTSec
+                // binary-searches this array assuming monotonic tSec.
+                return samples.sorted { $0.tSec < $1.tSec }.toSampleInputs()
+            }
+        }()
+
+        ReplayChartSection(
+            chartData: chartData,
+            samples: sampleInputs,
+            depthUnit: appState.depthUnit
+        )
+
+        resultGrid(
             decoResult: extracted.decoResult,
             totalTimeSec: extracted.totalTimeSec,
             decoTimeSec: extracted.decoTimeSec,
@@ -471,9 +507,11 @@ struct ReplayProfileSheet: View {
                 profileResult.totalTimeSec,
                 profileResult.totalTimeSec - profileResult.bottomEndTSec
             )
-        case .actual(let simResult):
-            let totalTime = samples.last.map { $0.tSec } ?? 0
-            return (simResult, totalTime, simResult.totalDecoTimeSec)
+        case .actual(let overlay, let planned):
+            // Max rather than .last — samples may be unsorted (see defensive
+            // sort in buildDecoSimParams / ReplayChartData).
+            let totalTime = samples.map(\.tSec).max() ?? 0
+            return (overlay, totalTime, planned.totalDecoTimeSec)
         }
     }
 
@@ -757,14 +795,30 @@ struct ReplayProfileSheet: View {
             return
         }
 
-        let params = buildDecoSimParams()
+        // Two engine calls:
+        // 1. Full samples with planAscent: false → per-point ceiling/GF99 overlay for charting
+        // 2. Truncated samples with planAscent: true → planned deco stop schedule
+        let overlayParams = buildDecoSimParams(truncate: false, planAscent: false)
+        let planParams = buildDecoSimParams(truncate: true, planAscent: true)
 
+        guard !overlayParams.samples.isEmpty, !planParams.samples.isEmpty else {
+            errorMessage = "No usable samples for deco simulation."
+            isGenerating = false
+            return
+        }
+
+        // Run both engine calls in parallel — they're independent and this
+        // roughly halves perceived latency on larger dives.
         Task {
+            async let overlayTask = Task.detached {
+                try DivelogCompute.computeDecoSimulation(params: overlayParams)
+            }.value
+            async let plannedTask = Task.detached {
+                try DivelogCompute.computeDecoSimulation(params: planParams)
+            }.value
             do {
-                let decoResult = try await Task.detached {
-                    try DivelogCompute.computeDecoSimulation(params: params)
-                }.value
-                result = .actual(decoResult)
+                let (overlay, planned) = try await (overlayTask, plannedTask)
+                result = .actual(overlay: overlay, planned: planned)
                 isGenerating = false
             } catch {
                 errorMessage = error.localizedDescription
@@ -801,25 +855,27 @@ struct ReplayProfileSheet: View {
         }
     }
 
-    private func buildDecoSimParams() -> DecoSimParams {
+    private func buildDecoSimParams(truncate: Bool = true, planAscent: Bool = true) -> DecoSimParams {
         let du = appState.depthUnit
         let sorted = samples.sorted(by: { $0.tSec < $1.tSec })
 
-        // Truncate samples at the bottom-end point so the engine plans the ascent
-        // from peak tissue loading (not from the surface after the dive is over).
-        // Use DiveStats.bottomEndT when available (handles multi-level dives correctly),
-        // otherwise fall back to 95% of max depth.
-        let bottomEndT: Int32
-        if let s = stats, s.bottomEndT > 0 {
-            bottomEndT = s.bottomEndT
+        let useSamples: [DiveSample]
+        if truncate {
+            // Truncate at bottom-end for ascent planning (peak tissue loading).
+            let bottomEndT: Int32
+            if let s = stats, s.bottomEndT > 0 {
+                bottomEndT = s.bottomEndT
+            } else {
+                let maxDepth = sorted.map(\.depthM).max() ?? 0
+                bottomEndT = sorted.last(where: { $0.depthM >= maxDepth * 0.95 })?.tSec ?? sorted.last?.tSec ?? 0
+            }
+            let bottomEndIdx = sorted.lastIndex(where: { $0.tSec <= bottomEndT }) ?? (sorted.count - 1)
+            useSamples = Array(sorted[...bottomEndIdx])
         } else {
-            let maxDepth = sorted.map(\.depthM).max() ?? 0
-            bottomEndT = sorted.last(where: { $0.depthM >= maxDepth * 0.95 })?.tSec ?? sorted.last?.tSec ?? 0
+            useSamples = sorted
         }
-        let bottomEndIdx = sorted.lastIndex(where: { $0.tSec <= bottomEndT }) ?? (sorted.count - 1)
-        let bottomSamples = Array(sorted[...bottomEndIdx])
 
-        var sampleInputs = bottomSamples.toSampleInputs()
+        var sampleInputs = useSamples.toSampleInputs()
 
         // CCR setpoint override: only if user changed it from the prefilled value.
         // Validate that the override is a valid number.
@@ -890,7 +946,7 @@ struct ReplayProfileSheet: View {
             gfLow: selectedModel == .buhlmannZhl16c ? UInt8(min(max(gfLow, 1), 100)) : nil,
             gfHigh: selectedModel == .buhlmannZhl16c ? UInt8(min(max(gfHigh, 1), 100)) : nil,
             thalmannPdcs: selectedModel == .thalmannElDca ? thalmannPdcs : nil,
-            planAscent: true
+            planAscent: planAscent
         )
     }
 }

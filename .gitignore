@@ -69,6 +69,10 @@ apple/DivelogCore/Sources/RustBridge/Generated/
 lcov.info
 coverage/
 
+# cargo-mutants output
+core/mutants.out/
+core/mutants.out.old/
+
 # Temporary files
 *.tmp
 *.temp

@@ -73,9 +73,10 @@ pub struct ProfileGenResult {
     /// Gas mixes used in the profile.
     pub gas_mixes: Vec<GasMixInput>,
     /// Full deco simulation result (pass 2) with per-point overlay data.
-    /// Note: `deco_result.deco_stops` is empty because pass 2 uses `plan_ascent: false`.
-    /// The deco stop schedule is baked into the sample profile shape (ascent holds).
     pub deco_result: DecoSimResult,
+    /// Planned deco stops from pass 1 (with depths and durations).
+    /// These are the stops used to build the ascent profile.
+    pub planned_stops: Vec<DecoStop>,
     /// Time at end of descent phase (seconds).
     pub descent_end_t_sec: i32,
     /// Time at end of bottom phase (seconds).
@@ -215,6 +216,7 @@ pub fn generate_dive_profile(params: ProfileGenParams) -> Result<ProfileGenResul
         samples,
         gas_mixes,
         deco_result,
+        planned_stops: pass1_result.deco_stops,
         descent_end_t_sec: descent_end_t,
         bottom_end_t_sec: bottom_end_t,
         total_time_sec,
@@ -1112,6 +1114,73 @@ mod tests {
             "Shallow dive should have no deco stops"
         );
         assert_eq!(result.deco_result.total_deco_time_sec, 0);
+        assert!(
+            result.planned_stops.is_empty(),
+            "No-deco dive should also have no planned stops"
+        );
+    }
+
+    #[test]
+    fn test_planned_stops_surface_deco_dive() {
+        // Deep dive with deco — planned_stops (from pass-1 planner) must be
+        // populated with shallower-than-bottom stops sorted deepest-first,
+        // and each stop must have a positive duration.
+        let mut params = air_params(40.0, 1200);
+        params.gf_low = Some(50);
+        params.gf_high = Some(80);
+        let result = generate_dive_profile(params).unwrap();
+
+        assert!(
+            !result.planned_stops.is_empty(),
+            "Deep dive with conservative GFs should produce planned stops"
+        );
+
+        // Deepest-first ordering.
+        for pair in result.planned_stops.windows(2) {
+            assert!(
+                pair[0].depth_m >= pair[1].depth_m,
+                "planned_stops must be sorted deepest-first: {} before {}",
+                pair[0].depth_m,
+                pair[1].depth_m,
+            );
+        }
+
+        for stop in &result.planned_stops {
+            assert!(
+                stop.duration_sec > 0,
+                "Each planned stop must have a positive duration, got {}",
+                stop.duration_sec
+            );
+            assert!(
+                stop.depth_m > 0.0 && (stop.depth_m as f64) < 40.0,
+                "Stop depth must be shallower than bottom: {}",
+                stop.depth_m
+            );
+        }
+
+        // The pass-1 stop schedule should shape the sample ascent: for each
+        // planned stop depth there must be at least two consecutive samples
+        // at that depth (the "hold").
+        for stop in &result.planned_stops {
+            let mut consecutive_at_depth = 0;
+            let mut saw_hold = false;
+            for s in result.samples.iter() {
+                if (s.depth_m - stop.depth_m).abs() < 0.01 {
+                    consecutive_at_depth += 1;
+                    if consecutive_at_depth >= 2 {
+                        saw_hold = true;
+                        break;
+                    }
+                } else {
+                    consecutive_at_depth = 0;
+                }
+            }
+            assert!(
+                saw_hold,
+                "Samples should include a hold at planned stop depth {}",
+                stop.depth_m
+            );
+        }
     }
 
     #[test]
