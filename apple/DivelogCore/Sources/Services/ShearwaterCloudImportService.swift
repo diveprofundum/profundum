@@ -12,6 +12,9 @@ public struct ShearwaterCloudImportResult: Equatable, Sendable {
     public var teammatesCreated: Int
     /// Diagnostic: number of samples with PPO2 sensor data.
     public var samplesWithPpo2: Int = 0
+    /// Existing dives whose missing metadata (GF settings, deco model, etc.)
+    /// was backfilled during a re-import.
+    public var divesBackfilled: Int = 0
 }
 
 /// Imports dive data from a Shearwater Cloud SQLite `.db` export file.
@@ -56,6 +59,7 @@ public final class ShearwaterCloudImportService: Sendable {
         var divesImported = 0
         var divesSkipped = 0
         var divesMerged = 0
+        var divesBackfilled = 0
         var devicesCreated = 0
         var sitesCreated = 0
         var teammatesCreated = 0
@@ -275,6 +279,13 @@ public final class ShearwaterCloudImportService: Sendable {
             }
 
             if allExist {
+                // Dives imported by older app versions may be missing metadata
+                // that wasn't extracted at the time (GF settings — PRO-62).
+                // Backfill nil fields from this row before skipping.
+                divesBackfilled += try backfillMissingMetadata(
+                    rows: group.map { ($0.row, $0.fingerprint) },
+                    dateFormatter: dateFormatter
+                )
                 divesSkipped += group.count
                 processedRows += group.count
                 for _ in group {
@@ -308,6 +319,10 @@ public final class ShearwaterCloudImportService: Sendable {
 
             if legacyExists && existingFp == nil {
                 // Legacy dedup — these dives exist but don't have source fingerprints yet
+                divesBackfilled += try backfillMissingMetadata(
+                    rows: group.map { ($0.row, $0.fingerprint) },
+                    dateFormatter: dateFormatter
+                )
                 divesSkipped += group.count
                 processedRows += group.count
                 for _ in group {
@@ -402,6 +417,13 @@ public final class ShearwaterCloudImportService: Sendable {
                         divesMerged += 1
                     }
                 }
+                // Backfill metadata the existing dive may be missing (PRO-62).
+                // Runs after the merge write so newly inserted fingerprints also
+                // resolve, letting the new computer's row fill gaps too.
+                divesBackfilled += try backfillMissingMetadata(
+                    rows: group.map { ($0.row, $0.fingerprint) },
+                    dateFormatter: dateFormatter
+                )
                 processedRows += group.count
                 for _ in group {
                     progress?(processedRows, totalDives)
@@ -652,8 +674,83 @@ public final class ShearwaterCloudImportService: Sendable {
             devicesCreated: devicesCreated,
             sitesCreated: sitesCreated,
             teammatesCreated: teammatesCreated,
-            samplesWithPpo2: totalSamplesWithPpo2
+            samplesWithPpo2: totalSamplesWithPpo2,
+            divesBackfilled: divesBackfilled
         )
+    }
+
+    // MARK: - Metadata Backfill
+
+    /// Backfills metadata fields on already-imported dives that are nil because
+    /// an older app version didn't extract them (GF settings, deco model,
+    /// salinity, surface pressure, end GF99 — PRO-62).
+    ///
+    /// The binary dive log is only parsed when at least one target field is
+    /// missing, so re-imports of fully populated databases stay cheap. Existing
+    /// non-nil values are never overwritten.
+    ///
+    /// - Returns: Number of dives updated.
+    private func backfillMissingMetadata(
+        rows: [(row: Row, fingerprint: Data)],
+        dateFormatter: DateFormatter
+    ) throws -> Int {
+        var updatedCount = 0
+        try database.dbQueue.write { db in
+            var updatedDiveIds = Set<String>()
+            for entry in rows {
+                // Resolve the dive via source fingerprint, falling back to the
+                // legacy dives.fingerprint column.
+                let diveId: String?
+                if let fpRecord = try DiveSourceFingerprint
+                    .filter(Column("fingerprint") == entry.fingerprint)
+                    .fetchOne(db) {
+                    diveId = fpRecord.diveId
+                } else {
+                    diveId = try Dive
+                        .filter(Column("fingerprint") == entry.fingerprint)
+                        .fetchOne(db)?.id
+                }
+                // Note: a dive already updated by an earlier row in the group is
+                // still re-checked — a second computer's row may fill fields the
+                // first one couldn't (matches "first non-nil across rows" merge
+                // semantics).
+                guard let diveId,
+                      var dive = try Dive.fetchOne(db, key: diveId) else { continue }
+
+                // Only parse the binary log when something is actually missing.
+                let needsBackfill = dive.gfLow == nil || dive.gfHigh == nil
+                    || dive.decoModel == nil || dive.salinity == nil
+                    || dive.surfacePressureBar == nil || dive.endGf99 == nil
+                guard needsBackfill else { continue }
+
+                let calcVals: CalculatedValues? = decodeJSON(
+                    entry.row["calculated_values_from_samples"] as DatabaseValue
+                )
+                let meta: DiveMetadata? = decodeJSON(entry.row["data_bytes_2"] as DatabaseValue)
+                let parsed = parseRow(
+                    entry.row, dateFormatter: dateFormatter,
+                    calcValues: calcVals, metadata: meta
+                )
+
+                var changed = false
+                if dive.gfLow == nil, let v = parsed.gfLow { dive.gfLow = v; changed = true }
+                if dive.gfHigh == nil, let v = parsed.gfHigh { dive.gfHigh = v; changed = true }
+                if dive.decoModel == nil, let v = parsed.decoModel { dive.decoModel = v; changed = true }
+                if dive.salinity == nil, let v = parsed.salinity { dive.salinity = v; changed = true }
+                if dive.surfacePressureBar == nil, let v = parsed.surfacePressureBar {
+                    dive.surfacePressureBar = v
+                    changed = true
+                }
+                if dive.endGf99 == nil, let v = parsed.endGf99 { dive.endGf99 = v; changed = true }
+
+                if changed {
+                    try dive.update(db)
+                    updatedDiveIds.insert(diveId)
+                }
+            }
+            updatedCount = updatedDiveIds.count
+        }
+        return updatedCount
     }
 
     // MARK: - Row Parsing
