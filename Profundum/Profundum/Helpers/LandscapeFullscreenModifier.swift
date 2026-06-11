@@ -22,7 +22,10 @@ struct LandscapeFullscreenModifier: ViewModifier {
             .gesture(
                 DragGesture(minimumDistance: 30)
                     .onEnded { value in
-                        if value.translation.height > 80 {
+                        // Dominant-axis check: a diagonal chart scrub can exceed
+                        // 80pt vertically; only dismiss on a clearly downward swipe.
+                        let translation = value.translation
+                        if translation.height > 80, translation.height > abs(translation.width) {
                             onSwipeDismiss?()
                             dismiss()
                         }
@@ -39,7 +42,11 @@ struct LandscapeFullscreenModifier: ViewModifier {
     }
 
     static func requestOrientation(_ orientations: UIInterfaceOrientationMask) {
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
+        // Prefer the foreground-active scene: `connectedScenes.first` can be a
+        // background or wrong scene under iPad multitasking / Stage Manager.
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let windowScene = scenes.first(where: { $0.activationState == .foregroundActive })
+            ?? scenes.first else { return }
         windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: orientations))
         windowScene.keyWindow?.rootViewController?
             .setNeedsUpdateOfSupportedInterfaceOrientations()
