@@ -451,6 +451,55 @@ final class ShearwaterCloudImportTests: XCTestCase {
         XCTAssertEqual(dives.count, 2)
     }
 
+    func testOwnedComputersMergeAcrossInterleavedBuddyRow() throws {
+        // mine A (t=0), buddy B (t=30), mine C (t=60): A and C must still
+        // merge into one dive; B stays separate.
+        let startTime: Int64 = 1718444400
+        let buddyDevice = Device(
+            model: "Symbios", serialNumber: "SERIAL_B", firmwareVersion: "1", ownership: .other
+        )
+        try diveService.saveDevice(buddyDevice)
+
+        let path = try createShearwaterDB(dives: [
+            ShearwaterTestDive(
+                diveId: 100, diveDate: "2024-06-15 10:00:00", depthFt: 100,
+                durationSec: 3600, serial: "SERIAL_A",
+                dataBytes2: """
+                    {"DIVE_START_TIME": \(startTime)}
+                """
+            ),
+            ShearwaterTestDive(
+                diveId: 200, diveDate: "2024-06-15 10:00:30", depthFt: 98,
+                durationSec: 3580, serial: "SERIAL_B",
+                dataBytes2: """
+                    {"DIVE_START_TIME": \(startTime + 30)}
+                """
+            ),
+            ShearwaterTestDive(
+                diveId: 300, diveDate: "2024-06-15 10:01:00", depthFt: 99,
+                durationSec: 3590, serial: "SERIAL_C",
+                dataBytes2: """
+                    {"DIVE_START_TIME": \(startTime + 60)}
+                """
+            ),
+        ])
+
+        let result = try importService.importFromFile(at: path)
+
+        // A+C merge into one dive, B imports separately
+        XCTAssertEqual(result.divesImported, 2)
+        XCTAssertEqual(result.divesMerged, 1)
+
+        let dives = try diveService.listDives()
+        XCTAssertEqual(dives.count, 2)
+
+        // The merged dive has fingerprints from both owned serials
+        let merged = try dives.first { dive in
+            try diveService.getSourceFingerprints(diveId: dive.id).count == 2
+        }
+        XCTAssertNotNil(merged, "Owned computers A and C should merge despite buddy row between them")
+    }
+
     func testMergedImportCreatesPerDeviceSettingsRows() throws {
         let startTime: Int64 = 1718444400
         let path = try createShearwaterDB(dives: [

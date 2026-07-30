@@ -253,16 +253,20 @@ public final class ShearwaterCloudImportService: Sendable {
         var currentGroup: [ImportRow] = []
 
         for ir in sorted {
+            // Buddy-owned rows never merge: emit as singleton groups without
+            // disturbing the current group, so two owned computers still merge
+            // even when a buddy row interleaves chronologically between them.
+            let irOwn = deviceOwnershipById[ir.deviceId] ?? .mine
+            if irOwn == .other {
+                groups.append([ir])
+                continue
+            }
             if let last = currentGroup.last {
                 let timeDiff = abs(ir.startTimeUnix - last.startTimeUnix)
                 let differentSerial = ir.serial != last.serial
                 if differentSerial && timeDiff <= 120 {
-                    let lastOwn = deviceOwnershipById[last.deviceId] ?? .mine
-                    let irOwn = deviceOwnershipById[ir.deviceId] ?? .mine
-                    if lastOwn == .mine && irOwn == .mine {
-                        currentGroup.append(ir)
-                        continue
-                    }
+                    currentGroup.append(ir)
+                    continue
                 }
             }
             if !currentGroup.isEmpty {

@@ -117,6 +117,25 @@ public final class DiveService: Sendable {
                 sql: "UPDATE dive_source_fingerprints SET device_id = ? WHERE device_id = ?",
                 arguments: [winnerId, loserId]
             )
+            // Reassign per-device settings. If a dive already has a settings row
+            // for the winner (both IDs are the same physical computer), drop the
+            // loser's row instead of violating the (dive_id, device_id) PK.
+            try db.execute(
+                sql: """
+                    DELETE FROM dive_device_settings
+                    WHERE device_id = ?
+                      AND EXISTS (
+                          SELECT 1 FROM dive_device_settings w
+                          WHERE w.dive_id = dive_device_settings.dive_id
+                            AND w.device_id = ?
+                      )
+                """,
+                arguments: [loserId, winnerId]
+            )
+            try db.execute(
+                sql: "UPDATE dive_device_settings SET device_id = ? WHERE device_id = ?",
+                arguments: [winnerId, loserId]
+            )
 
             // Merge metadata onto winner.
             // Freshness-sensitive fields (bleUuid, firmwareVersion, lastSyncUnix):

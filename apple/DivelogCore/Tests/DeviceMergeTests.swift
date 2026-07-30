@@ -137,6 +137,68 @@ final class DeviceMergeTests: XCTestCase {
         XCTAssertEqual(winner?.firmwareVersion, "1.2.3")
     }
 
+    func testMergeDevicesReassignsDeviceSettings() throws {
+        let winner = Device(model: "Petrel 3", serialNumber: "A31F4CE2",
+                            firmwareVersion: "", manufacturer: "Shearwater")
+        let loser = Device(model: "Petrel 3", serialNumber: "A31F4CE2",
+                           firmwareVersion: "1.2.3", bleUuid: "BLE-UUID")
+        try diveService.saveDevice(winner)
+        try diveService.saveDevice(loser)
+
+        let dive = Dive(deviceId: loser.id, startTimeUnix: 1000, endTimeUnix: 2000,
+                        maxDepthM: 30, avgDepthM: 20, bottomTimeSec: 1000,
+                        isCcr: false, decoRequired: false)
+        try diveService.saveDive(dive)
+        try database.dbQueue.write { db in
+            try DiveDeviceSettings(
+                diveId: dive.id, deviceId: loser.id,
+                gfLow: 30, gfHigh: 70, decoModel: "buhlmann", isPrimary: true
+            ).insert(db)
+        }
+
+        try diveService.mergeDevices(winnerId: winner.id, loserId: loser.id)
+
+        // Settings row should follow the samples/fingerprints to the winner
+        let settings = try diveService.getDeviceSettings(diveId: dive.id)
+        XCTAssertEqual(settings.count, 1)
+        XCTAssertEqual(settings[0].deviceId, winner.id)
+        XCTAssertEqual(settings[0].gfLow, 30)
+    }
+
+    func testMergeDevicesDropsDuplicateSettingsRow() throws {
+        let winner = Device(model: "Petrel 3", serialNumber: "A31F4CE2",
+                            firmwareVersion: "", manufacturer: "Shearwater")
+        let loser = Device(model: "Petrel 3", serialNumber: "A31F4CE2",
+                           firmwareVersion: "1.2.3", bleUuid: "BLE-UUID")
+        try diveService.saveDevice(winner)
+        try diveService.saveDevice(loser)
+
+        let dive = Dive(deviceId: winner.id, startTimeUnix: 1000, endTimeUnix: 2000,
+                        maxDepthM: 30, avgDepthM: 20, bottomTimeSec: 1000,
+                        isCcr: false, decoRequired: false)
+        try diveService.saveDive(dive)
+        // Same dive has settings rows under both IDs (same physical computer
+        // imported via Cloud and BLE before the merge)
+        try database.dbQueue.write { db in
+            try DiveDeviceSettings(
+                diveId: dive.id, deviceId: winner.id,
+                gfLow: 30, gfHigh: 70, isPrimary: true
+            ).insert(db)
+            try DiveDeviceSettings(
+                diveId: dive.id, deviceId: loser.id,
+                gfLow: 30, gfHigh: 70, isPrimary: false
+            ).insert(db)
+        }
+
+        // Must not throw a PK violation; loser's duplicate row is dropped
+        try diveService.mergeDevices(winnerId: winner.id, loserId: loser.id)
+
+        let settings = try diveService.getDeviceSettings(diveId: dive.id)
+        XCTAssertEqual(settings.count, 1)
+        XCTAssertEqual(settings[0].deviceId, winner.id)
+        XCTAssertTrue(settings[0].isPrimary)
+    }
+
     func testMergeDevicesAdoptsSpecificModel() throws {
         let cloudDevice = Device(model: "Shearwater", serialNumber: "A31F4CE2",
                                  firmwareVersion: "", manufacturer: "Shearwater")
