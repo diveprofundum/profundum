@@ -49,13 +49,6 @@ public final class ImportProgressTracker: @unchecked Sendable {
     }
 }
 
-/// Key for deduplicating gas mixes by composition and usage.
-struct GasMixKey: Hashable {
-    let o2: Int   // o2Fraction * 1000 as integer for reliable hashing
-    let he: Int   // heFraction * 1000 as integer for reliable hashing
-    let usage: String?
-}
-
 /// Service for importing dives from a dive computer.
 ///
 /// All libdivecomputer operations run on a dedicated serial queue,
@@ -148,25 +141,7 @@ public final class DiveComputerImportService: Sendable {
         }
 
         // Prepare domain objects outside the write lock (pure mapping)
-        let (dive, samples, gasMixes) = DiveDataMapper.toDive(parsed, deviceId: deviceId)
-
-        // Deduplicate gas mixes by (o2, he, usage)
-        var seenMixes = Set<GasMixKey>()
-        var uniqueMixes: [GasMix] = []
-        for mix in gasMixes {
-            let key = GasMixKey(
-                o2: Int(mix.o2Fraction * 1000),
-                he: Int(mix.heFraction * 1000),
-                usage: mix.usage
-            )
-            if seenMixes.insert(key).inserted {
-                uniqueMixes.append(mix)
-            }
-        }
-        // Re-index sequentially
-        for i in uniqueMixes.indices {
-            uniqueMixes[i].mixIndex = i
-        }
+        let (dive, _, _) = DiveDataMapper.toDive(parsed, deviceId: deviceId)
 
         // Single write transaction handles merge, skip, and new-dive paths.
         // Fingerprint dedup is re-checked here (TOCTOU guard against the
@@ -238,12 +213,33 @@ public final class DiveComputerImportService: Sendable {
             for activityTag in activityTags {
                 try DiveTag(diveId: dive.id, tag: activityTag.rawValue).insert(db)
             }
-            for sample in samples {
-                try sample.insert(db)
-            }
-            for mix in uniqueMixes {
-                try mix.insert(db)
-            }
+
+            let usedMixes = GasMixMergeHelper.filterUsedGasMixes(parsed.gasMixes, samples: parsed.samples)
+            let indexRemap = try GasMixMergeHelper.mergeGasMixes(
+                existingMixes: [],
+                incomingMixes: usedMixes,
+                diveId: dive.id,
+                deviceId: deviceId,
+                db: db
+            )
+            try GasMixMergeHelper.insertSamples(
+                samples: parsed.samples,
+                diveId: dive.id,
+                deviceId: deviceId,
+                indexRemap: indexRemap,
+                db: db
+            )
+            try DiveDeviceSettings.upsert(
+                diveId: dive.id,
+                deviceId: deviceId,
+                gfLow: parsed.gfLow,
+                gfHigh: parsed.gfHigh,
+                decoModel: parsed.decoModel,
+                salinity: parsed.salinity,
+                surfacePressureBar: parsed.surfacePressureBar,
+                isPrimary: true,
+                db: db
+            )
 
             // Record BLE fingerprint in dive_source_fingerprints for future dedup
             if let fp = dive.fingerprint {
@@ -288,67 +284,39 @@ public final class DiveComputerImportService: Sendable {
     private static func mergeSamplesInTransaction(
         _ parsed: ParsedDive, deviceId: String, intoDiveId existingDiveId: String, db: Database
     ) throws {
-        // Build index remap from incoming gas mix indices → persisted indices.
-        // This must happen BEFORE inserting samples so gasmixIndex values are correct.
         let existingMixes = try GasMix
             .filter(Column("dive_id") == existingDiveId)
             .fetchAll(db)
-        // Use uniquingKeysWith to handle potential duplicate compositions in existing data
-        // (no DB uniqueness constraint). Keep the lowest mixIndex for stability.
-        var mixByKey: [GasMixKey: Int] = Dictionary(
-            existingMixes.map {
-                (GasMixKey(o2: Int($0.o2Fraction * 1000), he: Int($0.heFraction * 1000), usage: $0.usage),
-                 $0.mixIndex)
-            },
-            uniquingKeysWith: { first, _ in first }
+        let usedMixes = GasMixMergeHelper.filterUsedGasMixes(parsed.gasMixes, samples: parsed.samples)
+        let indexRemap = try GasMixMergeHelper.mergeGasMixes(
+            existingMixes: existingMixes,
+            incomingMixes: usedMixes,
+            diveId: existingDiveId,
+            deviceId: deviceId,
+            db: db
         )
-        var nextMixIndex = (existingMixes.map(\.mixIndex).max() ?? -1) + 1
+        try GasMixMergeHelper.insertSamples(
+            samples: parsed.samples,
+            diveId: existingDiveId,
+            deviceId: deviceId,
+            indexRemap: indexRemap,
+            db: db
+        )
 
-        var indexRemap: [Int: Int] = [:]
-        for m in parsed.gasMixes {
-            let key = GasMixKey(o2: Int(m.o2Fraction * 1000), he: Int(m.heFraction * 1000), usage: m.usage)
-            if let existingIdx = mixByKey[key] {
-                indexRemap[m.index] = existingIdx
-            } else {
-                indexRemap[m.index] = nextMixIndex
-                mixByKey[key] = nextMixIndex
-                try GasMix(
-                    diveId: existingDiveId,
-                    mixIndex: nextMixIndex,
-                    o2Fraction: m.o2Fraction,
-                    heFraction: m.heFraction,
-                    usage: m.usage,
-                    deviceId: deviceId
-                ).insert(db)
-                nextMixIndex += 1
-            }
-        }
-
-        // Insert samples with remapped gas mix indices
-        for s in parsed.samples {
-            try DiveSample(
-                diveId: existingDiveId,
-                deviceId: deviceId,
-                tSec: s.tSec,
-                depthM: s.depthM,
-                tempC: s.tempC,
-                setpointPpo2: s.setpointPpo2,
-                ceilingM: s.ceilingM,
-                gf99: s.gf99,
-                ppo2_1: s.ppo2_1,
-                ppo2_2: s.ppo2_2,
-                ppo2_3: s.ppo2_3,
-                cns: s.cns,
-                tankPressure1Bar: s.tankPressure1Bar,
-                tankPressure2Bar: s.tankPressure2Bar,
-                ttsSec: s.ttsSec,
-                ndlSec: s.ndlSec,
-                decoStopDepthM: s.decoStopDepthM,
-                rbtSec: s.rbtSec,
-                gasmixIndex: s.gasmixIndex.flatMap { indexRemap[$0] },
-                atPlusFiveTtsMin: s.atPlusFiveTtsMin
-            ).insert(db)
-        }
+        let isPrimary = try DiveDeviceSettings
+            .filter(Column("dive_id") == existingDiveId)
+            .fetchCount(db) == 0
+        try DiveDeviceSettings.upsert(
+            diveId: existingDiveId,
+            deviceId: deviceId,
+            gfLow: parsed.gfLow,
+            gfHigh: parsed.gfHigh,
+            decoModel: parsed.decoModel,
+            salinity: parsed.salinity,
+            surfacePressureBar: parsed.surfacePressureBar,
+            isPrimary: isPrimary,
+            db: db
+        )
 
         // Link fingerprint
         if let fp = parsed.fingerprint {
@@ -556,6 +524,17 @@ public final class DiveComputerImportService: Sendable {
                 arguments: [newDiveId, diveId, deviceId]
             )
 
+            // 5b. Move this device's settings row to the new dive.
+            // It becomes the only device on the new dive, so mark it primary.
+            try db.execute(
+                sql: """
+                    UPDATE dive_device_settings
+                    SET dive_id = ?, is_primary = 1
+                    WHERE dive_id = ? AND device_id = ?
+                """,
+                arguments: [newDiveId, diveId, deviceId]
+            )
+
             // 6. Copy tags
             let tags = try DiveTag
                 .filter(Column("dive_id") == diveId)
@@ -606,6 +585,19 @@ public final class DiveComputerImportService: Sendable {
                     diveId
                 ]
             )
+
+            // If the split device was primary, promote the new primary's
+            // settings row so the original dive keeps a primary device.
+            if originalDive.deviceId == deviceId {
+                try db.execute(
+                    sql: """
+                        UPDATE dive_device_settings
+                        SET is_primary = 1
+                        WHERE dive_id = ? AND device_id = ?
+                    """,
+                    arguments: [diveId, newPrimaryDeviceId]
+                )
+            }
 
             return SplitResult(newDiveId: newDiveId, originalDiveId: diveId)
         }

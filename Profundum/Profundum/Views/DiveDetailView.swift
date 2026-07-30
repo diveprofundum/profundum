@@ -8,6 +8,7 @@ struct DiveDetailView: View {
     @State private var samples: [DiveSample] = []
     @State private var tags: [String] = []
     @State private var gasMixes: [GasMix] = []
+    @State private var deviceSettings: [DiveDeviceSettings] = []
     @State private var stats: DiveStats?
     @State private var showEditSheet = false
     @State private var loadedTeammateIds: [String] = []
@@ -87,6 +88,43 @@ struct DiveDetailView: View {
         return filtered.isEmpty ? samples : filtered
     }
 
+    /// Gas mixes scoped to the selected device.
+    private var scopedGasMixes: [GasMix] {
+        guard let deviceId = selectedDeviceId else { return gasMixes }
+        let filtered = gasMixes.filter { $0.deviceId == deviceId }
+        return filtered.isEmpty ? gasMixes : filtered
+    }
+
+    /// Per-device settings for the selected computer.
+    private var activeDeviceSettings: DiveDeviceSettings? {
+        if let deviceId = selectedDeviceId {
+            return deviceSettings.first(where: { $0.deviceId == deviceId })
+        }
+        return deviceSettings.first(where: { $0.isPrimary }) ?? deviceSettings.first
+    }
+
+    /// Footnote when computers disagree on GF or deco model.
+    private var deviceSettingsConflictNote: String? {
+        guard deviceSettings.count > 1 else { return nil }
+        let gfPairs = Set(deviceSettings.compactMap { setting -> String? in
+            guard let low = setting.gfLow, let high = setting.gfHigh else { return nil }
+            return "\(low)/\(high)"
+        })
+        let models = Set(deviceSettings.compactMap(\.decoModel))
+        guard gfPairs.count > 1 || models.count > 1 else { return nil }
+
+        let deviceName: String
+        if let deviceId = selectedDeviceId, let name = devicesWithSamples[deviceId] {
+            deviceName = name
+        } else if let primary = deviceSettings.first(where: { $0.isPrimary }),
+                  let name = devicesWithSamples[primary.deviceId] {
+            deviceName = name
+        } else {
+            deviceName = "primary computer"
+        }
+        return "Varies by computer — showing \(deviceName)"
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -107,8 +145,11 @@ struct DiveDetailView: View {
 
                 statsSection
 
-                // Deco / GF info
-                if dive.decoModel != nil || dive.gfLow != nil || dive.endGf99 != nil {
+                // Deco / GF info (device settings with dive-level fallback for
+                // dives imported before per-device settings existed)
+                if (activeDeviceSettings?.decoModel ?? dive.decoModel) != nil
+                    || (activeDeviceSettings?.gfLow ?? dive.gfLow) != nil
+                    || dive.endGf99 != nil {
                     Divider()
                     decoSection
                 }
@@ -138,7 +179,7 @@ struct DiveDetailView: View {
                 }
 
                 // Gas mixes
-                if !gasMixes.isEmpty {
+                if !scopedGasMixes.isEmpty {
                     Divider()
                     gasMixSection
                 }
@@ -526,7 +567,7 @@ struct DiveDetailView: View {
                 showAtPlusFive: showAtPlusFive,
                 showDeltaFive: showDeltaFive,
                 showSurfGf: showSurfGf,
-                gasMixes: gasMixes,
+                gasMixes: scopedGasMixes,
                 showPpo2: showPpo2,
                 showTankPressure: showTankPressure,
                 pressureUnit: appState.pressureUnit,
@@ -548,7 +589,7 @@ struct DiveDetailView: View {
                 samples: chartSamples,
                 depthUnit: appState.depthUnit,
                 temperatureUnit: appState.temperatureUnit,
-                gasMixes: gasMixes,
+                gasMixes: scopedGasMixes,
                 pressureUnit: appState.pressureUnit,
                 bottomEndT: stats?.bottomEndT,
                 decoStartT: stats?.decoStartT,
@@ -562,7 +603,7 @@ struct DiveDetailView: View {
                 samples: chartSamples,
                 depthUnit: appState.depthUnit,
                 temperatureUnit: appState.temperatureUnit,
-                gasMixes: gasMixes,
+                gasMixes: scopedGasMixes,
                 pressureUnit: appState.pressureUnit,
                 bottomEndT: stats?.bottomEndT,
                 decoStartT: stats?.decoStartT,
@@ -573,7 +614,13 @@ struct DiveDetailView: View {
         }
         #endif
         .sheet(isPresented: $showReplaySheet) {
-            ReplayProfileSheet(dive: dive, gasMixes: gasMixes, stats: stats, samples: samples)
+            ReplayProfileSheet(
+                dive: dive,
+                gasMixes: scopedGasMixes,
+                stats: stats,
+                samples: chartSamples,
+                deviceSettings: activeDeviceSettings
+            )
         }
     }
 
@@ -595,16 +642,23 @@ struct DiveDetailView: View {
                 GridItem(.flexible()),
                 GridItem(.flexible())
             ], spacing: 12) {
-                if let model = dive.decoModel {
+                if let model = activeDeviceSettings?.decoModel ?? dive.decoModel {
                     StatCard(title: "Deco Model", value: model.capitalized)
                 }
-                if let gfLow = dive.gfLow, let gfHigh = dive.gfHigh {
+                if let gfLow = activeDeviceSettings?.gfLow ?? dive.gfLow,
+                   let gfHigh = activeDeviceSettings?.gfHigh ?? dive.gfHigh {
                     StatCard(title: "GF Setting", value: "\(gfLow)/\(gfHigh)")
                 }
                 if let endGf = dive.endGf99 {
                     StatCard(title: "End GF99", value: String(format: "%.0f%%", endGf),
                              color: endGf > 85 ? .orange : nil)
                 }
+            }
+
+            if let note = deviceSettingsConflictNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
     }
@@ -779,7 +833,7 @@ struct DiveDetailView: View {
             Text("Gas Mixes")
                 .font(.headline)
 
-            ForEach(gasMixes) { mix in
+            ForEach(scopedGasMixes) { mix in
                 HStack {
                     Text(gasMixLabel(mix))
                         .font(.body)
@@ -949,11 +1003,18 @@ struct DiveDetailView: View {
             samples = detail.samples
             tags = detail.tags
             gasMixes = detail.gasMixes
+            deviceSettings = detail.deviceSettings
             loadedTeammateIds = detail.teammateIds
             loadedEquipmentIds = detail.equipmentIds
             sourceDeviceMap = detail.sourceDeviceMap
             if !hasPickedDevice {
-                selectedDeviceId = dive.deviceId
+                let multiDevice = Set(detail.samples.compactMap(\.deviceId)).count > 1
+                if multiDevice {
+                    selectedDeviceId = detail.deviceSettings.first(where: { $0.isPrimary })?.deviceId
+                        ?? dive.deviceId
+                } else {
+                    selectedDeviceId = dive.deviceId
+                }
                 hasPickedDevice = true
             }
 
