@@ -119,6 +119,92 @@ final class GasMixMergeHelperTests: XCTestCase {
         XCTAssertFalse(deviceIds.isEmpty)
     }
 
+    // MARK: - Conflict Detection
+
+    func testHasConflictingDeviceSettingsDetectsGfDisagreement() throws {
+        let deviceA = Device(model: "Petrel", serialNumber: "A-1", firmwareVersion: "93")
+        let deviceB = Device(model: "Perdix", serialNumber: "B-2", firmwareVersion: "93")
+        try diveService.saveDevice(deviceA)
+        try diveService.saveDevice(deviceB)
+        let dive = Dive(
+            deviceId: deviceA.id, startTimeUnix: 1_700_000_000, endTimeUnix: 1_700_003_600,
+            maxDepthM: 30, avgDepthM: 18, bottomTimeSec: 3_000
+        )
+        try diveService.saveDive(dive)
+
+        try database.dbQueue.write { db in
+            try DiveDeviceSettings(diveId: dive.id, deviceId: deviceA.id,
+                                   gfLow: 30, gfHigh: 70, decoModel: "buhlmann",
+                                   isPrimary: true).insert(db)
+            try DiveDeviceSettings(diveId: dive.id, deviceId: deviceB.id,
+                                   gfLow: 50, gfHigh: 80, decoModel: "buhlmann").insert(db)
+        }
+
+        XCTAssertTrue(try diveService.hasConflictingDeviceSettings(diveId: dive.id))
+    }
+
+    func testHasConflictingDeviceSettingsFalseWhenAgreeing() throws {
+        let deviceA = Device(model: "Petrel", serialNumber: "A-1", firmwareVersion: "93")
+        let deviceB = Device(model: "Perdix", serialNumber: "B-2", firmwareVersion: "93")
+        try diveService.saveDevice(deviceA)
+        try diveService.saveDevice(deviceB)
+        let dive = Dive(
+            deviceId: deviceA.id, startTimeUnix: 1_700_000_000, endTimeUnix: 1_700_003_600,
+            maxDepthM: 30, avgDepthM: 18, bottomTimeSec: 3_000
+        )
+        try diveService.saveDive(dive)
+
+        try database.dbQueue.write { db in
+            try DiveDeviceSettings(diveId: dive.id, deviceId: deviceA.id,
+                                   gfLow: 30, gfHigh: 70, decoModel: "buhlmann",
+                                   isPrimary: true).insert(db)
+            try DiveDeviceSettings(diveId: dive.id, deviceId: deviceB.id,
+                                   gfLow: 30, gfHigh: 70, decoModel: "buhlmann").insert(db)
+        }
+
+        XCTAssertFalse(try diveService.hasConflictingDeviceSettings(diveId: dive.id))
+    }
+
+    func testHasConflictingDeviceSettingsFalseForSingleDevice() throws {
+        let device = Device(model: "Petrel", serialNumber: "A-1", firmwareVersion: "93")
+        try diveService.saveDevice(device)
+        let dive = Dive(
+            deviceId: device.id, startTimeUnix: 1_700_000_000, endTimeUnix: 1_700_003_600,
+            maxDepthM: 30, avgDepthM: 18, bottomTimeSec: 3_000
+        )
+        try diveService.saveDive(dive)
+
+        try database.dbQueue.write { db in
+            try DiveDeviceSettings(diveId: dive.id, deviceId: device.id,
+                                   gfLow: 30, gfHigh: 70, isPrimary: true).insert(db)
+        }
+
+        XCTAssertFalse(try diveService.hasConflictingDeviceSettings(diveId: dive.id))
+    }
+
+    func testHasConflictingDeviceSettingsDetectsDecoModelDisagreement() throws {
+        let deviceA = Device(model: "Petrel", serialNumber: "A-1", firmwareVersion: "93")
+        let deviceB = Device(model: "Descent", serialNumber: "B-2", firmwareVersion: "1")
+        try diveService.saveDevice(deviceA)
+        try diveService.saveDevice(deviceB)
+        let dive = Dive(
+            deviceId: deviceA.id, startTimeUnix: 1_700_000_000, endTimeUnix: 1_700_003_600,
+            maxDepthM: 30, avgDepthM: 18, bottomTimeSec: 3_000
+        )
+        try diveService.saveDive(dive)
+
+        // Same GF, different deco model
+        try database.dbQueue.write { db in
+            try DiveDeviceSettings(diveId: dive.id, deviceId: deviceA.id,
+                                   gfLow: 30, gfHigh: 70, decoModel: "buhlmann",
+                                   isPrimary: true).insert(db)
+            try DiveDeviceSettings(diveId: dive.id, deviceId: deviceB.id,
+                                   gfLow: 30, gfHigh: 70, decoModel: "thalmann").insert(db)
+        }
+
+        XCTAssertTrue(try diveService.hasConflictingDeviceSettings(diveId: dive.id))
+    }
+
     func testMergeGasMixesSkipsUnusedProgrammedSlots() throws {
         let device = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93")
         try diveService.saveDevice(device)

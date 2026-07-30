@@ -550,6 +550,68 @@ final class ShearwaterCloudImportTests: XCTestCase {
         XCTAssertEqual(try diveService.getDeviceSettings(diveId: diveId).count, 2)
     }
 
+    func testReimportRecreatesSettingsRowDeletedByOlderVersion() throws {
+        // Dives imported before migration 018 have no settings row. A full
+        // re-import (all fingerprints known → skip path) must create it via
+        // backfillMissingMetadata without touching populated dive fields.
+        let path = try createShearwaterDB(dives: [
+            ShearwaterTestDive(diveId: 1, diveDate: "2024-06-15 10:30:00", depthFt: 100,
+                               durationSec: 3600, serial: "SN001"),
+        ])
+        _ = try importService.importFromFile(at: path)
+        let diveId = try diveService.listDives()[0].id
+
+        // Simulate pre-migration state: settings row absent
+        try database.dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM dive_device_settings WHERE dive_id = ?",
+                           arguments: [diveId])
+        }
+        XCTAssertTrue(try diveService.getDeviceSettings(diveId: diveId).isEmpty)
+
+        let reimport = try importService.importFromFile(at: path)
+        XCTAssertEqual(reimport.divesSkipped, 1)
+
+        let settings = try diveService.getDeviceSettings(diveId: diveId)
+        XCTAssertEqual(settings.count, 1)
+        XCTAssertTrue(settings[0].isPrimary)
+    }
+
+    func testReimportBackfillsDiveWithLegacyFingerprintOnly() throws {
+        // Dives from very old app versions have only dives.fingerprint, no
+        // dive_source_fingerprints row. Re-import must resolve them through
+        // the legacy column and still backfill settings.
+        let device = Device(model: "Petrel", serialNumber: "SN001", firmwareVersion: "93")
+        try diveService.saveDevice(device)
+        let legacyDive = Dive(
+            deviceId: device.id, startTimeUnix: 1718444400, endTimeUnix: 1718448000,
+            maxDepthM: 30.48, avgDepthM: 18.0, bottomTimeSec: 3600,
+            isCcr: false, decoRequired: false,
+            fingerprint: "1".data(using: .utf8)
+        )
+        try diveService.saveDive(legacyDive)
+
+        let path = try createShearwaterDB(dives: [
+            ShearwaterTestDive(diveId: 1, diveDate: "2024-06-15 10:30:00", depthFt: 100,
+                               durationSec: 3600, serial: "SN001", endGf99: 42.0),
+        ])
+        let result = try importService.importFromFile(at: path)
+
+        // Legacy dedup: skipped, not re-imported
+        XCTAssertEqual(result.divesImported, 0)
+        XCTAssertEqual(result.divesSkipped, 1)
+        XCTAssertEqual(result.divesBackfilled, 1)
+
+        // Dive-level field backfilled through the legacy fingerprint path
+        let dive = try diveService.getDive(id: legacyDive.id)
+        XCTAssertEqual(dive?.endGf99, 42.0)
+
+        // Settings row created for the legacy dive's device
+        let settings = try diveService.getDeviceSettings(diveId: legacyDive.id)
+        XCTAssertEqual(settings.count, 1)
+        XCTAssertEqual(settings[0].deviceId, device.id)
+        XCTAssertTrue(settings[0].isPrimary)
+    }
+
     // MARK: - New Tests: Metadata Import
 
     func testImportNotes() throws {
