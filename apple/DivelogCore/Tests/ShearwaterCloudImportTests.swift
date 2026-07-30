@@ -419,6 +419,88 @@ final class ShearwaterCloudImportTests: XCTestCase {
         XCTAssertEqual(dives.count, 2)
     }
 
+    func testImportDoesNotMergeWhenDeviceOwnershipIsOther() throws {
+        let startTime: Int64 = 1718444400
+        let buddyDevice = Device(
+            model: "Symbios", serialNumber: "SERIAL_B", firmwareVersion: "1", ownership: .other
+        )
+        try diveService.saveDevice(buddyDevice)
+
+        let path = try createShearwaterDB(dives: [
+            ShearwaterTestDive(
+                diveId: 100, diveDate: "2024-06-15 10:00:00", depthFt: 100,
+                durationSec: 3600, serial: "SERIAL_A",
+                dataBytes2: """
+                    {"DIVE_START_TIME": \(startTime)}
+                """
+            ),
+            ShearwaterTestDive(
+                diveId: 200, diveDate: "2024-06-15 10:00:30", depthFt: 98,
+                durationSec: 3580, serial: "SERIAL_B",
+                dataBytes2: """
+                    {"DIVE_START_TIME": \(startTime + 30)}
+                """
+            ),
+        ])
+
+        let result = try importService.importFromFile(at: path)
+        XCTAssertEqual(result.divesImported, 2)
+        XCTAssertEqual(result.divesMerged, 0)
+
+        let dives = try diveService.listDives()
+        XCTAssertEqual(dives.count, 2)
+    }
+
+    func testMergedImportCreatesPerDeviceSettingsRows() throws {
+        let startTime: Int64 = 1718444400
+        let path = try createShearwaterDB(dives: [
+            ShearwaterTestDive(
+                diveId: 100, diveDate: "2024-06-15 10:00:00", depthFt: 100,
+                durationSec: 3600, serial: "SERIAL_A",
+                dataBytes2: """
+                    {"DIVE_START_TIME": \(startTime)}
+                """
+            ),
+            ShearwaterTestDive(
+                diveId: 200, diveDate: "2024-06-15 10:00:30", depthFt: 98,
+                durationSec: 3580, serial: "SERIAL_B",
+                dataBytes2: """
+                    {"DIVE_START_TIME": \(startTime + 30)}
+                """
+            ),
+        ])
+
+        _ = try importService.importFromFile(at: path)
+
+        let dive = try diveService.listDives()[0]
+        let settings = try diveService.getDeviceSettings(diveId: dive.id)
+        XCTAssertEqual(settings.count, 2)
+        XCTAssertEqual(settings.filter(\.isPrimary).count, 1)
+    }
+
+    func testReimportBackfillsPerDeviceSettingsRows() throws {
+        let startTime: Int64 = 1718444400
+        let diveA = ShearwaterTestDive(
+            diveId: 100, diveDate: "2024-06-15 10:00:00", depthFt: 100,
+            durationSec: 3600, serial: "SERIAL_A",
+            dataBytes2: "{\"DIVE_START_TIME\": \(startTime)}"
+        )
+        let diveB = ShearwaterTestDive(
+            diveId: 200, diveDate: "2024-06-15 10:00:30", depthFt: 98,
+            durationSec: 3580, serial: "SERIAL_B",
+            dataBytes2: "{\"DIVE_START_TIME\": \(startTime + 30)}"
+        )
+
+        let pathA = try createShearwaterDB(dives: [diveA])
+        _ = try importService.importFromFile(at: pathA)
+        let diveId = try diveService.listDives()[0].id
+        XCTAssertEqual(try diveService.getDeviceSettings(diveId: diveId).count, 1)
+
+        let pathAB = try createShearwaterDB(dives: [diveA, diveB])
+        _ = try importService.importFromFile(at: pathAB)
+        XCTAssertEqual(try diveService.getDeviceSettings(diveId: diveId).count, 2)
+    }
+
     // MARK: - New Tests: Metadata Import
 
     func testImportNotes() throws {

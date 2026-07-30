@@ -408,6 +408,26 @@ public final class DivelogDatabase: Sendable {
             try db.execute(sql: "ALTER TABLE dives ADD COLUMN deco_start_t_override_sec INTEGER")
         }
 
+        // Migration 18: Per-device deco/settings for multi-computer dives
+        migrator.registerMigration("018_dive_device_settings") { db in
+            try db.execute(sql: """
+                CREATE TABLE dive_device_settings (
+                    dive_id TEXT NOT NULL REFERENCES dives(id) ON DELETE CASCADE,
+                    device_id TEXT NOT NULL REFERENCES devices(id),
+                    gf_low INTEGER,
+                    gf_high INTEGER,
+                    deco_model TEXT,
+                    salinity TEXT,
+                    surface_pressure_bar REAL,
+                    is_primary INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (dive_id, device_id)
+                )
+            """)
+            try db.execute(sql: """
+                CREATE INDEX idx_dive_device_settings_dive ON dive_device_settings(dive_id)
+            """)
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

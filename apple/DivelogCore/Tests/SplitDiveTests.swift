@@ -115,6 +115,47 @@ final class SplitDiveTests: XCTestCase {
         XCTAssertEqual(originalDive?.maxDepthM ?? 0, 30.0, accuracy: 0.1)
     }
 
+    func testSplitMovesDeviceSettingsToNewDive() throws {
+        let deviceA = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93")
+        let deviceB = Device(model: "Petrel", serialNumber: "B-5678", firmwareVersion: "93")
+        let diveId = try createMergedDive(deviceA: deviceA, deviceB: deviceB)
+
+        // Merged dive has one settings row per device
+        XCTAssertEqual(try diveService.getDeviceSettings(diveId: diveId).count, 2)
+
+        let result = try importService.splitDive(diveId: diveId, deviceId: deviceB.id)
+
+        // B's settings row moves to the new dive and becomes primary
+        let newSettings = try diveService.getDeviceSettings(diveId: result.newDiveId)
+        XCTAssertEqual(newSettings.count, 1)
+        XCTAssertEqual(newSettings[0].deviceId, deviceB.id)
+        XCTAssertTrue(newSettings[0].isPrimary)
+
+        // Original keeps only A's row
+        let originalSettings = try diveService.getDeviceSettings(diveId: diveId)
+        XCTAssertEqual(originalSettings.count, 1)
+        XCTAssertEqual(originalSettings[0].deviceId, deviceA.id)
+    }
+
+    func testSplitPrimaryDevicePromotesRemainingSettings() throws {
+        let deviceA = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93")
+        let deviceB = Device(model: "Petrel", serialNumber: "B-5678", firmwareVersion: "93")
+        let diveId = try createMergedDive(deviceA: deviceA, deviceB: deviceB)
+
+        // Split out device A (the primary) — B's row on the original gets promoted
+        let result = try importService.splitDive(diveId: diveId, deviceId: deviceA.id)
+
+        let newSettings = try diveService.getDeviceSettings(diveId: result.newDiveId)
+        XCTAssertEqual(newSettings.count, 1)
+        XCTAssertEqual(newSettings[0].deviceId, deviceA.id)
+        XCTAssertTrue(newSettings[0].isPrimary)
+
+        let originalSettings = try diveService.getDeviceSettings(diveId: diveId)
+        XCTAssertEqual(originalSettings.count, 1)
+        XCTAssertEqual(originalSettings[0].deviceId, deviceB.id)
+        XCTAssertTrue(originalSettings[0].isPrimary)
+    }
+
     func testSplitDuplicatesGasMixes() throws {
         let deviceA = Device(model: "Perdix", serialNumber: "A-1234", firmwareVersion: "93")
         let deviceB = Device(model: "Petrel", serialNumber: "B-5678", firmwareVersion: "93")
