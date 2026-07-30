@@ -419,6 +419,199 @@ final class ShearwaterCloudImportTests: XCTestCase {
         XCTAssertEqual(dives.count, 2)
     }
 
+    func testImportDoesNotMergeWhenDeviceOwnershipIsOther() throws {
+        let startTime: Int64 = 1718444400
+        let buddyDevice = Device(
+            model: "Symbios", serialNumber: "SERIAL_B", firmwareVersion: "1", ownership: .other
+        )
+        try diveService.saveDevice(buddyDevice)
+
+        let path = try createShearwaterDB(dives: [
+            ShearwaterTestDive(
+                diveId: 100, diveDate: "2024-06-15 10:00:00", depthFt: 100,
+                durationSec: 3600, serial: "SERIAL_A",
+                dataBytes2: """
+                    {"DIVE_START_TIME": \(startTime)}
+                """
+            ),
+            ShearwaterTestDive(
+                diveId: 200, diveDate: "2024-06-15 10:00:30", depthFt: 98,
+                durationSec: 3580, serial: "SERIAL_B",
+                dataBytes2: """
+                    {"DIVE_START_TIME": \(startTime + 30)}
+                """
+            ),
+        ])
+
+        let result = try importService.importFromFile(at: path)
+        XCTAssertEqual(result.divesImported, 2)
+        XCTAssertEqual(result.divesMerged, 0)
+
+        let dives = try diveService.listDives()
+        XCTAssertEqual(dives.count, 2)
+    }
+
+    func testOwnedComputersMergeAcrossInterleavedBuddyRow() throws {
+        // mine A (t=0), buddy B (t=30), mine C (t=60): A and C must still
+        // merge into one dive; B stays separate.
+        let startTime: Int64 = 1718444400
+        let buddyDevice = Device(
+            model: "Symbios", serialNumber: "SERIAL_B", firmwareVersion: "1", ownership: .other
+        )
+        try diveService.saveDevice(buddyDevice)
+
+        let path = try createShearwaterDB(dives: [
+            ShearwaterTestDive(
+                diveId: 100, diveDate: "2024-06-15 10:00:00", depthFt: 100,
+                durationSec: 3600, serial: "SERIAL_A",
+                dataBytes2: """
+                    {"DIVE_START_TIME": \(startTime)}
+                """
+            ),
+            ShearwaterTestDive(
+                diveId: 200, diveDate: "2024-06-15 10:00:30", depthFt: 98,
+                durationSec: 3580, serial: "SERIAL_B",
+                dataBytes2: """
+                    {"DIVE_START_TIME": \(startTime + 30)}
+                """
+            ),
+            ShearwaterTestDive(
+                diveId: 300, diveDate: "2024-06-15 10:01:00", depthFt: 99,
+                durationSec: 3590, serial: "SERIAL_C",
+                dataBytes2: """
+                    {"DIVE_START_TIME": \(startTime + 60)}
+                """
+            ),
+        ])
+
+        let result = try importService.importFromFile(at: path)
+
+        // A+C merge into one dive, B imports separately
+        XCTAssertEqual(result.divesImported, 2)
+        XCTAssertEqual(result.divesMerged, 1)
+
+        let dives = try diveService.listDives()
+        XCTAssertEqual(dives.count, 2)
+
+        // The merged dive has fingerprints from both owned serials
+        let merged = try dives.first { dive in
+            try diveService.getSourceFingerprints(diveId: dive.id).count == 2
+        }
+        XCTAssertNotNil(merged, "Owned computers A and C should merge despite buddy row between them")
+    }
+
+    func testMergedImportCreatesPerDeviceSettingsRows() throws {
+        let startTime: Int64 = 1718444400
+        let path = try createShearwaterDB(dives: [
+            ShearwaterTestDive(
+                diveId: 100, diveDate: "2024-06-15 10:00:00", depthFt: 100,
+                durationSec: 3600, serial: "SERIAL_A",
+                dataBytes2: """
+                    {"DIVE_START_TIME": \(startTime)}
+                """
+            ),
+            ShearwaterTestDive(
+                diveId: 200, diveDate: "2024-06-15 10:00:30", depthFt: 98,
+                durationSec: 3580, serial: "SERIAL_B",
+                dataBytes2: """
+                    {"DIVE_START_TIME": \(startTime + 30)}
+                """
+            ),
+        ])
+
+        _ = try importService.importFromFile(at: path)
+
+        let dive = try diveService.listDives()[0]
+        let settings = try diveService.getDeviceSettings(diveId: dive.id)
+        XCTAssertEqual(settings.count, 2)
+        XCTAssertEqual(settings.filter(\.isPrimary).count, 1)
+    }
+
+    func testReimportBackfillsPerDeviceSettingsRows() throws {
+        let startTime: Int64 = 1718444400
+        let diveA = ShearwaterTestDive(
+            diveId: 100, diveDate: "2024-06-15 10:00:00", depthFt: 100,
+            durationSec: 3600, serial: "SERIAL_A",
+            dataBytes2: "{\"DIVE_START_TIME\": \(startTime)}"
+        )
+        let diveB = ShearwaterTestDive(
+            diveId: 200, diveDate: "2024-06-15 10:00:30", depthFt: 98,
+            durationSec: 3580, serial: "SERIAL_B",
+            dataBytes2: "{\"DIVE_START_TIME\": \(startTime + 30)}"
+        )
+
+        let pathA = try createShearwaterDB(dives: [diveA])
+        _ = try importService.importFromFile(at: pathA)
+        let diveId = try diveService.listDives()[0].id
+        XCTAssertEqual(try diveService.getDeviceSettings(diveId: diveId).count, 1)
+
+        let pathAB = try createShearwaterDB(dives: [diveA, diveB])
+        _ = try importService.importFromFile(at: pathAB)
+        XCTAssertEqual(try diveService.getDeviceSettings(diveId: diveId).count, 2)
+    }
+
+    func testReimportRecreatesSettingsRowDeletedByOlderVersion() throws {
+        // Dives imported before migration 018 have no settings row. A full
+        // re-import (all fingerprints known → skip path) must create it via
+        // backfillMissingMetadata without touching populated dive fields.
+        let path = try createShearwaterDB(dives: [
+            ShearwaterTestDive(diveId: 1, diveDate: "2024-06-15 10:30:00", depthFt: 100,
+                               durationSec: 3600, serial: "SN001"),
+        ])
+        _ = try importService.importFromFile(at: path)
+        let diveId = try diveService.listDives()[0].id
+
+        // Simulate pre-migration state: settings row absent
+        try database.dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM dive_device_settings WHERE dive_id = ?",
+                           arguments: [diveId])
+        }
+        XCTAssertTrue(try diveService.getDeviceSettings(diveId: diveId).isEmpty)
+
+        let reimport = try importService.importFromFile(at: path)
+        XCTAssertEqual(reimport.divesSkipped, 1)
+
+        let settings = try diveService.getDeviceSettings(diveId: diveId)
+        XCTAssertEqual(settings.count, 1)
+        XCTAssertTrue(settings[0].isPrimary)
+    }
+
+    func testReimportBackfillsDiveWithLegacyFingerprintOnly() throws {
+        // Dives from very old app versions have only dives.fingerprint, no
+        // dive_source_fingerprints row. Re-import must resolve them through
+        // the legacy column and still backfill settings.
+        let device = Device(model: "Petrel", serialNumber: "SN001", firmwareVersion: "93")
+        try diveService.saveDevice(device)
+        let legacyDive = Dive(
+            deviceId: device.id, startTimeUnix: 1718444400, endTimeUnix: 1718448000,
+            maxDepthM: 30.48, avgDepthM: 18.0, bottomTimeSec: 3600,
+            isCcr: false, decoRequired: false,
+            fingerprint: "1".data(using: .utf8)
+        )
+        try diveService.saveDive(legacyDive)
+
+        let path = try createShearwaterDB(dives: [
+            ShearwaterTestDive(diveId: 1, diveDate: "2024-06-15 10:30:00", depthFt: 100,
+                               durationSec: 3600, serial: "SN001", endGf99: 42.0),
+        ])
+        let result = try importService.importFromFile(at: path)
+
+        // Legacy dedup: skipped, not re-imported
+        XCTAssertEqual(result.divesImported, 0)
+        XCTAssertEqual(result.divesSkipped, 1)
+        XCTAssertEqual(result.divesBackfilled, 1)
+
+        // Dive-level field backfilled through the legacy fingerprint path
+        let dive = try diveService.getDive(id: legacyDive.id)
+        XCTAssertEqual(dive?.endGf99, 42.0)
+
+        // Settings row created for the legacy dive's device
+        let settings = try diveService.getDeviceSettings(diveId: legacyDive.id)
+        XCTAssertEqual(settings.count, 1)
+        XCTAssertEqual(settings[0].deviceId, device.id)
+        XCTAssertTrue(settings[0].isPrimary)
+    }
+
     // MARK: - New Tests: Metadata Import
 
     func testImportNotes() throws {

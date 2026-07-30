@@ -117,6 +117,25 @@ public final class DiveService: Sendable {
                 sql: "UPDATE dive_source_fingerprints SET device_id = ? WHERE device_id = ?",
                 arguments: [winnerId, loserId]
             )
+            // Reassign per-device settings. If a dive already has a settings row
+            // for the winner (both IDs are the same physical computer), drop the
+            // loser's row instead of violating the (dive_id, device_id) PK.
+            try db.execute(
+                sql: """
+                    DELETE FROM dive_device_settings
+                    WHERE device_id = ?
+                      AND EXISTS (
+                          SELECT 1 FROM dive_device_settings w
+                          WHERE w.dive_id = dive_device_settings.dive_id
+                            AND w.device_id = ?
+                      )
+                """,
+                arguments: [loserId, winnerId]
+            )
+            try db.execute(
+                sql: "UPDATE dive_device_settings SET device_id = ? WHERE device_id = ?",
+                arguments: [winnerId, loserId]
+            )
 
             // Merge metadata onto winner.
             // Freshness-sensitive fields (bleUuid, firmwareVersion, lastSyncUnix):
@@ -346,6 +365,8 @@ public final class DiveService: Sendable {
         public let sourceDeviceNames: [String]
         /// Maps device ID → human-readable display name for all source devices.
         public let sourceDeviceMap: [String: String]
+        /// Per-computer deco and environment settings.
+        public let deviceSettings: [DiveDeviceSettings]
     }
 
     /// Load all dive relations in a single read transaction (eliminates N+1 queries).
@@ -375,6 +396,10 @@ public final class DiveService: Sendable {
                 .map { $0["equipment_id"] as String }
 
             let sourceFingerprints = try DiveSourceFingerprint
+                .filter(Column("dive_id") == diveId)
+                .fetchAll(db)
+
+            let deviceSettings = try DiveDeviceSettings
                 .filter(Column("dive_id") == diveId)
                 .fetchAll(db)
 
@@ -411,8 +436,35 @@ public final class DiveService: Sendable {
                 equipmentIds: equipmentIds,
                 sourceFingerprints: sourceFingerprints,
                 sourceDeviceNames: sourceDeviceNames,
-                sourceDeviceMap: sourceDeviceMap
+                sourceDeviceMap: sourceDeviceMap,
+                deviceSettings: deviceSettings
             )
+        }
+    }
+
+    /// Returns true when multiple computers on this dive disagree on GF or deco model.
+    public func hasConflictingDeviceSettings(diveId: String) throws -> Bool {
+        try database.dbQueue.read { db in
+            let settings = try DiveDeviceSettings
+                .filter(Column("dive_id") == diveId)
+                .fetchAll(db)
+            guard settings.count > 1 else { return false }
+
+            let gfPairs = Set(settings.compactMap { setting -> String? in
+                guard let low = setting.gfLow, let high = setting.gfHigh else { return nil }
+                return "\(low)/\(high)"
+            })
+            let models = Set(settings.compactMap(\.decoModel))
+            return gfPairs.count > 1 || models.count > 1
+        }
+    }
+
+    /// Load per-device settings for a dive.
+    public func getDeviceSettings(diveId: String) throws -> [DiveDeviceSettings] {
+        try database.dbQueue.read { db in
+            try DiveDeviceSettings
+                .filter(Column("dive_id") == diveId)
+                .fetchAll(db)
         }
     }
 

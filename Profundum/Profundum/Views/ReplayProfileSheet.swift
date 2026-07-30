@@ -9,6 +9,21 @@ struct ReplayProfileSheet: View {
     let gasMixes: [GasMix]
     let stats: DiveStats?
     let samples: [DiveSample]
+    let deviceSettings: DiveDeviceSettings?
+
+    init(
+        dive: Dive,
+        gasMixes: [GasMix],
+        stats: DiveStats?,
+        samples: [DiveSample],
+        deviceSettings: DiveDeviceSettings? = nil
+    ) {
+        self.dive = dive
+        self.gasMixes = gasMixes
+        self.stats = stats
+        self.samples = samples
+        self.deviceSettings = deviceSettings
+    }
 
     // MARK: - Mode
 
@@ -640,7 +655,7 @@ struct ReplayProfileSheet: View {
         }
 
         // Deco model
-        if let model = dive.decoModel?.lowercased() {
+        if let model = (deviceSettings?.decoModel ?? dive.decoModel)?.lowercased() {
             if model.contains("thalmann") {
                 selectedModel = .thalmannElDca
             } else {
@@ -648,8 +663,8 @@ struct ReplayProfileSheet: View {
             }
         }
 
-        gfLow = dive.gfLow ?? 30
-        gfHigh = dive.gfHigh ?? 70
+        gfLow = deviceSettings?.gfLow ?? dive.gfLow ?? 30
+        gfHigh = deviceSettings?.gfHigh ?? dive.gfHigh ?? 70
         gfLowText = "\(gfLow)"
         gfHighText = "\(gfHigh)"
 

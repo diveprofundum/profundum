@@ -236,6 +236,16 @@ public final class ShearwaterCloudImportService: Sendable {
         // Rows that didn't pass validation in Phase 2
         divesSkipped += (totalDives - importRows.count)
 
+        let deviceOwnershipById: [String: DeviceOwnership] = try database.dbQueue.read { db in
+            var result: [String: DeviceOwnership] = [:]
+            for deviceId in Set(importRows.map(\.deviceId)) {
+                if let device = try Device.fetchOne(db, key: deviceId) {
+                    result[deviceId] = device.ownership
+                }
+            }
+            return result
+        }
+
         // Phase 3: Group rows by time proximity for merging
         // Sort by start time, then group consecutive rows from different serials within 2 minutes
         let sorted = importRows.sorted { $0.startTimeUnix < $1.startTimeUnix }
@@ -243,6 +253,14 @@ public final class ShearwaterCloudImportService: Sendable {
         var currentGroup: [ImportRow] = []
 
         for ir in sorted {
+            // Buddy-owned rows never merge: emit as singleton groups without
+            // disturbing the current group, so two owned computers still merge
+            // even when a buddy row interleaves chronologically between them.
+            let irOwn = deviceOwnershipById[ir.deviceId] ?? .mine
+            if irOwn == .other {
+                groups.append([ir])
+                continue
+            }
             if let last = currentGroup.last {
                 let timeDiff = abs(ir.startTimeUnix - last.startTimeUnix)
                 let differentSerial = ir.serial != last.serial
@@ -335,15 +353,6 @@ public final class ShearwaterCloudImportService: Sendable {
                 // Partial merge: add new samples, fingerprints, and gas mixes to existing dive
                 let existingDiveId = existingFpRecord.diveId
                 try database.dbQueue.write { db in
-                    // Build seen-set from existing gas mixes for this dive
-                    let existingMixes = try GasMix
-                        .filter(Column("dive_id") == existingDiveId)
-                        .fetchAll(db)
-                    var seenMixes = Set<GasMixKey>(existingMixes.map {
-                        GasMixKey(o2: Int($0.o2Fraction * 1000), he: Int($0.heFraction * 1000), usage: $0.usage)
-                    })
-                    var nextMixIndex = (existingMixes.map(\.mixIndex).max() ?? -1) + 1
-
                     for ir in group {
                         // Skip if this specific fingerprint already exists
                         let fpExists = try DiveSourceFingerprint
@@ -370,49 +379,39 @@ public final class ShearwaterCloudImportService: Sendable {
                             fingerprint: ir.fingerprint
                         ).insert(db)
 
-                        // Insert samples with this device_id
-                        for sample in parsedInfo.samples {
-                            try DiveSample(
-                                diveId: existingDiveId,
-                                deviceId: ir.deviceId,
-                                tSec: sample.tSec,
-                                depthM: sample.depthM,
-                                tempC: sample.tempC,
-                                setpointPpo2: sample.setpointPpo2,
-                                ceilingM: sample.ceilingM,
-                                gf99: sample.gf99,
-                                ppo2_1: sample.ppo2_1,
-                                ppo2_2: sample.ppo2_2,
-                                ppo2_3: sample.ppo2_3,
-                                cns: sample.cns,
-                                tankPressure1Bar: sample.tankPressure1Bar,
-                                tankPressure2Bar: sample.tankPressure2Bar,
-                                ttsSec: sample.ttsSec,
-                                ndlSec: sample.ndlSec,
-                                decoStopDepthM: sample.decoStopDepthM,
-                                rbtSec: sample.rbtSec,
-                                gasmixIndex: sample.gasmixIndex,
-                                atPlusFiveTtsMin: sample.atPlusFiveTtsMin
-                            ).insert(db)
-                        }
+                        let existingMixes = try GasMix
+                            .filter(Column("dive_id") == existingDiveId)
+                            .fetchAll(db)
+                        let usedMixes = GasMixMergeHelper.filterUsedGasMixes(
+                            parsedInfo.gasMixes, samples: parsedInfo.samples
+                        )
+                        let indexRemap = try GasMixMergeHelper.mergeGasMixes(
+                            existingMixes: existingMixes,
+                            incomingMixes: usedMixes,
+                            diveId: existingDiveId,
+                            deviceId: ir.deviceId,
+                            db: db
+                        )
+                        try GasMixMergeHelper.insertSamples(
+                            samples: parsedInfo.samples,
+                            diveId: existingDiveId,
+                            deviceId: ir.deviceId,
+                            indexRemap: indexRemap,
+                            db: db
+                        )
 
-                        // Insert new unique gas mixes from this device
-                        for mix in parsedInfo.gasMixes {
-                            let key = GasMixKey(o2: Int(mix.o2Fraction * 1000),
-                                                he: Int(mix.heFraction * 1000),
-                                                usage: mix.usage)
-                            if seenMixes.insert(key).inserted {
-                                try GasMix(
-                                    diveId: existingDiveId,
-                                    mixIndex: nextMixIndex,
-                                    o2Fraction: mix.o2Fraction,
-                                    heFraction: mix.heFraction,
-                                    usage: mix.usage,
-                                    deviceId: ir.deviceId
-                                ).insert(db)
-                                nextMixIndex += 1
-                            }
-                        }
+                        let dive = try Dive.fetchOne(db, key: existingDiveId)
+                        try DiveDeviceSettings.upsert(
+                            diveId: existingDiveId,
+                            deviceId: ir.deviceId,
+                            gfLow: parsedInfo.gfLow,
+                            gfHigh: parsedInfo.gfHigh,
+                            decoModel: parsedInfo.decoModel,
+                            salinity: parsedInfo.salinity,
+                            surfacePressureBar: parsedInfo.surfacePressureBar,
+                            isPrimary: dive?.deviceId == ir.deviceId,
+                            db: db
+                        )
 
                         divesMerged += 1
                     }
@@ -477,11 +476,11 @@ public final class ShearwaterCloudImportService: Sendable {
             let mergedMaxTempC = parseResults.compactMap(\.parsedInfo.maxTempC).max()
             let mergedAvgTempC = parseResults.compactMap(\.parsedInfo.avgTempC).first
             let mergedEndGf99 = parseResults.compactMap(\.parsedInfo.endGf99).first
-            let mergedGfLow = parseResults.compactMap(\.parsedInfo.gfLow).first
-            let mergedGfHigh = parseResults.compactMap(\.parsedInfo.gfHigh).first
-            let mergedDecoModel = parseResults.compactMap(\.parsedInfo.decoModel).first
-            let mergedSalinity = parseResults.compactMap(\.parsedInfo.salinity).first
-            let mergedSurfacePressure = parseResults.compactMap(\.parsedInfo.surfacePressureBar).first
+            let mergedGfLow = primaryResult.parsedInfo.gfLow
+            let mergedGfHigh = primaryResult.parsedInfo.gfHigh
+            let mergedDecoModel = primaryResult.parsedInfo.decoModel
+            let mergedSalinity = primaryResult.parsedInfo.salinity
+            let mergedSurfacePressure = primaryResult.parsedInfo.surfacePressureBar
             let mergedLat = parseResults.compactMap(\.parsedInfo.lat).first
             let mergedLon = parseResults.compactMap(\.parsedInfo.lon).first
             let mergedEnvironment = parseResults.compactMap(\.parsedInfo.environment).first
@@ -590,10 +589,6 @@ public final class ShearwaterCloudImportService: Sendable {
                 }
 
                 // Insert source fingerprints + samples from each device
-                // Collect gas mixes across all devices, deduplicating by (o2, he, usage)
-                var seenMixes = Set<GasMixKey>()
-                var uniqueMixes: [ParsedGasMix] = []
-
                 for pr in parseResults {
                     try DiveSourceFingerprint(
                         diveId: diveId,
@@ -601,51 +596,38 @@ public final class ShearwaterCloudImportService: Sendable {
                         fingerprint: pr.ir.fingerprint
                     ).insert(db)
 
-                    for sample in pr.parsedInfo.samples {
-                        try DiveSample(
-                            diveId: diveId,
-                            deviceId: pr.ir.deviceId,
-                            tSec: sample.tSec,
-                            depthM: sample.depthM,
-                            tempC: sample.tempC,
-                            setpointPpo2: sample.setpointPpo2,
-                            ceilingM: sample.ceilingM,
-                            gf99: sample.gf99,
-                            ppo2_1: sample.ppo2_1,
-                            ppo2_2: sample.ppo2_2,
-                            ppo2_3: sample.ppo2_3,
-                            cns: sample.cns,
-                            tankPressure1Bar: sample.tankPressure1Bar,
-                            tankPressure2Bar: sample.tankPressure2Bar,
-                            ttsSec: sample.ttsSec,
-                            ndlSec: sample.ndlSec,
-                            decoStopDepthM: sample.decoStopDepthM,
-                            rbtSec: sample.rbtSec,
-                            gasmixIndex: sample.gasmixIndex,
-                            atPlusFiveTtsMin: sample.atPlusFiveTtsMin
-                        ).insert(db)
-                    }
-
-                    for mix in pr.parsedInfo.gasMixes {
-                        let key = GasMixKey(o2: Int(mix.o2Fraction * 1000),
-                                            he: Int(mix.heFraction * 1000),
-                                            usage: mix.usage)
-                        if seenMixes.insert(key).inserted {
-                            uniqueMixes.append(mix)
-                        }
-                    }
-                }
-
-                // Insert deduplicated gas mixes with sequential indices
-                for (idx, mix) in uniqueMixes.enumerated() {
-                    try GasMix(
+                    let existingMixes = try GasMix
+                        .filter(Column("dive_id") == diveId)
+                        .fetchAll(db)
+                    let usedMixes = GasMixMergeHelper.filterUsedGasMixes(
+                        pr.parsedInfo.gasMixes, samples: pr.parsedInfo.samples
+                    )
+                    let indexRemap = try GasMixMergeHelper.mergeGasMixes(
+                        existingMixes: existingMixes,
+                        incomingMixes: usedMixes,
                         diveId: diveId,
-                        mixIndex: idx,
-                        o2Fraction: mix.o2Fraction,
-                        heFraction: mix.heFraction,
-                        usage: mix.usage,
-                        deviceId: primaryIr.deviceId
-                    ).insert(db)
+                        deviceId: pr.ir.deviceId,
+                        db: db
+                    )
+                    try GasMixMergeHelper.insertSamples(
+                        samples: pr.parsedInfo.samples,
+                        diveId: diveId,
+                        deviceId: pr.ir.deviceId,
+                        indexRemap: indexRemap,
+                        db: db
+                    )
+
+                    try DiveDeviceSettings.upsert(
+                        diveId: diveId,
+                        deviceId: pr.ir.deviceId,
+                        gfLow: pr.parsedInfo.gfLow,
+                        gfHigh: pr.parsedInfo.gfHigh,
+                        decoModel: pr.parsedInfo.decoModel,
+                        salinity: pr.parsedInfo.salinity,
+                        surfacePressureBar: pr.parsedInfo.surfacePressureBar,
+                        isPrimary: pr.ir.deviceId == primaryIr.deviceId,
+                        db: db
+                    )
                 }
             }
 
@@ -683,13 +665,15 @@ public final class ShearwaterCloudImportService: Sendable {
 
     /// Backfills metadata fields on already-imported dives that are nil because
     /// an older app version didn't extract them (GF settings, deco model,
-    /// salinity, surface pressure, end GF99 — PRO-62).
+    /// salinity, surface pressure, end GF99 — PRO-62), and creates missing
+    /// per-device settings rows (multi-computer support).
     ///
-    /// The binary dive log is only parsed when at least one target field is
-    /// missing, so re-imports of fully populated databases stay cheap. Existing
-    /// non-nil values are never overwritten.
+    /// The binary dive log is only parsed when at least one target field or
+    /// the per-device settings row is missing, so re-imports of fully
+    /// populated databases stay cheap. Existing non-nil values are never
+    /// overwritten.
     ///
-    /// - Returns: Number of dives updated.
+    /// - Returns: Number of dives updated (dive-level fields only).
     private func backfillMissingMetadata(
         rows: [(row: Row, fingerprint: Data)],
         dateFormatter: DateFormatter
@@ -701,14 +685,20 @@ public final class ShearwaterCloudImportService: Sendable {
                 // Resolve the dive via source fingerprint, falling back to the
                 // legacy dives.fingerprint column.
                 let diveId: String?
+                let deviceId: String?
                 if let fpRecord = try DiveSourceFingerprint
                     .filter(Column("fingerprint") == entry.fingerprint)
                     .fetchOne(db) {
                     diveId = fpRecord.diveId
+                    deviceId = fpRecord.deviceId
+                } else if let legacyDive = try Dive
+                    .filter(Column("fingerprint") == entry.fingerprint)
+                    .fetchOne(db) {
+                    diveId = legacyDive.id
+                    deviceId = legacyDive.deviceId
                 } else {
-                    diveId = try Dive
-                        .filter(Column("fingerprint") == entry.fingerprint)
-                        .fetchOne(db)?.id
+                    diveId = nil
+                    deviceId = nil
                 }
                 // Note: a dive already updated by an earlier row in the group is
                 // still re-checked — a second computer's row may fill fields the
@@ -717,11 +707,19 @@ public final class ShearwaterCloudImportService: Sendable {
                 guard let diveId,
                       var dive = try Dive.fetchOne(db, key: diveId) else { continue }
 
-                // Only parse the binary log when something is actually missing.
-                let needsBackfill = dive.gfLow == nil || dive.gfHigh == nil
+                // Only parse the binary log when something is actually missing:
+                // a nil dive-level field or an absent per-device settings row.
+                let needsDiveFieldBackfill = dive.gfLow == nil || dive.gfHigh == nil
                     || dive.decoModel == nil || dive.salinity == nil
                     || dive.surfacePressureBar == nil || dive.endGf99 == nil
-                guard needsBackfill else { continue }
+                let needsSettingsRow: Bool = try {
+                    guard let deviceId else { return false }
+                    return try DiveDeviceSettings
+                        .filter(Column("dive_id") == diveId)
+                        .filter(Column("device_id") == deviceId)
+                        .fetchCount(db) == 0
+                }()
+                guard needsDiveFieldBackfill || needsSettingsRow else { continue }
 
                 let calcVals: CalculatedValues? = decodeJSON(
                     entry.row["calculated_values_from_samples"] as DatabaseValue
@@ -731,6 +729,22 @@ public final class ShearwaterCloudImportService: Sendable {
                     entry.row, dateFormatter: dateFormatter,
                     calcValues: calcVals, metadata: meta
                 )
+
+                if needsSettingsRow, let deviceId {
+                    try DiveDeviceSettings.backfillIfMissing(
+                        diveId: diveId,
+                        deviceId: deviceId,
+                        gfLow: parsed.gfLow,
+                        gfHigh: parsed.gfHigh,
+                        decoModel: parsed.decoModel,
+                        salinity: parsed.salinity,
+                        surfacePressureBar: parsed.surfacePressureBar,
+                        isPrimary: dive.deviceId == deviceId,
+                        db: db
+                    )
+                }
+
+                guard needsDiveFieldBackfill else { continue }
 
                 var changed = false
                 if dive.gfLow == nil, let v = parsed.gfLow { dive.gfLow = v; changed = true }
