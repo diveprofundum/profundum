@@ -77,7 +77,8 @@ clean:
 # ──────────────────────────────────────────────────────────────
 
 # Auto-detect the first connected device; override with: make iphone DEVICE=<udid>
-DEVICE ?= $(shell xcrun devicectl list devices 2>/dev/null | grep -E 'connected' | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' | head -1)
+# Matches both CoreDevice UUIDs (Xcode <= 26) and hardware UDIDs (Xcode 27+)
+DEVICE ?= $(shell xcrun devicectl list devices 2>/dev/null | grep -E 'connected' | grep -Ev 'simulated' | grep -Eo '[0-9A-F]{8}-([0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}|[0-9A-F]{16})' | head -1)
 DEVICE_BUILD_DIR := build/device
 APP_PATH := $(DEVICE_BUILD_DIR)/Build/Products/Debug-iphoneos/Profundum.app
 BUNDLE_ID := azlucis.Profundum
@@ -94,6 +95,7 @@ iphone-build: swift-bindings
 		-destination 'platform=iOS,id=$(DEVICE)' \
 		-derivedDataPath $(DEVICE_BUILD_DIR) \
 		-allowProvisioningUpdates \
+		-allowProvisioningDeviceRegistration \
 		-quiet
 
 # Install the built app onto the device
