@@ -206,14 +206,57 @@ class ImportSession: ObservableObject {
         // recognise (e.g. Shearwater Cloud IDs), keep the wider window.
         let tracker = ImportProgressTracker(consecutiveSkipThreshold: syncFP?.source == .ble ? 3 : 10)
 
+        // Dives are written on a separate serial queue so the libdivecomputer
+        // callback returns immediately and the next dive request goes out while
+        // the previous dive is being saved. Halcyon Symbios devices time out and
+        // drop the link if the host goes quiet between dives (PRO-71).
+        let persistence = DivePersistenceQueue(
+            importService: importService,
+            tracker: tracker
+        ) { [weak self] parsed, outcome, error in
+            if let error {
+                let desc = error.localizedDescription
+                importLog.error(
+                    "Failed to save dive at \(parsed.startTimeUnix): \(desc, privacy: .public)"
+                )
+            }
+            _ = outcome
+
+            // Auto-stop after consecutive duplicates (threshold set above from
+            // fingerprint provenance; only without an explicit cutoff). Evaluated
+            // after each save; libdivecomputer polls `onCancel` before the next
+            // dive, so at most one extra dive is in flight when this trips.
+            if tracker.shouldAutoStop && cutoffTime == nil {
+                self?.isCancelled = true
+            }
+
+            let s = tracker.saved
+            let m = tracker.merged
+            let k = tracker.skipped
+            let f = tracker.failed
+            Task { @MainActor [weak self] in
+                var parts: [String] = []
+                if s > 0 { parts.append("\(s) saved") }
+                if m > 0 { parts.append("\(m) merged") }
+                if k > 0 { parts.append("\(k) skipped") }
+                if f > 0 { parts.append("\(f) failed") }
+                let msg = parts.isEmpty
+                    ? "Processing..."
+                    : parts.joined(separator: ", ") + "..."
+                self?.statusMessage = msg
+            }
+        }
+
         downloadTask = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
 
             // Progress-aware retry: keep reconnecting as long as new dives are
-            // being downloaded. Some devices (e.g. Halcyon Symbios) can only
-            // handle one dive download per BLE session before needing a fresh
-            // connection. Give up after consecutive failures with no new saves.
-            let maxNoProgress = 2
+            // being downloaded. Some devices (e.g. Halcyon Symbios) drop the BLE
+            // session between dives, so each reconnect may yield only one more
+            // dive. Give up after consecutive attempts with no new saves. Three
+            // rather than two because the first session after connect has been
+            // observed to fail before any dive is attempted (PRO-71).
+            let maxNoProgress = 3
             var consecutiveNoProgress = 0
             var attempt = 0
             var currentTransport: TracingBLETransport = tracingTransport
@@ -244,44 +287,11 @@ class ImportSession: ObservableObject {
                                 return
                             }
 
-                            // Save each dive immediately as it arrives. A save
-                            // error is not a duplicate: record it separately so
-                            // it cannot trip the consecutive-skip auto-stop.
-                            do {
-                                let outcome = try importService.saveImportedDive(
-                                    parsed, deviceId: device.id
-                                )
-                                tracker.record(outcome)
-                            } catch {
-                                tracker.recordFailure()
-                                let desc = error.localizedDescription
-                                importLog.error(
-                                    "Failed to save dive at \(parsed.startTimeUnix): \(desc, privacy: .public)"
-                                )
-                            }
-
-                            // Auto-stop after consecutive duplicates (threshold set
-                            // above from fingerprint provenance; only without an
-                            // explicit cutoff)
-                            if tracker.shouldAutoStop && cutoffTime == nil {
-                                self.isCancelled = true
-                            }
-
-                            let s = tracker.saved
-                            let m = tracker.merged
-                            let k = tracker.skipped
-                            let f = tracker.failed
-                            Task { @MainActor [weak self] in
-                                var parts: [String] = []
-                                if s > 0 { parts.append("\(s) saved") }
-                                if m > 0 { parts.append("\(m) merged") }
-                                if k > 0 { parts.append("\(k) skipped") }
-                                if f > 0 { parts.append("\(f) failed") }
-                                let msg = parts.isEmpty
-                                    ? "Processing..."
-                                    : parts.joined(separator: ", ") + "..."
-                                self?.statusMessage = msg
-                            }
+                            // Hand off for persistence and return immediately so
+                            // libdivecomputer can request the next dive. Save
+                            // outcomes (including errors) are recorded by the
+                            // queue's completion handler above.
+                            persistence.enqueue(parsed, deviceId: device.id)
                         },
                         onProgress: { progress in
                             Task { @MainActor [weak self] in
@@ -293,7 +303,8 @@ class ImportSession: ObservableObject {
                         }
                     )
 
-                    // Success — update device info and show results
+                    // Success — wait for queued saves, then update device info
+                    await persistence.drainAsync()
                     await self.updateDeviceInfo(device: device, result: result)
 
                     BLEPeripheralTransport.enableLogging = false
@@ -337,8 +348,12 @@ class ImportSession: ObservableObject {
                     return
 
                 } catch DiveComputerError.cancelled {
+                    await persistence.drainAsync()
                     importLog.info("Import cancelled — dumping I/O trace")
                     currentTransport.dumpTrace()
+                    self.writeTraceFile(
+                        currentTransport, device: device, attempt: attempt, reason: "cancelled"
+                    )
                     BLEPeripheralTransport.enableLogging = false
                     #if os(iOS)
                     await MainActor.run { UIApplication.shared.isIdleTimerDisabled = false }
@@ -370,6 +385,9 @@ class ImportSession: ObservableObject {
                     return
 
                 } catch {
+                    // Dives delivered before the failure may still be in the
+                    // persistence queue; wait so progress accounting is accurate.
+                    await persistence.drainAsync()
                     let newSaves = tracker.saved - savedBefore
                     let newMerges = tracker.merged - mergedBefore
                     let madeProgress = newSaves > 0 || newMerges > 0
@@ -379,6 +397,9 @@ class ImportSession: ObservableObject {
                         "Attempt \(attempt) (\(newSaves) new, \(newMerges) merged): \(errDesc, privacy: .public)"
                     )
                     currentTransport.dumpTrace()
+                    self.writeTraceFile(
+                        currentTransport, device: device, attempt: attempt, reason: errDesc
+                    )
 
                     let retryable = (error as? DiveComputerError)?.isRetryable ?? true
                     if !retryable {
@@ -507,6 +528,46 @@ class ImportSession: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+    }
+
+    /// Directory where failed-import transport traces are written.
+    ///
+    /// `Documents/ImportTraces` inside the app container. Retrieve with:
+    /// `xcrun devicectl device copy from --device <udid> --domain-type appDataContainer
+    ///  --domain-identifier azlucis.Profundum --source Documents/ImportTraces --destination .`
+    nonisolated static var traceDirectory: URL? {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("ImportTraces", isDirectory: true)
+    }
+
+    /// Persists the transport trace for a failed or cancelled attempt so it can
+    /// be pulled off the device without Console.app. Never throws; failures to
+    /// write are logged and otherwise ignored.
+    nonisolated private func writeTraceFile(
+        _ transport: TracingBLETransport, device: Device, attempt: Int, reason: String
+    ) {
+        guard let dir = Self.traceDirectory else { return }
+        let stamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let safeName = device.displayName
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "_")
+        let url = dir.appendingPathComponent("\(stamp)_\(safeName)_attempt\(attempt).txt")
+        let header = [
+            "device: \(device.displayName) (\(device.model), sn \(device.serialNumber))",
+            "firmware: \(device.firmwareVersion)",
+            "attempt: \(attempt)",
+            "reason: \(reason)",
+            "",
+        ]
+        do {
+            try transport.writeTrace(to: url, header: header)
+            importLog.error("Trace written to \(url.path, privacy: .public)")
+        } catch {
+            let desc = error.localizedDescription
+            importLog.error("Failed to write trace file: \(desc, privacy: .public)")
+        }
     }
 
     /// Disconnects, waits for the device to reset, reconnects, and waits for

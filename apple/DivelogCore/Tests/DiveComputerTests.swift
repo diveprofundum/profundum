@@ -1045,6 +1045,60 @@ final class DiveComputerTests: XCTestCase {
         if case .close = entries[1].operation {} else { XCTFail("Expected close") }
     }
 
+    /// PRO-71: traces are rendered as text lines covering every operation kind,
+    /// so a failing import can be diagnosed from a file pulled off the device.
+    func testTraceLinesCoverAllOperations() throws {
+        let inner = MockBLETransport()
+        inner.readData = [Data([0x85, 0x15, 0x04, 0x9C])]  // Halcyon NAK, ERR_TIMEOUT
+        inner.maxWriteSize = 1
+        let tracing = TracingBLETransport(wrapping: inner)
+
+        try tracing.write(Data([0x06]), timeout: 1)
+        _ = try tracing.read(count: 259, timeout: 1)
+        XCTAssertThrowsError(try tracing.read(count: 4, timeout: 0.1))
+        XCTAssertThrowsError(try tracing.write(Data([0x01, 0x02]), timeout: 1))
+        tracing.recordSetTimeout(ms: 3000)
+        try tracing.purge()
+        try tracing.close()
+
+        let lines = tracing.traceLines()
+        XCTAssertEqual(lines.first, "=== BLE Transport Trace (7 entries) ===")
+        XCTAssertEqual(lines.last, "=== End Trace ===")
+        // writeError emits two lines, so 7 entries → 8 body lines + 2 brackets.
+        XCTAssertEqual(lines.count, 10)
+        XCTAssertTrue(lines.contains { $0.contains("WRITE 1B | 06") })
+        XCTAssertTrue(lines.contains { $0.contains("READ req=259 got=4 | 85 15 04 9C") })
+        XCTAssertTrue(lines.contains { $0.contains("READ req=4 ERROR:") })
+        XCTAssertTrue(lines.contains { $0.contains("WRITE 2B ERR") })
+        XCTAssertTrue(lines.contains { $0.contains("WRITE data: 01 02") })
+        XCTAssertTrue(lines.contains { $0.contains("SET_TIMEOUT 3000 ms") })
+        XCTAssertTrue(lines.contains { $0.hasSuffix("PURGE") })
+        XCTAssertTrue(lines.contains { $0.hasSuffix("CLOSE") })
+    }
+
+    func testWriteTraceCreatesFileWithHeader() throws {
+        let inner = MockBLETransport()
+        let tracing = TracingBLETransport(wrapping: inner)
+        try tracing.write(Data([0x01]), timeout: 1)
+
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("trace-test-\(UUID().uuidString)", isDirectory: true)
+        let url = dir.appendingPathComponent("nested").appendingPathComponent("trace.txt")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let written = try tracing.writeTrace(to: url, header: ["device: Symbios", "reason: timeout", ""])
+        XCTAssertEqual(written, url)
+
+        let text = try String(contentsOf: url, encoding: .utf8)
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        XCTAssertEqual(lines[0], "device: Symbios")
+        XCTAssertEqual(lines[1], "reason: timeout")
+        XCTAssertEqual(lines[2], "")
+        XCTAssertEqual(lines[3], "=== BLE Transport Trace (1 entries) ===")
+        XCTAssertTrue(text.contains("WRITE 1B | 01"))
+        XCTAssertTrue(text.hasSuffix("=== End Trace ===\n"))
+    }
+
     // MARK: - Timeout Behavior Tests
 
     func testMockTransportReadTimeoutEmpty() throws {

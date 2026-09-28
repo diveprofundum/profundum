@@ -102,42 +102,54 @@ public final class TracingBLETransport: BLETransport, @unchecked Sendable {
     /// this method is only called on import failure/cancellation, so the elevated
     /// level is appropriate and necessary for post-hoc diagnostics.
     public func dumpTrace() {
+        for line in traceLines() {
+            traceLog.error("\(line, privacy: .public)")
+        }
+    }
+
+    /// The trace as human-readable lines, one per I/O operation, bracketed by
+    /// header and footer lines. Shared by `dumpTrace()` and `writeTrace(to:)`.
+    public func traceLines() -> [String] {
         let snapshot = entries
-        traceLog.error("=== BLE Transport Trace (\(snapshot.count) entries) ===")
+        var lines: [String] = ["=== BLE Transport Trace (\(snapshot.count) entries) ==="]
         for entry in snapshot {
             let ts = String(format: "%+.3f", entry.elapsed)
             switch entry.operation {
             case .read(let requested, let returned):
-                let hex = returned.hexDump
-                traceLog.error(
-                    "[\(ts, privacy: .public)] READ req=\(requested) got=\(returned.count) | \(hex, privacy: .public)"
-                )
+                lines.append("[\(ts)] READ req=\(requested) got=\(returned.count) | \(returned.hexDump)")
             case .readError(let requested, let error):
-                traceLog.error(
-                    "[\(ts, privacy: .public)] READ req=\(requested) ERROR: \(error, privacy: .public)"
-                )
+                lines.append("[\(ts)] READ req=\(requested) ERROR: \(error)")
             case .write(let data):
-                let hex = data.hexDump
-                traceLog.error(
-                    "[\(ts, privacy: .public)] WRITE \(data.count)B | \(hex, privacy: .public)"
-                )
+                lines.append("[\(ts)] WRITE \(data.count)B | \(data.hexDump)")
             case .writeError(let data, let error):
-                let hex = data.hexDump
-                traceLog.error(
-                    "[\(ts, privacy: .public)] WRITE \(data.count)B ERR \(error, privacy: .public)"
-                )
-                traceLog.error(
-                    "[\(ts, privacy: .public)] WRITE data: \(hex, privacy: .public)"
-                )
+                lines.append("[\(ts)] WRITE \(data.count)B ERR \(error)")
+                lines.append("[\(ts)] WRITE data: \(data.hexDump)")
             case .setTimeout(let ms):
-                traceLog.error("[\(ts, privacy: .public)] SET_TIMEOUT \(ms) ms")
+                lines.append("[\(ts)] SET_TIMEOUT \(ms) ms")
             case .purge:
-                traceLog.error("[\(ts, privacy: .public)] PURGE")
+                lines.append("[\(ts)] PURGE")
             case .close:
-                traceLog.error("[\(ts, privacy: .public)] CLOSE")
+                lines.append("[\(ts)] CLOSE")
             }
         }
-        traceLog.error("=== End Trace ===")
+        lines.append("=== End Trace ===")
+        return lines
+    }
+
+    /// Writes the trace to a text file, creating intermediate directories.
+    ///
+    /// Used to persist failure traces where they can be retrieved from the
+    /// device (e.g. `xcrun devicectl device copy from`) without Console.app.
+    /// - Parameters:
+    ///   - url: Destination file URL.
+    ///   - header: Optional lines written before the trace (device, attempt, error).
+    @discardableResult
+    public func writeTrace(to url: URL, header: [String] = []) throws -> URL {
+        let dir = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let text = (header + traceLines()).joined(separator: "\n") + "\n"
+        try text.write(to: url, atomically: true, encoding: .utf8)
+        return url
     }
 
     // MARK: - Private
