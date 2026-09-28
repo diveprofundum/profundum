@@ -24,6 +24,9 @@ public final class ImportProgressTracker: @unchecked Sendable {
     nonisolated(unsafe) public private(set) var saved = 0
     nonisolated(unsafe) public private(set) var merged = 0
     nonisolated(unsafe) public private(set) var skipped = 0
+    /// Dives that were downloaded but could not be persisted (database error).
+    /// These are neither duplicates nor successes and must not feed auto-stop.
+    nonisolated(unsafe) public private(set) var failed = 0
     nonisolated(unsafe) public private(set) var consecutiveSkips = 0
 
     public init(consecutiveSkipThreshold: Int = 10) {
@@ -36,6 +39,13 @@ public final class ImportProgressTracker: @unchecked Sendable {
         case .merged: merged += 1; consecutiveSkips = 0
         case .skipped: skipped += 1; consecutiveSkips += 1
         }
+    }
+
+    /// Records a dive whose save threw. Leaves `consecutiveSkips` untouched so a
+    /// run of persistence errors can never be mistaken for "all caught up" and
+    /// silently end the download (PRO-32 / PRO-70).
+    public func recordFailure() {
+        failed += 1
     }
 
     public var shouldAutoStop: Bool { consecutiveSkips >= consecutiveSkipThreshold }
@@ -89,22 +99,50 @@ public final class DiveComputerImportService: Sendable {
         }
     }
 
+    /// Where a sync fingerprint came from, which determines how much we can trust
+    /// libdivecomputer to recognise it.
+    public enum FingerprintSource: Equatable, Sendable {
+        /// Recorded by a BLE import — produced by libdivecomputer for this exact
+        /// device, so it will match during incremental sync.
+        case ble
+        /// Legacy `dives.fingerprint` or a non-BLE `dive_source_fingerprints` row
+        /// (e.g. Shearwater Cloud, whose fingerprints are UTF-8 dive IDs that
+        /// libdivecomputer will never match). May be usable, may not.
+        case legacy
+    }
+
     /// Returns the most recent fingerprint for a given device, ordered by dive start time.
     ///
     /// Used for incremental sync: pass this fingerprint to libdivecomputer so it
     /// stops downloading once it reaches a dive we already have.
     ///
-    /// Checks both the legacy `dives.fingerprint` column (populated only when
-    /// this device is the dive's primary) and `dive_source_fingerprints` (which
-    /// records every device that contributed to a dive). A secondary computer
-    /// whose dives were all merged into another device's dives has fingerprints
-    /// only in the latter — reading just the legacy column made incremental
-    /// sync silently fall back to a full re-download for such devices (PRO-70).
+    /// Prefers fingerprints recorded by BLE imports (`dive_source_fingerprints`
+    /// with `source_type = 'ble'`) because those are guaranteed to be in the
+    /// format libdivecomputer produces. Falls back to the legacy
+    /// `dives.fingerprint` column unioned with any other source-fingerprint rows,
+    /// which covers dives BLE-imported before source rows were written but may
+    /// also return a Cloud fingerprint the device cannot match.
+    ///
+    /// Both queries consider `dive_source_fingerprints`, not just `dives.fingerprint`.
+    /// The latter belongs to the dive's *primary* device only, so a secondary
+    /// computer whose dives were all merged into another device's dives was
+    /// previously seen as having no fingerprint at all and re-downloaded
+    /// everything on every import (PRO-70).
     /// - Parameter deviceId: The device to look up.
-    /// - Returns: The fingerprint of the newest dive from this device, or `nil`.
-    public func lastFingerprint(deviceId: String) throws -> Data? {
+    /// - Returns: The newest fingerprint and where it came from, or `nil`.
+    public func lastSyncFingerprint(deviceId: String) throws -> (fingerprint: Data, source: FingerprintSource)? {
         try database.dbQueue.read { db in
-            try Data.fetchOne(db, sql: """
+            if let ble = try Data.fetchOne(db, sql: """
+                SELECT f.fingerprint
+                FROM dive_source_fingerprints f
+                JOIN dives d ON d.id = f.dive_id
+                WHERE f.device_id = ? AND f.source_type = 'ble'
+                ORDER BY d.start_time_unix DESC
+                LIMIT 1
+                """, arguments: [deviceId]) {
+                return (ble, .ble)
+            }
+            if let legacy = try Data.fetchOne(db, sql: """
                 SELECT fingerprint FROM (
                     SELECT d.fingerprint AS fingerprint, d.start_time_unix AS start_time_unix
                     FROM dives d
@@ -117,8 +155,16 @@ public final class DiveComputerImportService: Sendable {
                 )
                 ORDER BY start_time_unix DESC
                 LIMIT 1
-                """, arguments: [deviceId, deviceId])
+                """, arguments: [deviceId, deviceId]) {
+                return (legacy, .legacy)
+            }
+            return nil
         }
+    }
+
+    /// Convenience over ``lastSyncFingerprint(deviceId:)`` returning only the bytes.
+    public func lastFingerprint(deviceId: String) throws -> Data? {
+        try lastSyncFingerprint(deviceId: deviceId)?.fingerprint
     }
 
     /// Saves an imported dive and its samples transactionally.

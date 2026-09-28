@@ -311,7 +311,8 @@ final class DiveComputerTests: XCTestCase {
 
         XCTAssertEqual(try importService.lastFingerprint(deviceId: deviceB.id), newerFPForB)
 
-        // And the reverse: newest dive is one where B is primary.
+        // And the reverse: newest dive is one where B is primary. The BLE save
+        // path writes both dives.fingerprint and a 'ble' source row.
         let newestFP = Data([0x03])
         let newest = Dive(
             deviceId: deviceB.id,
@@ -323,6 +324,12 @@ final class DiveComputerTests: XCTestCase {
             fingerprint: newestFP
         )
         try diveService.saveDive(newest)
+        try database.dbQueue.write { db in
+            try DiveSourceFingerprint(
+                diveId: newest.id, deviceId: deviceB.id,
+                fingerprint: newestFP, sourceType: "ble"
+            ).insert(db)
+        }
         XCTAssertEqual(try importService.lastFingerprint(deviceId: deviceB.id), newestFP)
     }
 
@@ -355,6 +362,76 @@ final class DiveComputerTests: XCTestCase {
 
         XCTAssertEqual(try importService.lastFingerprint(deviceId: secondary.id), Data([0xB2, 0x02]))
         XCTAssertEqual(try importService.lastFingerprint(deviceId: primary.id), Data([0xA2, 0x01]))
+
+        // Both were written by the BLE path, so they are trusted as .ble.
+        XCTAssertEqual(try importService.lastSyncFingerprint(deviceId: secondary.id)?.source, .ble)
+        XCTAssertEqual(try importService.lastSyncFingerprint(deviceId: primary.id)?.source, .ble)
+    }
+
+    /// PRO-70: a BLE-sourced fingerprint is preferred over a newer non-BLE one
+    /// (e.g. Shearwater Cloud, whose fingerprints libdivecomputer cannot match),
+    /// and the source is reported so callers can size the auto-stop window.
+    func testLastSyncFingerprintPrefersBLESourceOverNewerCloudSource() throws {
+        let device = Device(model: "Perdix", serialNumber: "C1", firmwareVersion: "1.0")
+        let otherDevice = Device(model: "Petrel", serialNumber: "C2", firmwareVersion: "1.0")
+        try diveService.saveDevice(device)
+        try diveService.saveDevice(otherDevice)
+
+        // Older dive, BLE-imported: source row with 'ble'.
+        let bleFP = Data([0x10, 0x20, 0x30, 0x40])
+        let olderBLE = Dive(
+            deviceId: otherDevice.id,
+            startTimeUnix: 1700000000, endTimeUnix: 1700003600,
+            maxDepthM: 20, avgDepthM: 12, bottomTimeSec: 2000,
+            fingerprint: Data([0xFF])
+        )
+        try diveService.saveDive(olderBLE)
+
+        // Newer dive, Cloud-imported: UTF-8 dive ID as fingerprint.
+        let cloudFP = "123456789".data(using: .utf8)!
+        let newerCloud = Dive(
+            deviceId: device.id,
+            startTimeUnix: 1700100000, endTimeUnix: 1700103600,
+            maxDepthM: 25, avgDepthM: 15, bottomTimeSec: 2500,
+            fingerprint: cloudFP
+        )
+        try diveService.saveDive(newerCloud)
+
+        try database.dbQueue.write { db in
+            try DiveSourceFingerprint(
+                diveId: olderBLE.id, deviceId: device.id, fingerprint: bleFP, sourceType: "ble"
+            ).insert(db)
+            try DiveSourceFingerprint(
+                diveId: newerCloud.id, deviceId: device.id, fingerprint: cloudFP,
+                sourceType: "shearwater_cloud"
+            ).insert(db)
+        }
+
+        let result = try XCTUnwrap(try importService.lastSyncFingerprint(deviceId: device.id))
+        XCTAssertEqual(result.fingerprint, bleFP)
+        XCTAssertEqual(result.source, .ble)
+    }
+
+    /// PRO-70: with no BLE-sourced row at all, fall back to the legacy union
+    /// (which may be a Cloud fingerprint) and report it as such.
+    func testLastSyncFingerprintFallsBackToLegacyWhenNoBLESource() throws {
+        let device = Device(model: "Perdix", serialNumber: "L1", firmwareVersion: "1.0")
+        try diveService.saveDevice(device)
+
+        let legacyFP = Data([0xAB, 0xCD])
+        let dive = Dive(
+            deviceId: device.id,
+            startTimeUnix: 1700000000, endTimeUnix: 1700003600,
+            maxDepthM: 20, avgDepthM: 12, bottomTimeSec: 2000,
+            fingerprint: legacyFP
+        )
+        try diveService.saveDive(dive)
+
+        let result = try XCTUnwrap(try importService.lastSyncFingerprint(deviceId: device.id))
+        XCTAssertEqual(result.fingerprint, legacyFP)
+        XCTAssertEqual(result.source, .legacy)
+
+        XCTAssertNil(try importService.lastSyncFingerprint(deviceId: "nonexistent"))
     }
 
     // MARK: - Data Mapper Tests

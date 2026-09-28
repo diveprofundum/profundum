@@ -93,4 +93,34 @@ final class ImportProgressTrackerTests: XCTestCase {
         XCTAssertTrue(tracker.shouldAutoStop)
         XCTAssertEqual(tracker.consecutiveSkips, 5)
     }
+
+    /// PRO-70 / PRO-32: a save error is not a duplicate. With the lower
+    /// 3-skip threshold, three persistence failures must not end the download.
+    func testFailuresDoNotCountTowardAutoStop() {
+        let tracker = ImportProgressTracker(consecutiveSkipThreshold: 3)
+
+        for _ in 0..<5 {
+            tracker.recordFailure()
+        }
+        XCTAssertEqual(tracker.failed, 5)
+        XCTAssertEqual(tracker.skipped, 0)
+        XCTAssertEqual(tracker.consecutiveSkips, 0)
+        XCTAssertFalse(tracker.shouldAutoStop)
+    }
+
+    /// A failure in the middle of a skip run neither resets nor extends it.
+    func testFailureLeavesConsecutiveSkipsUntouched() {
+        let tracker = ImportProgressTracker(consecutiveSkipThreshold: 3)
+
+        tracker.record(.skipped)
+        tracker.record(.skipped)
+        tracker.recordFailure()
+        XCTAssertEqual(tracker.consecutiveSkips, 2)
+        XCTAssertFalse(tracker.shouldAutoStop)
+
+        tracker.record(.skipped)
+        XCTAssertTrue(tracker.shouldAutoStop)
+        XCTAssertEqual(tracker.failed, 1)
+        XCTAssertEqual(tracker.skipped, 3)
+    }
 }
