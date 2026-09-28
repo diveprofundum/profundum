@@ -581,9 +581,21 @@ class ImportSession: ObservableObject {
         do {
             try transport.writeTrace(to: url, header: header)
             importLog.error("Trace written to \(url.path, privacy: .public)")
+            Self.pruneTraceFiles(in: dir, keeping: 30)
         } catch {
             let desc = error.localizedDescription
             importLog.error("Failed to write trace file: \(desc, privacy: .public)")
+        }
+    }
+
+    /// Keeps only the newest `limit` trace files (names sort chronologically).
+    nonisolated static func pruneTraceFiles(in dir: URL, keeping limit: Int) {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return }
+        let sorted = names.filter { $0.hasSuffix(".txt") }.sorted()
+        guard sorted.count > limit else { return }
+        for name in sorted.prefix(sorted.count - limit) {
+            try? fm.removeItem(at: dir.appendingPathComponent(name))
         }
     }
 
