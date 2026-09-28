@@ -207,7 +207,7 @@ Variables available for segment formulas:
 
 ### Branch & PR Workflow
 
-- One Linear issue per branch. Name branches `dev/<TICKET>` using the issue key only (e.g. `dev/PRO-70`), not Linear's auto-generated slug.
+- One Linear issue per branch. Name branches `dev/<ticket>` using the lower-cased issue key only (e.g. `dev/pro-70`), not Linear's auto-generated slug.
 - Mark the Linear issue In Progress when starting; reference the issue key in the PR title.
 - The agent commits locally; the user pushes the branch; the agent then opens the PR and runs the reviews below.
 
