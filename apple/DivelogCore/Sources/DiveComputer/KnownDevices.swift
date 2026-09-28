@@ -1,5 +1,49 @@
 import Foundation
 
+/// Per-device BLE transport behaviour that deviates from the defaults.
+///
+/// Values are deliberately data, not code, so a failing import's trace header
+/// can record exactly which quirks were active (see `TracingBLETransport`).
+public struct BLETransportQuirks: Equatable, Sendable {
+    /// Use ATT *Write Request* (with response) for commands even when the Tx
+    /// characteristic also supports *Write Command* (without response).
+    ///
+    /// Costs one extra round trip per packet but gives link-level confirmation
+    /// that the peripheral's stack accepted each byte. Used to distinguish
+    /// "the device never got our ACK" from "the device got it and ignored it".
+    public var preferWriteWithResponse: Bool
+
+    /// Minimum time between the end of the previous read and the next write.
+    ///
+    /// Some firmware drops host packets that arrive while it is still busy
+    /// after transmitting; spacing writes out avoids that window. `0` disables.
+    public var writePacing: TimeInterval
+
+    /// How long to wait after disconnecting before reconnecting during a
+    /// retry. Devices with their own host-timeout state machines need long
+    /// enough to expire it, or the next session starts wedged.
+    public var reconnectDelay: TimeInterval
+
+    public init(
+        preferWriteWithResponse: Bool = false,
+        writePacing: TimeInterval = 0,
+        reconnectDelay: TimeInterval = 2
+    ) {
+        self.preferWriteWithResponse = preferWriteWithResponse
+        self.writePacing = writePacing
+        self.reconnectDelay = reconnectDelay
+    }
+
+    public static let `default` = BLETransportQuirks()
+
+    /// One-line summary for trace headers and logs.
+    public var summary: String {
+        "writeWithResponse=\(preferWriteWithResponse) "
+            + "writePacing=\(Int(writePacing * 1000))ms "
+            + "reconnectDelay=\(reconnectDelay)s"
+    }
+}
+
 /// Registry of known BLE-capable dive computers and their characteristic UUIDs.
 public enum KnownDiveComputer: String, CaseIterable, Sendable {
     case shearwater
@@ -73,6 +117,26 @@ public enum KnownDiveComputer: String, CaseIterable, Sendable {
         switch self {
         case .halcyonSymbios:  return "00000101-8C3B-4F2C-A59E-8C08224F3253"
         default:               return nil
+        }
+    }
+
+    /// Transport quirks for this device family.
+    ///
+    /// Halcyon Symbios (PRO-71): the device runs a ~5.6 s host-response timer
+    /// and occasionally fails to register an ACK that CoreBluetooth reports as
+    /// sent, then NAKs with `ERR_TIMEOUT` and stays wedged for a while. Writes
+    /// with response confirm receipt at the ATT layer, and a longer reconnect
+    /// delay lets the device's transfer state expire before the next session.
+    public var transportQuirks: BLETransportQuirks {
+        switch self {
+        case .halcyonSymbios:
+            return BLETransportQuirks(
+                preferWriteWithResponse: true,
+                writePacing: 0,
+                reconnectDelay: 8
+            )
+        default:
+            return .default
         }
     }
 

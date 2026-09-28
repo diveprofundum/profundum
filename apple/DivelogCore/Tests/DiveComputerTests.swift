@@ -812,6 +812,41 @@ final class DiveComputerTests: XCTestCase {
         XCTAssertNil(result)
     }
 
+    // MARK: - Transport quirks (PRO-71)
+
+    func testDefaultQuirksAreNeutral() {
+        let quirks = BLETransportQuirks.default
+        XCTAssertFalse(quirks.preferWriteWithResponse)
+        XCTAssertEqual(quirks.writePacing, 0)
+        XCTAssertEqual(quirks.reconnectDelay, 2)
+    }
+
+    func testNonHalcyonDevicesUseDefaultQuirks() {
+        for device in KnownDiveComputer.allCases where device != .halcyonSymbios {
+            XCTAssertEqual(device.transportQuirks, .default, "\(device) should use default quirks")
+        }
+    }
+
+    func testHalcyonSymbiosQuirks() {
+        let quirks = KnownDiveComputer.halcyonSymbios.transportQuirks
+        XCTAssertTrue(quirks.preferWriteWithResponse)
+        XCTAssertEqual(quirks.writePacing, 0)
+        XCTAssertGreaterThanOrEqual(
+            quirks.reconnectDelay, 6,
+            "must outlast the Symbios ~5.6 s host-response timer"
+        )
+    }
+
+    func testQuirksSummaryIncludesEveryField() {
+        let quirks = BLETransportQuirks(
+            preferWriteWithResponse: true, writePacing: 0.15, reconnectDelay: 8
+        )
+        XCTAssertEqual(
+            quirks.summary,
+            "writeWithResponse=true writePacing=150ms reconnectDelay=8.0s"
+        )
+    }
+
     func testExistingDevicesParseDeviceNameNil() {
         let existingDevices: [KnownDiveComputer] = [
             .shearwater, .hwOstc, .suuntoEon, .garminDescent, .maresGenius,

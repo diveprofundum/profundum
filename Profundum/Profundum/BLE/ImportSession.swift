@@ -188,6 +188,8 @@ class ImportSession: ObservableObject {
 
         // Wrap transport with tracing for protocol-level I/O visibility
         let tracingTransport = TracingBLETransport(wrapping: transport)
+        let initialLink = transport.linkDescription
+        importLog.notice("Transport: \(initialLink, privacy: .public)")
 
         // Keep screen awake during import — iOS throttles BLE when the screen locks,
         // causing mid-transfer failures on slow dive computers (e.g. Halcyon Symbios).
@@ -260,6 +262,7 @@ class ImportSession: ObservableObject {
             var consecutiveNoProgress = 0
             var attempt = 0
             var currentTransport: TracingBLETransport = tracingTransport
+            var currentLink = initialLink
 
             // Refreshable fingerprint for incremental sync — updated after each
             // successful attempt so libdivecomputer skips already-downloaded dives.
@@ -352,7 +355,8 @@ class ImportSession: ObservableObject {
                     importLog.info("Import cancelled — dumping I/O trace")
                     currentTransport.dumpTrace()
                     self.writeTraceFile(
-                        currentTransport, device: device, attempt: attempt, reason: "cancelled"
+                        currentTransport, device: device, attempt: attempt,
+                        reason: "cancelled", link: currentLink
                     )
                     BLEPeripheralTransport.enableLogging = false
                     #if os(iOS)
@@ -398,7 +402,8 @@ class ImportSession: ObservableObject {
                     )
                     currentTransport.dumpTrace()
                     self.writeTraceFile(
-                        currentTransport, device: device, attempt: attempt, reason: errDesc
+                        currentTransport, device: device, attempt: attempt,
+                        reason: errDesc, link: currentLink
                     )
 
                     let retryable = (error as? DiveComputerError)?.isRetryable ?? true
@@ -448,6 +453,8 @@ class ImportSession: ObservableObject {
                         return
                     }
                     currentTransport = TracingBLETransport(wrapping: newTransport)
+                    currentLink = newTransport.linkDescription
+                    importLog.notice("Transport: \(currentLink, privacy: .public)")
                     // Only reset if user hasn't cancelled during reconnect
                     guard !Task.isCancelled else { continue }
                     self.isCancelled = false
@@ -544,7 +551,8 @@ class ImportSession: ObservableObject {
     /// be pulled off the device without Console.app. Never throws; failures to
     /// write are logged and otherwise ignored.
     nonisolated private func writeTraceFile(
-        _ transport: TracingBLETransport, device: Device, attempt: Int, reason: String
+        _ transport: TracingBLETransport, device: Device, attempt: Int, reason: String,
+        link: String
     ) {
         guard let dir = Self.traceDirectory else { return }
         let stamp = ISO8601DateFormatter().string(from: Date())
@@ -559,6 +567,7 @@ class ImportSession: ObservableObject {
             "firmware: \(device.firmwareVersion)",
             "attempt: \(attempt)",
             "reason: \(reason)",
+            "link: \(link)",
             "",
         ]
         do {
@@ -578,8 +587,13 @@ class ImportSession: ObservableObject {
     private func reconnect(peripheral: CBPeripheral) async -> BLEPeripheralTransport? {
         await MainActor.run { scanner.disconnect() }
 
-        // Give the device time to reset its BLE stack
-        try? await Task.sleep(for: .seconds(2))
+        // Give the device time to reset its BLE stack (and, for devices with a
+        // host-timeout state machine, to let a wedged transfer expire).
+        let delay = await MainActor.run {
+            scanner.connectedKnownComputer?.transportQuirks.reconnectDelay ?? 2
+        }
+        importLog.info("Reconnecting in \(delay, privacy: .public)s")
+        try? await Task.sleep(for: .seconds(delay))
         guard !Task.isCancelled else { return nil }
 
         await MainActor.run { scanner.connect(peripheral) }
