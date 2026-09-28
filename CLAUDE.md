@@ -205,6 +205,12 @@ Variables available for segment formulas:
 - Thresholds: 95% project (both Rust and Swift), 90% patch (new code)
 - Install locally: `cargo install cargo-llvm-cov`
 
+### Branch & PR Workflow
+
+- One Linear issue per branch. Name branches `dev/<TICKET>` using the issue key only (e.g. `dev/PRO-70`), not Linear's auto-generated slug.
+- Mark the Linear issue In Progress when starting; reference the issue key in the PR title.
+- The agent commits locally; the user pushes the branch; the agent then opens the PR and runs the reviews below.
+
 ### Validation Suite (required for all code changes)
 
 **Before opening a PR**, run the full validation suite locally:
