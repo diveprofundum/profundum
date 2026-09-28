@@ -819,6 +819,7 @@ final class DiveComputerTests: XCTestCase {
         XCTAssertFalse(quirks.preferWriteWithResponse)
         XCTAssertEqual(quirks.writePacing, 0)
         XCTAssertEqual(quirks.reconnectDelay, 2)
+        XCTAssertNil(quirks.readTimeoutFloor)
     }
 
     func testNonHalcyonDevicesUseDefaultQuirks() {
@@ -835,16 +836,22 @@ final class DiveComputerTests: XCTestCase {
             quirks.reconnectDelay, 6,
             "must outlast the Symbios ~5.6 s host-response timer"
         )
+        XCTAssertEqual(
+            quirks.readTimeoutFloor, 4,
+            "host must time out before the Symbios ~5 s ACK timer so a NAK can still be acted on"
+        )
     }
 
     func testQuirksSummaryIncludesEveryField() {
         let quirks = BLETransportQuirks(
-            preferWriteWithResponse: true, writePacing: 0.15, reconnectDelay: 8
+            preferWriteWithResponse: true, writePacing: 0.15, reconnectDelay: 8,
+            readTimeoutFloor: 4
         )
         XCTAssertEqual(
             quirks.summary,
-            "writeWithResponse=true writePacing=150ms reconnectDelay=8.0s"
+            "writeWithResponse=true writePacing=150ms reconnectDelay=8.0s readTimeoutFloor=4.0s"
         )
+        XCTAssertTrue(BLETransportQuirks.default.summary.hasSuffix("readTimeoutFloor=default"))
     }
 
     func testExistingDevicesParseDeviceNameNil() {

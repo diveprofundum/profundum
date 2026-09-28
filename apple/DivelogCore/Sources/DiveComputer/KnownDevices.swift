@@ -24,14 +24,24 @@ public struct BLETransportQuirks: Equatable, Sendable {
     /// enough to expire it, or the next session starts wedged.
     public var reconnectDelay: TimeInterval
 
+    /// Overrides the transport's default read-timeout floor (the minimum the
+    /// bridge enforces on top of libdivecomputer's requested timeout).
+    ///
+    /// `nil` keeps the transport default. Devices with their own host-response
+    /// timer need a floor *below* that timer so the host can request a
+    /// retransmission while the device is still listening.
+    public var readTimeoutFloor: TimeInterval?
+
     public init(
         preferWriteWithResponse: Bool = false,
         writePacing: TimeInterval = 0,
-        reconnectDelay: TimeInterval = 2
+        reconnectDelay: TimeInterval = 2,
+        readTimeoutFloor: TimeInterval? = nil
     ) {
         self.preferWriteWithResponse = preferWriteWithResponse
         self.writePacing = writePacing
         self.reconnectDelay = reconnectDelay
+        self.readTimeoutFloor = readTimeoutFloor
     }
 
     public static let `default` = BLETransportQuirks()
@@ -40,7 +50,8 @@ public struct BLETransportQuirks: Equatable, Sendable {
     public var summary: String {
         "writeWithResponse=\(preferWriteWithResponse) "
             + "writePacing=\(Int(writePacing * 1000))ms "
-            + "reconnectDelay=\(reconnectDelay)s"
+            + "reconnectDelay=\(reconnectDelay)s "
+            + "readTimeoutFloor=\(readTimeoutFloor.map { "\($0)s" } ?? "default")"
     }
 }
 
@@ -122,18 +133,21 @@ public enum KnownDiveComputer: String, CaseIterable, Sendable {
 
     /// Transport quirks for this device family.
     ///
-    /// Halcyon Symbios (PRO-71): the device runs a ~5.6 s host-response timer
-    /// and occasionally fails to register an ACK that CoreBluetooth reports as
-    /// sent, then NAKs with `ERR_TIMEOUT` and stays wedged for a while. Writes
-    /// with response confirm receipt at the ATT layer, and a longer reconnect
-    /// delay lets the device's transfer state expire before the next session.
+    /// Halcyon Symbios (PRO-71): the device runs a ~5–6 s host-response timer
+    /// and occasionally fails to act on an ACK that the ATT layer confirmed as
+    /// delivered. Once its timer fires it NAKs with `ERR_TIMEOUT` and the
+    /// transfer is dead until a power cycle. The host read timeout must expire
+    /// *before* that timer so a retransmission request reaches a device that
+    /// is still listening; writes with response give ATT-level confirmation;
+    /// the longer reconnect delay gives the device time to settle.
     public var transportQuirks: BLETransportQuirks {
         switch self {
         case .halcyonSymbios:
             return BLETransportQuirks(
                 preferWriteWithResponse: true,
                 writePacing: 0,
-                reconnectDelay: 8
+                reconnectDelay: 8,
+                readTimeoutFloor: 4
             )
         default:
             return .default

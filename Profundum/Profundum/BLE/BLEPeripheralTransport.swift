@@ -95,7 +95,8 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
     /// Indication-based transports (writeType == .withResponse) need a larger
     /// timeout floor due to GATT confirmation round-trips on every packet.
     var minimumTimeoutSeconds: TimeInterval {
-        writeType == .withResponse ? 10.0 : 5.0
+        if let floor = quirks.readTimeoutFloor { return floor }
+        return writeType == .withResponse ? 10.0 : 5.0
     }
 
     /// - Parameters:
