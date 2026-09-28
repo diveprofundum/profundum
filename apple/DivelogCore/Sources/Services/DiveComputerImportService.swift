@@ -131,7 +131,11 @@ public final class DivePersistenceQueue: @unchecked Sendable {
     }
 
     /// Blocks until every dive enqueued so far has been written.
+    ///
+    /// Must not be called from `onSaved` (which runs on the persistence queue):
+    /// that would deadlock. Use `drainAsync()` from async contexts.
     public func drain() {
+        dispatchPrecondition(condition: .notOnQueue(queue))
         queue.sync {}
     }
 
@@ -141,6 +145,28 @@ public final class DivePersistenceQueue: @unchecked Sendable {
             queue.async { cont.resume() }
         }
     }
+}
+
+/// A cancellation flag that can be set and polled from any thread.
+///
+/// Import cancellation is requested from several places at once: the UI
+/// (MainActor), the persistence queue (auto-stop after consecutive duplicates),
+/// and the libdivecomputer queue (cutoff-time check in `onDive`), and polled
+/// by libdivecomputer through `onCancel`. A lock keeps all of that race-free.
+public final class CancellationFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _isSet = false
+
+    public init() {}
+
+    /// Whether cancellation has been requested.
+    public var isSet: Bool { lock.withLock { _isSet } }
+
+    /// Requests cancellation.
+    public func set() { lock.withLock { _isSet = true } }
+
+    /// Clears the flag, e.g. before a new attempt.
+    public func reset() { lock.withLock { _isSet = false } }
 }
 
 /// Service for importing dives from a dive computer.

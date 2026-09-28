@@ -131,6 +131,51 @@ final class DivePersistenceQueueTests: XCTestCase {
 
         XCTAssertEqual(tracker.saved, 20)
     }
+
+    // MARK: - CancellationFlag
+
+    func testCancellationFlagSetResetIsSet() {
+        let flag = CancellationFlag()
+        XCTAssertFalse(flag.isSet)
+        flag.set()
+        XCTAssertTrue(flag.isSet)
+        flag.set()
+        XCTAssertTrue(flag.isSet, "Setting twice stays set")
+        flag.reset()
+        XCTAssertFalse(flag.isSet)
+    }
+
+    func testCancellationFlagSetFromPersistenceCallbackIsObservedByPoller() throws {
+        // Mirrors ImportSession: auto-stop sets the flag from the persistence
+        // queue's onSaved callback while libdivecomputer polls it elsewhere.
+        let tracker = ImportProgressTracker(consecutiveSkipThreshold: 2)
+        let flag = CancellationFlag()
+        let queue = DivePersistenceQueue(importService: importService, tracker: tracker) { _, _, _ in
+            if tracker.shouldAutoStop { flag.set() }
+        }
+        let dive = parsedDive(start: 1_700_000_000, fp: 1)
+        // Save once (new), then re-save the same dive twice (skipped, skipped).
+        for _ in 0..<3 { queue.enqueue(dive, deviceId: device.id) }
+        queue.drain()
+        XCTAssertTrue(flag.isSet)
+        XCTAssertTrue(tracker.shouldAutoStop)
+    }
+
+    func testCancellationFlagConcurrentAccess() {
+        let flag = CancellationFlag()
+        let group = DispatchGroup()
+        for i in 0..<8 {
+            group.enter()
+            DispatchQueue.global().async {
+                for _ in 0..<5000 {
+                    if i % 2 == 0 { flag.set() } else { _ = flag.isSet }
+                }
+                group.leave()
+            }
+        }
+        group.wait()
+        XCTAssertTrue(flag.isSet)
+    }
 }
 
 /// Thread-safe append-only list for recording callback order.
