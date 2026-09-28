@@ -93,16 +93,31 @@ public final class DiveComputerImportService: Sendable {
     ///
     /// Used for incremental sync: pass this fingerprint to libdivecomputer so it
     /// stops downloading once it reaches a dive we already have.
+    ///
+    /// Checks both the legacy `dives.fingerprint` column (populated only when
+    /// this device is the dive's primary) and `dive_source_fingerprints` (which
+    /// records every device that contributed to a dive). A secondary computer
+    /// whose dives were all merged into another device's dives has fingerprints
+    /// only in the latter — reading just the legacy column made incremental
+    /// sync silently fall back to a full re-download for such devices (PRO-70).
     /// - Parameter deviceId: The device to look up.
     /// - Returns: The fingerprint of the newest dive from this device, or `nil`.
     public func lastFingerprint(deviceId: String) throws -> Data? {
         try database.dbQueue.read { db in
-            try Dive
-                .filter(Column("device_id") == deviceId)
-                .filter(Column("fingerprint") != nil)
-                .order(Column("start_time_unix").desc)
-                .fetchOne(db)?
-                .fingerprint
+            try Data.fetchOne(db, sql: """
+                SELECT fingerprint FROM (
+                    SELECT d.fingerprint AS fingerprint, d.start_time_unix AS start_time_unix
+                    FROM dives d
+                    WHERE d.device_id = ? AND d.fingerprint IS NOT NULL
+                    UNION ALL
+                    SELECT f.fingerprint AS fingerprint, d.start_time_unix AS start_time_unix
+                    FROM dive_source_fingerprints f
+                    JOIN dives d ON d.id = f.dive_id
+                    WHERE f.device_id = ?
+                )
+                ORDER BY start_time_unix DESC
+                LIMIT 1
+                """, arguments: [deviceId, deviceId])
         }
     }
 

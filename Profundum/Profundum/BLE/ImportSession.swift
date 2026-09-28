@@ -195,7 +195,12 @@ class ImportSession: ObservableObject {
         // Enable BLE-level logging for real-device debugging
         BLEPeripheralTransport.enableLogging = true
 
-        let tracker = ImportProgressTracker()
+        // When a fingerprint was supplied, libdivecomputer should stop on its own
+        // before reaching already-imported dives, so consecutive skips indicate a
+        // stale/mismatched fingerprint — stop early rather than downloading ten
+        // full dives just to discard them (PRO-70). Without a fingerprint (first
+        // sync or forced full sync) keep the wider window.
+        let tracker = ImportProgressTracker(consecutiveSkipThreshold: lastFP == nil ? 10 : 3)
 
         downloadTask = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }

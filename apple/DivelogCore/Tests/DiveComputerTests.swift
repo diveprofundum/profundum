@@ -234,6 +234,129 @@ final class DiveComputerTests: XCTestCase {
         XCTAssertEqual(last, fp)
     }
 
+    /// PRO-70: a secondary computer whose dives were all merged into another
+    /// device's dives has fingerprints only in `dive_source_fingerprints`.
+    /// `lastFingerprint` must find them, or incremental sync silently degrades
+    /// to a full re-download on every import.
+    func testLastFingerprintFindsSecondaryDeviceViaSourceFingerprints() throws {
+        let primary = Device(model: "Petrel", serialNumber: "P1", firmwareVersion: "1.0")
+        let secondary = Device(model: "Perdix", serialNumber: "S1", firmwareVersion: "1.0")
+        try diveService.saveDevice(primary)
+        try diveService.saveDevice(secondary)
+
+        // Dive owned by the primary; the secondary only contributed samples.
+        let primaryFP = Data([0xA1])
+        let secondaryFP = Data([0xB1])
+        let dive = Dive(
+            deviceId: primary.id,
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 30.0,
+            avgDepthM: 18.0,
+            bottomTimeSec: 3000,
+            fingerprint: primaryFP
+        )
+        try diveService.saveDive(dive)
+        try database.dbQueue.write { db in
+            try DiveSourceFingerprint(
+                diveId: dive.id, deviceId: secondary.id,
+                fingerprint: secondaryFP, sourceType: "ble"
+            ).insert(db)
+        }
+
+        XCTAssertEqual(try importService.lastFingerprint(deviceId: secondary.id), secondaryFP)
+        // Primary is unaffected and does not pick up the secondary's fingerprint.
+        XCTAssertEqual(try importService.lastFingerprint(deviceId: primary.id), primaryFP)
+    }
+
+    /// PRO-70: when a device is primary on some dives and secondary on others,
+    /// the newest dive wins regardless of which table holds the fingerprint.
+    func testLastFingerprintPicksNewestAcrossLegacyAndSourceFingerprints() throws {
+        let deviceA = Device(model: "Petrel", serialNumber: "A", firmwareVersion: "1.0")
+        let deviceB = Device(model: "Perdix", serialNumber: "B", firmwareVersion: "1.0")
+        try diveService.saveDevice(deviceA)
+        try diveService.saveDevice(deviceB)
+
+        // Older dive: B is primary (legacy column).
+        let olderFP = Data([0x01])
+        let older = Dive(
+            deviceId: deviceB.id,
+            startTimeUnix: 1700000000,
+            endTimeUnix: 1700003600,
+            maxDepthM: 20.0,
+            avgDepthM: 12.0,
+            bottomTimeSec: 2000,
+            fingerprint: olderFP
+        )
+        try diveService.saveDive(older)
+
+        // Newer dive: A is primary, B merged in (source fingerprint only).
+        let newerFPForB = Data([0x02])
+        let newer = Dive(
+            deviceId: deviceA.id,
+            startTimeUnix: 1700100000,
+            endTimeUnix: 1700103600,
+            maxDepthM: 25.0,
+            avgDepthM: 15.0,
+            bottomTimeSec: 2500,
+            fingerprint: Data([0xAA])
+        )
+        try diveService.saveDive(newer)
+        try database.dbQueue.write { db in
+            try DiveSourceFingerprint(
+                diveId: newer.id, deviceId: deviceB.id,
+                fingerprint: newerFPForB, sourceType: "ble"
+            ).insert(db)
+        }
+
+        XCTAssertEqual(try importService.lastFingerprint(deviceId: deviceB.id), newerFPForB)
+
+        // And the reverse: newest dive is one where B is primary.
+        let newestFP = Data([0x03])
+        let newest = Dive(
+            deviceId: deviceB.id,
+            startTimeUnix: 1700200000,
+            endTimeUnix: 1700203600,
+            maxDepthM: 22.0,
+            avgDepthM: 14.0,
+            bottomTimeSec: 2200,
+            fingerprint: newestFP
+        )
+        try diveService.saveDive(newest)
+        XCTAssertEqual(try importService.lastFingerprint(deviceId: deviceB.id), newestFP)
+    }
+
+    /// PRO-70 end-to-end: after a real merge via `saveImportedDive`, the
+    /// secondary device's BLE fingerprint is what `lastFingerprint` returns.
+    func testLastFingerprintAfterMergeReturnsSecondaryBLEFingerprint() throws {
+        let primary = Device(model: "Petrel", serialNumber: "P2", firmwareVersion: "1.0", ownership: .mine)
+        let secondary = Device(model: "Perdix", serialNumber: "S2", firmwareVersion: "1.0", ownership: .mine)
+        try diveService.saveDevice(primary)
+        try diveService.saveDevice(secondary)
+
+        let samples = [
+            ParsedSample(tSec: 0, depthM: 0, tempC: 20),
+            ParsedSample(tSec: 60, depthM: 20, tempC: 19),
+            ParsedSample(tSec: 120, depthM: 0, tempC: 20),
+        ]
+        let fromPrimary = ParsedDive(
+            startTimeUnix: 1700000000, endTimeUnix: 1700000120,
+            maxDepthM: 20, avgDepthM: 10, bottomTimeSec: 120,
+            fingerprint: Data([0xA2, 0x01]), samples: samples
+        )
+        let fromSecondary = ParsedDive(
+            startTimeUnix: 1700000005, endTimeUnix: 1700000125,
+            maxDepthM: 20, avgDepthM: 10, bottomTimeSec: 120,
+            fingerprint: Data([0xB2, 0x02]), samples: samples
+        )
+
+        XCTAssertEqual(try importService.saveImportedDive(fromPrimary, deviceId: primary.id), .saved)
+        XCTAssertEqual(try importService.saveImportedDive(fromSecondary, deviceId: secondary.id), .merged)
+
+        XCTAssertEqual(try importService.lastFingerprint(deviceId: secondary.id), Data([0xB2, 0x02]))
+        XCTAssertEqual(try importService.lastFingerprint(deviceId: primary.id), Data([0xA2, 0x01]))
+    }
+
     // MARK: - Data Mapper Tests
 
     func testDataMapperRoundTrip() {
