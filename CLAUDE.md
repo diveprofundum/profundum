@@ -221,7 +221,7 @@ Variables available for segment formulas:
 | 2. Tests | `make test` | Rust + Swift test suites |
 | 3. Build | `xcodebuild build -project Profundum/Profundum.xcodeproj -scheme Profundum -destination 'platform=macOS' -quiet` | macOS build |
 | 4. Security | `make security` | cargo audit + cargo deny |
-| 5. Mutation testing | `make mutants` | Rust compute core (slow, local only) |
+| 5. Mutation testing | `make mutants` | Rust compute core (slow, local only). **Run alone**: never in parallel with builds, tests, or other heavy processes — it saturates the machine. Wait for everything else to finish first, and run nothing else until it completes. |
 | 6. Version check | `make version-check` | Only if manifests changed |
 
 **After opening the PR**, run code reviews:
