@@ -640,7 +640,12 @@ class ImportSession: ObservableObject {
                 self.statusMessage =
                     "Connection lost. \(total) dive\(plural) saved before the error."
             } else {
-                self.phase = .error(.downloadFailed(error.localizedDescription))
+                var message = error.localizedDescription
+                if self.scanner.connectedKnownComputer == .halcyonSymbios {
+                    message += " The Symbios usually needs to be powered off and on "
+                        + "before the next attempt."
+                }
+                self.phase = .error(.downloadFailed(message))
             }
         }
     }

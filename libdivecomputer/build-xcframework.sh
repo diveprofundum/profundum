@@ -32,6 +32,21 @@ echo "Building libdivecomputer for all Apple platforms..."
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 
+# Apply local patches on a copy of the submodule so the checkout stays clean.
+# Patches live in libdivecomputer/patches/*.patch (git diff format, paths
+# relative to the submodule root) and are applied in lexical order.
+PATCH_DIR="$SCRIPT_DIR/patches"
+PATCHED_SRC="$BUILD_DIR/src"
+echo "Copying source to $PATCHED_SRC..."
+rsync -a --exclude '.git' "$SRC_DIR/" "$PATCHED_SRC/"
+if compgen -G "$PATCH_DIR/*.patch" > /dev/null; then
+    for patch in "$PATCH_DIR"/*.patch; do
+        echo "Applying $(basename "$patch")..."
+        patch -d "$PATCHED_SRC" -p1 --forward --silent < "$patch"
+    done
+fi
+SRC_DIR="$PATCHED_SRC"
+
 # Generate configure script if needed
 pushd "$SRC_DIR" > /dev/null
 if [ ! -f configure ]; then

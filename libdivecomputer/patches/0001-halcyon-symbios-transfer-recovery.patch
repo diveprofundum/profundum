@@ -1,0 +1,229 @@
+diff --git a/src/halcyon_symbios.c b/src/halcyon_symbios.c
+index 3eabf80..57696ad 100644
+--- a/src/halcyon_symbios.c
++++ b/src/halcyon_symbios.c
+@@ -154,16 +154,21 @@ halcyon_symbios_recv (halcyon_symbios_device_t *device, unsigned char cmd, unsig
+ 	}
+ 
+ 	// Verify the command byte.
++	//
++	// A NAK packet is accepted regardless of the command byte: after an
++	// aborted transfer the device reports the error under the command it
++	// is stuck in (e.g. 0x90) rather than the one being answered, and the
++	// error code is what the caller needs to recover.
+ 	unsigned int rsp = packet[0];
+ 	unsigned int expected = cmd | CMD_RESPONSE;
+-	if (rsp != expected) {
++	unsigned int type = packet[1];
++	if (rsp != expected && !(type == NAK && len == 4)) {
+ 		ERROR (abstract->context, "Unexpected command byte (%02x).", rsp);
+ 		status = DC_STATUS_PROTOCOL;
+ 		goto error_exit;
+ 	}
+ 
+ 	// Verify the ACK/NAK byte.
+-	unsigned int type = packet[1];
+ 	if (type != ACK && type != NAK) {
+ 		ERROR (abstract->context, "Unexpected ACK/NAK byte (%02x).", type);
+ 		status = DC_STATUS_PROTOCOL;
+@@ -260,16 +265,51 @@ halcyon_symbios_download (halcyon_symbios_device_t *device, dc_event_progress_t
+ 	// Clear the buffer.
+ 	dc_buffer_clear (buffer);
+ 
+-	// Request the data.
++	const unsigned int initial = progress ? progress->current : 0;
++
++	// Recovery state (see below).
++	//
++	// The Symbios firmware occasionally fails to act on a host ACK that the
++	// BLE link has already confirmed as delivered. About 5 s later it gives
++	// up and sends a NAK with ERR_TIMEOUT, after which the transfer is dead:
++	// the retransmission NAK the host would normally send is never answered.
++	// Recover in two stages: first resend the ACK (the cheapest thing the
++	// device might still be waiting for); if that produces nothing, re-issue
++	// the request and block command and skip the blocks already received.
++	unsigned int length = 0;
++	unsigned int counter = 1;
++	unsigned int nbytes = 0;
++	unsigned int nrestarts = 0;
++	unsigned int nresends = 0;
+ 	unsigned char response[4] = {0};
++
++restart:
++	// Request the data.
++	memset (response, 0, sizeof(response));
+ 	status = halcyon_symbios_transfer (device, request, data, size, response, sizeof(response), NULL, &errcode);
+ 	if (status != DC_STATUS_SUCCESS) {
++		if (nrestarts > 0 && errcode == (ERR_FILE | ERR_BASE)) {
++			// The device refuses to reopen a file it was transferring a
++			// moment ago: it is wedged, not missing data. Don't let the
++			// caller mistake this for "dive not available".
++			ERROR (abstract->context, "Device rejected the restarted request (ERR_FILE); it needs a power cycle.");
++			errcode = 0;
++			status = DC_STATUS_IO;
++			goto error_exit;
++		}
+ 		ERROR (abstract->context, "Failed to request the data.");
+ 		goto error_exit;
+ 	}
+ 
+ 	// Get the total length.
+-	unsigned int length = array_uint32_le (response);
++	unsigned int announced = array_uint32_le (response);
++	if (nrestarts == 0) {
++		length = announced;
++	} else if (announced != length) {
++		ERROR (abstract->context, "Announced length changed on restart (%u %u).", announced, length);
++		status = DC_STATUS_PROTOCOL;
++		goto error_exit;
++	}
+ 
+ 	// Resize the buffer.
+ 	if (!dc_buffer_reserve (buffer, length)) {
+@@ -285,22 +325,52 @@ halcyon_symbios_download (halcyon_symbios_device_t *device, dc_event_progress_t
+ 		goto error_exit;
+ 	}
+ 
+-	const unsigned int initial = progress ? progress->current : 0;
+-
+-	unsigned int counter = 1;
+-	unsigned int nbytes = 0;
++	// Blocks always restart at 1 after a re-request; the ones below
++	// `counter` are already in the buffer and are acknowledged but dropped.
++	unsigned int expected = 1;
+ 	while (1) {
+ 		// Receive the data block.
+ 		unsigned int len = 0;
++		unsigned int blockerr = 0;
+ 		unsigned char payload[2 + SZ_BLOCK] = {0};
+ 		unsigned int nretries = 0;
+-		while ((status = halcyon_symbios_recv (device, block, payload, sizeof(payload), &len, NULL)) != DC_STATUS_SUCCESS) {
++		while ((status = halcyon_symbios_recv (device, block, payload, sizeof(payload), &len, &blockerr)) != DC_STATUS_SUCCESS) {
+ 			// Abort if the error is fatal.
+ 			if (status != DC_STATUS_PROTOCOL) {
+ 				ERROR (abstract->context, "Failed to receive the answer.");
+ 				goto error_exit;
+ 			}
+ 
++			if (blockerr == (ERR_TIMEOUT | ERR_BASE)) {
++				// The device gave up waiting for our ACK.
++				if (nresends < 1) {
++					nresends++;
++					WARNING (abstract->context, "Device timed out waiting for ACK at block %u; resending ACK.", expected);
++					status = halcyon_symbios_send (device, ACK, NULL, 0);
++					if (status != DC_STATUS_SUCCESS) {
++						ERROR (abstract->context, "Failed to resend the ACK.");
++						goto error_exit;
++					}
++					continue;
++				}
++				if (nrestarts < MAXRETRIES) {
++					nrestarts++;
++					nresends = 0;
++					WARNING (abstract->context, "Restarting transfer (%u/%u) from block %u.", nrestarts, MAXRETRIES, counter);
++					goto restart;
++				}
++				ERROR (abstract->context, "Transfer could not be recovered.");
++				errcode = blockerr;
++				goto error_exit;
++			}
++
++			if (blockerr) {
++				// Any other device-reported error is final for this transfer.
++				ERROR (abstract->context, "Device reported error %u during transfer.", blockerr & ~ERR_BASE);
++				errcode = blockerr;
++				goto error_exit;
++			}
++
+ 			// Abort if the maximum number of retries is reached.
+ 			if (nretries++ >= MAXRETRIES) {
+ 				ERROR (abstract->context, "Reached the maximum number of retries.");
+@@ -315,6 +385,9 @@ halcyon_symbios_download (halcyon_symbios_device_t *device, dc_event_progress_t
+ 			}
+ 		}
+ 
++		// A block arrived: any pending ACK resend is considered successful.
++		nresends = 0;
++
+ 		// Verify the minimum block length.
+ 		if (len < 2) {
+ 			ERROR (abstract->context, "Unexpected block length (%u).", len);
+@@ -325,30 +398,39 @@ halcyon_symbios_download (halcyon_symbios_device_t *device, dc_event_progress_t
+ 		// Verify the sequence number.
+ 		unsigned int id = array_uint16_le (payload);
+ 		unsigned int seqnum = id & 0x7FFF;
+-		if (seqnum != counter) {
+-			ERROR (abstract->context, "Unexpected block sequence number (%04x %04x).", seqnum, counter);
++		if (seqnum != expected) {
++			ERROR (abstract->context, "Unexpected block sequence number (%04x %04x).", seqnum, expected);
+ 			status = DC_STATUS_PROTOCOL;
+ 			goto error_exit;
+ 		}
++		expected += 1;
++		expected &= 0x7FFF;
++
++		if (seqnum == counter) {
++			// Append the payload data to the output buffer.
++			if (!dc_buffer_append (buffer, payload + 2, len - 2)) {
++				ERROR (abstract->context, "Failed to allocate memory.");
++				status = DC_STATUS_NOMEMORY;
++				goto error_exit;
++			}
+ 
+-		// Append the payload data to the output buffer.
+-		if (!dc_buffer_append (buffer, payload + 2, len - 2)) {
+-			ERROR (abstract->context, "Failed to allocate memory.");
+-			status = DC_STATUS_NOMEMORY;
+-			goto error_exit;
+-		}
+-
+-		nbytes += len - 2;
+-		counter += 1;
+-		counter &= 0x7FFF;
++			nbytes += len - 2;
++			counter += 1;
++			counter &= 0x7FFF;
+ 
+-		// Update and emit a progress event.
+-		if (progress) {
+-			// Limit the progress events to the announced length.
+-			unsigned int n = nbytes > length ? length : nbytes;
+-			progress->current = initial + STEP(n, length);
+-			device_event_emit (abstract, DC_EVENT_PROGRESS, progress);
++			// Update and emit a progress event.
++			if (progress) {
++				// Limit the progress events to the announced length.
++				unsigned int n = nbytes > length ? length : nbytes;
++				progress->current = initial + STEP(n, length);
++				device_event_emit (abstract, DC_EVENT_PROGRESS, progress);
++			}
++		} else if (seqnum > counter) {
++			ERROR (abstract->context, "Block %u skipped past %u after restart.", seqnum, counter);
++			status = DC_STATUS_PROTOCOL;
++			goto error_exit;
+ 		}
++		// else: already-received block replayed after a restart; drop it.
+ 
+ 		// Send an ACK to request the next block or finalize the download.
+ 		status = halcyon_symbios_send (device, ACK, NULL, 0);
+@@ -492,14 +574,12 @@ halcyon_symbios_device_foreach (dc_device_t *abstract, dc_dive_callback_t callba
+ 	status = halcyon_symbios_download (device, &progress, CMD_LOGBOOK_REQUEST, NULL, 0, CMD_LOGBOOK_BLOCK, logbook, &errcode);
+ 	if (status != DC_STATUS_SUCCESS) {
+ 		if (errcode == (ERR_FILE | ERR_BASE)) {
+-			WARNING (abstract->context, "Logbook not available!");
+-
+-			// Update and emit a progress event.
+-			progress.current = NSTEPS;
+-			progress.maximum = NSTEPS;
+-			device_event_emit (abstract, DC_EVENT_PROGRESS, &progress);
+-
+-			status = DC_STATUS_SUCCESS;
++			// Upstream treats this as an empty logbook and reports success.
++			// In practice the device answers ERR_FILE for every request
++			// after an aborted transfer until it is power cycled, and a
++			// silent "no dives" here hides that from the user.
++			ERROR (abstract->context, "Logbook not available (ERR_FILE); the device likely needs a power cycle.");
++			status = DC_STATUS_IO;
+ 			goto error_free;
+ 		}
+ 		ERROR (abstract->context, "Failed to download the logbook.");
