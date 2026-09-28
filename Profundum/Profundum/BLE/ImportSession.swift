@@ -321,6 +321,14 @@ class ImportSession: ObservableObject {
                     let merged = tracker.merged
                     let skipped = tracker.skipped
                     let autoStopped = tracker.shouldAutoStop
+                    // Successful sessions are traced too: a device that has
+                    // silently served bad data looks like a clean completion.
+                    self.writeTraceFile(
+                        currentTransport, device: device, attempt: attempt,
+                        reason: "completed (\(saved) new, \(merged) merged, \(skipped) skipped, "
+                            + "\(tracker.failed) failed)",
+                        link: currentLink
+                    )
                     await MainActor.run {
                         self.phase = .completed(ImportResult(
                             newDives: saved,

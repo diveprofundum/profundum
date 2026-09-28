@@ -1,5 +1,5 @@
 diff --git a/src/halcyon_symbios.c b/src/halcyon_symbios.c
-index 3eabf80..d35e476 100644
+index 3eabf80..d996600 100644
 --- a/src/halcyon_symbios.c
 +++ b/src/halcyon_symbios.c
 @@ -154,16 +154,21 @@ halcyon_symbios_recv (halcyon_symbios_device_t *device, unsigned char cmd, unsig
@@ -171,15 +171,37 @@ index 3eabf80..d35e476 100644
  		// Verify the minimum block length.
  		if (len < 2) {
  			ERROR (abstract->context, "Unexpected block length (%u).", len);
-@@ -325,30 +414,39 @@ halcyon_symbios_download (halcyon_symbios_device_t *device, dc_event_progress_t
+@@ -325,30 +414,54 @@ halcyon_symbios_download (halcyon_symbios_device_t *device, dc_event_progress_t
  		// Verify the sequence number.
  		unsigned int id = array_uint16_le (payload);
  		unsigned int seqnum = id & 0x7FFF;
 -		if (seqnum != counter) {
 -			ERROR (abstract->context, "Unexpected block sequence number (%04x %04x).", seqnum, counter);
+-			status = DC_STATUS_PROTOCOL;
+-			goto error_exit;
++		unsigned int previous = (expected - 1) & 0x7FFF;
++		if (seqnum == previous && expected > 1) {
++			// Retransmission of the block we already acknowledged: the
++			// device never acted on that ACK (this is what a NAK after a
++			// host timeout produces). Acknowledge it again and move on.
++			WARNING (abstract->context, "Block %u retransmitted; re-acknowledging.", seqnum);
++			status = halcyon_symbios_send (device, ACK, NULL, 0);
++			if (status != DC_STATUS_SUCCESS) {
++				ERROR (abstract->context, "Failed to send the ACK.");
++				goto error_exit;
++			}
++			if (id & 0x8000)
++				break;
++			continue;
+ 		}
+-
+-		// Append the payload data to the output buffer.
+-		if (!dc_buffer_append (buffer, payload + 2, len - 2)) {
+-			ERROR (abstract->context, "Failed to allocate memory.");
+-			status = DC_STATUS_NOMEMORY;
 +		if (seqnum != expected) {
 +			ERROR (abstract->context, "Unexpected block sequence number (%04x %04x).", seqnum, expected);
- 			status = DC_STATUS_PROTOCOL;
++			status = DC_STATUS_PROTOCOL;
  			goto error_exit;
  		}
 +		expected += 1;
@@ -193,13 +215,6 @@ index 3eabf80..d35e476 100644
 +				goto error_exit;
 +			}
  
--		// Append the payload data to the output buffer.
--		if (!dc_buffer_append (buffer, payload + 2, len - 2)) {
--			ERROR (abstract->context, "Failed to allocate memory.");
--			status = DC_STATUS_NOMEMORY;
--			goto error_exit;
--		}
--
 -		nbytes += len - 2;
 -		counter += 1;
 -		counter &= 0x7FFF;
@@ -229,7 +244,7 @@ index 3eabf80..d35e476 100644
  
  		// Send an ACK to request the next block or finalize the download.
  		status = halcyon_symbios_send (device, ACK, NULL, 0);
-@@ -492,14 +590,12 @@ halcyon_symbios_device_foreach (dc_device_t *abstract, dc_dive_callback_t callba
+@@ -492,14 +605,12 @@ halcyon_symbios_device_foreach (dc_device_t *abstract, dc_dive_callback_t callba
  	status = halcyon_symbios_download (device, &progress, CMD_LOGBOOK_REQUEST, NULL, 0, CMD_LOGBOOK_BLOCK, logbook, &errcode);
  	if (status != DC_STATUS_SUCCESS) {
  		if (errcode == (ERR_FILE | ERR_BASE)) {
@@ -250,7 +265,30 @@ index 3eabf80..d35e476 100644
  			goto error_free;
  		}
  		ERROR (abstract->context, "Failed to download the logbook.");
-@@ -541,15 +637,14 @@ halcyon_symbios_device_foreach (dc_device_t *abstract, dc_dive_callback_t callba
+@@ -511,6 +622,22 @@ halcyon_symbios_device_foreach (dc_device_t *abstract, dc_dive_callback_t callba
+ 
+ 	HEXDUMP (abstract->context, DC_LOGLEVEL_DEBUG, "Logbook", data, size);
+ 
++	// Sanity check the logbook. A device with a stale open file has been
++	// seen answering the logbook request with the remainder of that file;
++	// treating it as a logbook yields zero dives and a false "success".
++	if (size % SZ_LOGBOOK != 0) {
++		ERROR (abstract->context, "Logbook size is not a multiple of the entry size (" DC_PRINTF_SIZE ").", size);
++		status = DC_STATUS_DATAFORMAT;
++		goto error_free;
++	}
++	for (unsigned int i = 0; i < size; i += SZ_LOGBOOK) {
++		if (array_uint16_le (data + i + 16) == 0) {
++			ERROR (abstract->context, "Logbook entry %u has dive number 0; the device likely needs a power cycle.", i / SZ_LOGBOOK);
++			status = DC_STATUS_DATAFORMAT;
++			goto error_free;
++		}
++	}
++
+ 	// Get the number of dives.
+ 	unsigned int ndives = 0;
+ 	unsigned int offset = size;
+@@ -541,15 +668,14 @@ halcyon_symbios_device_foreach (dc_device_t *abstract, dc_dive_callback_t callba
  		status = halcyon_symbios_download (device, &progress, CMD_DIVELOG_REQUEST, data + offset + 16, 2, CMD_DIVELOG_BLOCK, dive, &errcode);
  		if (status != DC_STATUS_SUCCESS) {
  			if (errcode == (ERR_FILE | ERR_BASE)) {
