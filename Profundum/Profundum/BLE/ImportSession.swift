@@ -43,6 +43,8 @@ struct ImportResult: Equatable {
     let skippedDives: Int
     let deviceName: String
     let autoStopped: Bool
+    /// Dives downloaded from the computer that could not be saved.
+    var failedDives: Int = 0
 }
 
 enum ImportError: Equatable {
@@ -181,7 +183,8 @@ class ImportSession: ObservableObject {
         }
 
         // Look up last fingerprint for incremental sync
-        let lastFP: Data? = forceFullSync ? nil : (try? importService.lastFingerprint(deviceId: device.id))
+        let syncFP = forceFullSync ? nil : (try? importService.lastSyncFingerprint(deviceId: device.id))
+        let lastFP: Data? = syncFP?.fingerprint
 
         // Wrap transport with tracing for protocol-level I/O visibility
         let tracingTransport = TracingBLETransport(wrapping: transport)
@@ -195,7 +198,13 @@ class ImportSession: ObservableObject {
         // Enable BLE-level logging for real-device debugging
         BLEPeripheralTransport.enableLogging = true
 
-        let tracker = ImportProgressTracker()
+        // When a BLE-sourced fingerprint was supplied, libdivecomputer should stop
+        // on its own before reaching already-imported dives, so consecutive skips
+        // indicate a stale fingerprint — stop early rather than downloading ten
+        // full dives just to discard them (PRO-70). Without a fingerprint (first
+        // sync, forced full sync) or with a legacy one the device may not
+        // recognise (e.g. Shearwater Cloud IDs), keep the wider window.
+        let tracker = ImportProgressTracker(consecutiveSkipThreshold: syncFP?.source == .ble ? 3 : 10)
 
         downloadTask = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
@@ -235,13 +244,25 @@ class ImportSession: ObservableObject {
                                 return
                             }
 
-                            // Save each dive immediately as it arrives
-                            let outcome = (try? importService.saveImportedDive(
-                                parsed, deviceId: device.id
-                            )) ?? .skipped
-                            tracker.record(outcome)
+                            // Save each dive immediately as it arrives. A save
+                            // error is not a duplicate: record it separately so
+                            // it cannot trip the consecutive-skip auto-stop.
+                            do {
+                                let outcome = try importService.saveImportedDive(
+                                    parsed, deviceId: device.id
+                                )
+                                tracker.record(outcome)
+                            } catch {
+                                tracker.recordFailure()
+                                let desc = error.localizedDescription
+                                importLog.error(
+                                    "Failed to save dive at \(parsed.startTimeUnix): \(desc, privacy: .public)"
+                                )
+                            }
 
-                            // Auto-stop: 10 consecutive skips (only when no explicit cutoff)
+                            // Auto-stop after consecutive duplicates (threshold set
+                            // above from fingerprint provenance; only without an
+                            // explicit cutoff)
                             if tracker.shouldAutoStop && cutoffTime == nil {
                                 self.isCancelled = true
                             }
@@ -249,11 +270,13 @@ class ImportSession: ObservableObject {
                             let s = tracker.saved
                             let m = tracker.merged
                             let k = tracker.skipped
+                            let f = tracker.failed
                             Task { @MainActor [weak self] in
                                 var parts: [String] = []
                                 if s > 0 { parts.append("\(s) saved") }
                                 if m > 0 { parts.append("\(m) merged") }
                                 if k > 0 { parts.append("\(k) skipped") }
+                                if f > 0 { parts.append("\(f) failed") }
                                 let msg = parts.isEmpty
                                     ? "Processing..."
                                     : parts.joined(separator: ", ") + "..."
@@ -290,7 +313,8 @@ class ImportSession: ObservableObject {
                             mergedDives: merged,
                             skippedDives: skipped,
                             deviceName: device.displayName,
-                            autoStopped: autoStopped
+                            autoStopped: autoStopped,
+                            failedDives: tracker.failed
                         ))
                         if saved > 0 && merged > 0 {
                             let sp = saved == 1 ? "" : "s"
@@ -330,7 +354,8 @@ class ImportSession: ObservableObject {
                                 mergedDives: merged,
                                 skippedDives: skipped,
                                 deviceName: device.displayName,
-                                autoStopped: autoStopped
+                                autoStopped: autoStopped,
+                                failedDives: tracker.failed
                             ))
                             let total = saved + merged
                             let plural = total == 1 ? "" : "s"
@@ -532,7 +557,8 @@ class ImportSession: ObservableObject {
                     mergedDives: merged,
                     skippedDives: skipped,
                     deviceName: device.displayName,
-                    autoStopped: autoStopped
+                    autoStopped: autoStopped,
+                    failedDives: tracker.failed
                 ))
                 let total = saved + merged
                 let plural = total == 1 ? "" : "s"
@@ -564,7 +590,8 @@ class ImportSession: ObservableObject {
                         mergedDives: merged,
                         skippedDives: skipped,
                         deviceName: device.displayName,
-                        autoStopped: autoStopped
+                        autoStopped: autoStopped,
+                        failedDives: tracker.failed
                     ))
                     let total = saved + merged
                     let plural = total == 1 ? "" : "s"
@@ -581,7 +608,8 @@ class ImportSession: ObservableObject {
                     mergedDives: merged,
                     skippedDives: skipped,
                     deviceName: device.displayName,
-                    autoStopped: autoStopped
+                    autoStopped: autoStopped,
+                    failedDives: tracker.failed
                 ))
                 let total = saved + merged
                 let plural = total == 1 ? "" : "s"

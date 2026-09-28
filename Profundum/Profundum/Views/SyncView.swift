@@ -330,8 +330,17 @@ struct SyncView: View {
                     .frame(maxWidth: 350)
             }
 
-            if result.newDives > 0 || result.mergedDives > 0 || result.skippedDives > 0 {
+            if result.newDives > 0 || result.mergedDives > 0 || result.skippedDives > 0
+                || result.failedDives > 0 {
                 VStack(spacing: 8) {
+                    if result.failedDives > 0 {
+                        let plural = result.failedDives == 1 ? "" : "s"
+                        Label(
+                            "\(result.failedDives) dive\(plural) could not be saved — try again",
+                            systemImage: "exclamationmark.triangle"
+                        )
+                        .foregroundStyle(.orange)
+                    }
                     if result.newDives > 0 {
                         let plural = result.newDives == 1 ? "" : "s"
                         Label(
