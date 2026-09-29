@@ -1,5 +1,60 @@
 import Foundation
 
+/// Per-device BLE transport behaviour that deviates from the defaults.
+///
+/// Values are deliberately data, not code, so a failing import's trace header
+/// can record exactly which quirks were active (see `TracingBLETransport`).
+public struct BLETransportQuirks: Equatable, Sendable {
+    /// Use ATT *Write Request* (with response) for commands even when the Tx
+    /// characteristic also supports *Write Command* (without response).
+    ///
+    /// Costs one extra round trip per packet but gives link-level confirmation
+    /// that the peripheral's stack accepted each byte. Used to distinguish
+    /// "the device never got our ACK" from "the device got it and ignored it".
+    public var preferWriteWithResponse: Bool
+
+    /// Minimum time between the end of the previous read and the next write.
+    ///
+    /// Some firmware drops host packets that arrive while it is still busy
+    /// after transmitting; spacing writes out avoids that window. `0` disables.
+    public var writePacing: TimeInterval
+
+    /// How long to wait after disconnecting before reconnecting during a
+    /// retry. Devices with their own host-timeout state machines need long
+    /// enough to expire it, or the next session starts wedged.
+    public var reconnectDelay: TimeInterval
+
+    /// Overrides the transport's default read-timeout floor (the minimum the
+    /// bridge enforces on top of libdivecomputer's requested timeout).
+    ///
+    /// `nil` keeps the transport default. Devices with their own host-response
+    /// timer need a floor *below* that timer so the host can request a
+    /// retransmission while the device is still listening.
+    public var readTimeoutFloor: TimeInterval?
+
+    public init(
+        preferWriteWithResponse: Bool = false,
+        writePacing: TimeInterval = 0,
+        reconnectDelay: TimeInterval = 2,
+        readTimeoutFloor: TimeInterval? = nil
+    ) {
+        self.preferWriteWithResponse = preferWriteWithResponse
+        self.writePacing = writePacing
+        self.reconnectDelay = reconnectDelay
+        self.readTimeoutFloor = readTimeoutFloor
+    }
+
+    public static let `default` = BLETransportQuirks()
+
+    /// One-line summary for trace headers and logs.
+    public var summary: String {
+        "writeWithResponse=\(preferWriteWithResponse) "
+            + "writePacing=\(Int(writePacing * 1000))ms "
+            + "reconnectDelay=\(reconnectDelay)s "
+            + "readTimeoutFloor=\(readTimeoutFloor.map { "\($0)s" } ?? "default")"
+    }
+}
+
 /// Registry of known BLE-capable dive computers and their characteristic UUIDs.
 public enum KnownDiveComputer: String, CaseIterable, Sendable {
     case shearwater
@@ -73,6 +128,29 @@ public enum KnownDiveComputer: String, CaseIterable, Sendable {
         switch self {
         case .halcyonSymbios:  return "00000101-8C3B-4F2C-A59E-8C08224F3253"
         default:               return nil
+        }
+    }
+
+    /// Transport quirks for this device family.
+    ///
+    /// Halcyon Symbios (PRO-71): the device runs a ~5–6 s host-response timer
+    /// and occasionally fails to act on an ACK that the ATT layer confirmed as
+    /// delivered. Once its timer fires it NAKs with `ERR_TIMEOUT` and the
+    /// transfer is dead until a power cycle. The host read timeout must expire
+    /// *before* that timer so a retransmission request reaches a device that
+    /// is still listening; writes with response give ATT-level confirmation;
+    /// the longer reconnect delay gives the device time to settle.
+    public var transportQuirks: BLETransportQuirks {
+        switch self {
+        case .halcyonSymbios:
+            return BLETransportQuirks(
+                preferWriteWithResponse: true,
+                writePacing: 0,
+                reconnectDelay: 8,
+                readTimeoutFloor: 4
+            )
+        default:
+            return .default
         }
     }
 

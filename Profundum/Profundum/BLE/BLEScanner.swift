@@ -337,7 +337,8 @@ extension BLEScanner: CBPeripheralDelegate {
                     let bleTransport = BLEPeripheralTransport(
                         peripheral: peripheral,
                         characteristic: rxChar,
-                        writeCharacteristic: txChar
+                        writeCharacteristic: txChar,
+                        quirks: knownComputer?.transportQuirks ?? .default
                     )
                     self.transport = bleTransport
                     self.connectedKnownComputer = knownComputer
@@ -355,7 +356,8 @@ extension BLEScanner: CBPeripheralDelegate {
                     self.isConnecting = false
                     let bleTransport = BLEPeripheralTransport(
                         peripheral: peripheral,
-                        characteristic: rxChar
+                        characteristic: rxChar,
+                        quirks: knownComputer?.transportQuirks ?? .default
                     )
                     self.transport = bleTransport
                     self.connectedKnownComputer = knownComputer

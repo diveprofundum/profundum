@@ -42,6 +42,24 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
     /// protocol-level failure.
     private let writeCapabilityValidated: Bool
 
+    /// Device-specific transport behaviour (write type preference, pacing).
+    let quirks: BLETransportQuirks
+
+    /// Time of the most recent completed read, used for `quirks.writePacing`.
+    /// Protected by `lock`.
+    private var lastReadCompletedAt: Date?
+
+    /// Human-readable summary of the negotiated link, for trace headers.
+    var linkDescription: String {
+        let wt = writeType == .withoutResponse ? "withoutResponse" : "withResponse"
+        let mtu = peripheral.maximumWriteValueLength(for: writeType)
+        let rxProps = String(characteristic.properties.rawValue, radix: 16)
+        let txProps = String(writeCharacteristic.properties.rawValue, radix: 16)
+        return "rx=\(characteristic.uuid.uuidString) props=0x\(rxProps) "
+            + "tx=\(writeCharacteristic.uuid.uuidString) props=0x\(txProps) "
+            + "writeType=\(wt) mtu=\(mtu) quirks[\(quirks.summary)]"
+    }
+
     /// Guards all mutable state: `readBuffer`, `lastError`, `isClosed`, `indicationReady`.
     private let lock = NSLock()
 
@@ -77,7 +95,8 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
     /// Indication-based transports (writeType == .withResponse) need a larger
     /// timeout floor due to GATT confirmation round-trips on every packet.
     var minimumTimeoutSeconds: TimeInterval {
-        writeType == .withResponse ? 10.0 : 5.0
+        if let floor = quirks.readTimeoutFloor { return floor }
+        return writeType == .withResponse ? 10.0 : 5.0
     }
 
     /// - Parameters:
@@ -87,15 +106,23 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
     ///     When `nil`, `characteristic` is used for both reads and writes.
     @MainActor
     init(peripheral: CBPeripheral, characteristic: CBCharacteristic,
-         writeCharacteristic: CBCharacteristic? = nil) {
+         writeCharacteristic: CBCharacteristic? = nil,
+         quirks: BLETransportQuirks = .default) {
         self.peripheral = peripheral
         self.characteristic = characteristic
         self.writeCharacteristic = writeCharacteristic ?? characteristic
+        self.quirks = quirks
         // Determine write type from the write characteristic's properties.
         // Prefer writeWithoutResponse — most BLE dive computers require it.
-        // Fall back to withResponse only if the characteristic doesn't support it.
+        // Fall back to withResponse only if the characteristic doesn't support
+        // it, or when the device's quirks ask for confirmed writes and the
+        // characteristic can do them.
         let txChar = writeCharacteristic ?? characteristic
-        if txChar.properties.contains(.writeWithoutResponse) {
+        let canWithResponse = txChar.properties.contains(.write)
+        let canWithoutResponse = txChar.properties.contains(.writeWithoutResponse)
+        if quirks.preferWriteWithResponse && canWithResponse {
+            self.writeType = .withResponse
+        } else if canWithoutResponse {
             self.writeType = .withoutResponse
         } else {
             self.writeType = .withResponse
@@ -159,6 +186,7 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
             if !readBuffer.isEmpty {
                 let deliverable = readBuffer.prefix(count)
                 readBuffer = Data(readBuffer.dropFirst(deliverable.count))
+                lastReadCompletedAt = Date()
                 lock.unlock()
                 return Data(deliverable)
             }
@@ -248,6 +276,19 @@ final class BLEPeripheralTransport: NSObject, BLETransport, @unchecked Sendable 
         // Ensure indication/notification subscription is active before first write.
         // Blocks only on the first call; subsequent writes see indicationReady == true.
         try waitForIndicationSubscription(timeout: timeout)
+
+        // Device quirk: keep a minimum gap between the last read and this write.
+        if quirks.writePacing > 0 {
+            lock.lock()
+            let last = lastReadCompletedAt
+            lock.unlock()
+            if let last {
+                let remaining = quirks.writePacing - Date().timeIntervalSince(last)
+                if remaining > 0 {
+                    Thread.sleep(forTimeInterval: remaining)
+                }
+            }
+        }
 
         // Chunk writes to the peripheral's MTU to avoid silent truncation.
         let mtu = peripheral.maximumWriteValueLength(for: writeType)

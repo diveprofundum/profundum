@@ -15,29 +15,39 @@ public enum ImportOutcome: Equatable, Sendable {
 ///
 /// ## Thread Safety
 ///
-/// Marked `@unchecked Sendable` because all mutable state is accessed from
-/// a single writer (the download task's `onDive` callback and the retry loop,
-/// which execute sequentially within `DiveDownloader.download()`). No lock
-/// is needed because there is no concurrent mutation.
+/// Marked `@unchecked Sendable`; all mutable state is guarded by `lock`.
+/// Writes come from the persistence queue (`DivePersistenceQueue`) while the
+/// libdivecomputer download thread and the retry loop read counters
+/// concurrently, so every accessor takes the lock.
 public final class ImportProgressTracker: @unchecked Sendable {
     public let consecutiveSkipThreshold: Int
-    nonisolated(unsafe) public private(set) var saved = 0
-    nonisolated(unsafe) public private(set) var merged = 0
-    nonisolated(unsafe) public private(set) var skipped = 0
+
+    private let lock = NSLock()
+    private var _saved = 0
+    private var _merged = 0
+    private var _skipped = 0
+    private var _failed = 0
+    private var _consecutiveSkips = 0
+
+    public var saved: Int { lock.withLock { _saved } }
+    public var merged: Int { lock.withLock { _merged } }
+    public var skipped: Int { lock.withLock { _skipped } }
     /// Dives that were downloaded but could not be persisted (database error).
     /// These are neither duplicates nor successes and must not feed auto-stop.
-    nonisolated(unsafe) public private(set) var failed = 0
-    nonisolated(unsafe) public private(set) var consecutiveSkips = 0
+    public var failed: Int { lock.withLock { _failed } }
+    public var consecutiveSkips: Int { lock.withLock { _consecutiveSkips } }
 
     public init(consecutiveSkipThreshold: Int = 10) {
         self.consecutiveSkipThreshold = consecutiveSkipThreshold
     }
 
     public func record(_ outcome: ImportOutcome) {
-        switch outcome {
-        case .saved:  saved += 1; consecutiveSkips = 0
-        case .merged: merged += 1; consecutiveSkips = 0
-        case .skipped: skipped += 1; consecutiveSkips += 1
+        lock.withLock {
+            switch outcome {
+            case .saved:  _saved += 1; _consecutiveSkips = 0
+            case .merged: _merged += 1; _consecutiveSkips = 0
+            case .skipped: _skipped += 1; _consecutiveSkips += 1
+            }
         }
     }
 
@@ -45,18 +55,118 @@ public final class ImportProgressTracker: @unchecked Sendable {
     /// run of persistence errors can never be mistaken for "all caught up" and
     /// silently end the download (PRO-32 / PRO-70).
     public func recordFailure() {
-        failed += 1
+        lock.withLock { _failed += 1 }
     }
 
-    public var shouldAutoStop: Bool { consecutiveSkips >= consecutiveSkipThreshold }
+    public var shouldAutoStop: Bool {
+        lock.withLock { _consecutiveSkips >= consecutiveSkipThreshold }
+    }
 
     /// Resets the consecutive skip counter without losing accumulated totals.
     ///
     /// Called before a retry attempt so that re-enumerated (already-saved) dives
     /// don't trigger auto-stop prematurely.
     public func resetConsecutiveSkips() {
-        consecutiveSkips = 0
+        lock.withLock { _consecutiveSkips = 0 }
     }
+}
+
+/// Persists downloaded dives on a dedicated serial queue so the
+/// libdivecomputer callback can return immediately.
+///
+/// ## Why
+///
+/// `dc_device_foreach` delivers each dive on the download thread and does not
+/// request the next dive until the callback returns. Halcyon Symbios devices
+/// run their own host-response timer (they NAK with `ERR_TIMEOUT` and then drop
+/// the link); parsing plus a multi-hundred-row GRDB write inside the callback
+/// was long enough to trip it between dives (PRO-71). Handing the parsed dive
+/// off here keeps BLE traffic flowing while the previous dive is written.
+///
+/// Saves stay strictly ordered (serial queue), so the newest-first enumeration
+/// order and the fingerprint bookkeeping are unchanged. Call `drain()` before
+/// reporting results so every enqueued dive has reached the database.
+///
+/// ## Thread Safety
+///
+/// `@unchecked Sendable`: the only mutable state is `pending`, guarded by the
+/// serial `queue` (mutated only from blocks running on it) plus `lock` for the
+/// cross-thread read in `pendingCount`.
+public final class DivePersistenceQueue: @unchecked Sendable {
+    private let importService: DiveComputerImportService
+    private let tracker: ImportProgressTracker
+    private let queue = DispatchQueue(label: "com.divelog.import.persist", qos: .userInitiated)
+    private let lock = NSLock()
+    private var _pending = 0
+    /// Called on the queue after each save attempt, with the outcome or `nil` on error.
+    private let onSaved: (@Sendable (ParsedDive, ImportOutcome?, Error?) -> Void)?
+
+    /// Number of dives enqueued but not yet written.
+    public var pendingCount: Int { lock.withLock { _pending } }
+
+    public init(
+        importService: DiveComputerImportService,
+        tracker: ImportProgressTracker,
+        onSaved: (@Sendable (ParsedDive, ImportOutcome?, Error?) -> Void)? = nil
+    ) {
+        self.importService = importService
+        self.tracker = tracker
+        self.onSaved = onSaved
+    }
+
+    /// Schedules `parsed` for persistence and returns immediately.
+    public func enqueue(_ parsed: ParsedDive, deviceId: String) {
+        lock.withLock { _pending += 1 }
+        queue.async { [self] in
+            defer { lock.withLock { _pending -= 1 } }
+            do {
+                let outcome = try importService.saveImportedDive(parsed, deviceId: deviceId)
+                tracker.record(outcome)
+                onSaved?(parsed, outcome, nil)
+            } catch {
+                tracker.recordFailure()
+                onSaved?(parsed, nil, error)
+            }
+        }
+    }
+
+    /// Blocks until every dive enqueued so far has been written.
+    ///
+    /// Must not be called from `onSaved` (which runs on the persistence queue):
+    /// that would deadlock. Use `drainAsync()` from async contexts.
+    public func drain() {
+        dispatchPrecondition(condition: .notOnQueue(queue))
+        queue.sync {}
+    }
+
+    /// Async variant of `drain()` that does not block the calling thread.
+    public func drainAsync() async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            queue.async { cont.resume() }
+        }
+    }
+}
+
+/// A cancellation flag that can be set and polled from any thread.
+///
+/// Import cancellation is requested from several places at once: the UI
+/// (MainActor), the persistence queue (auto-stop after consecutive duplicates),
+/// and the libdivecomputer queue (cutoff-time check in `onDive`), and polled
+/// by libdivecomputer through `onCancel`. A lock keeps all of that race-free.
+public final class CancellationFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _isSet = false
+
+    public init() {}
+
+    /// Whether cancellation has been requested.
+    public var isSet: Bool { lock.withLock { _isSet } }
+
+    /// Requests cancellation.
+    public func set() { lock.withLock { _isSet = true } }
+
+    /// Clears the flag, e.g. before a new attempt.
+    public func reset() { lock.withLock { _isSet = false } }
 }
 
 /// Service for importing dives from a dive computer.
