@@ -93,10 +93,9 @@ final class DivePersistenceQueueTests: XCTestCase {
 
     func testSaveErrorIsRecordedAsFailureAndDoesNotStopQueue() throws {
         let tracker = ImportProgressTracker(consecutiveSkipThreshold: 3)
-        var errors: [Error] = []
-        let errLock = NSLock()
+        let errors = ErrorRecorder()
         let queue = DivePersistenceQueue(importService: importService, tracker: tracker) { _, _, error in
-            if let error { errLock.withLock { errors.append(error) } }
+            if let error { errors.append(error) }
         }
 
         // A dive referencing a device that does not exist violates the FK and throws.
@@ -184,4 +183,12 @@ private final class OrderRecorder: @unchecked Sendable {
     private var _values: [Int64] = []
     var values: [Int64] { lock.withLock { _values } }
     func append(_ v: Int64) { lock.withLock { _values.append(v) } }
+}
+
+/// Thread-safe append-only list for recording save errors from the queue.
+private final class ErrorRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _errors: [Error] = []
+    var count: Int { lock.withLock { _errors.count } }
+    func append(_ e: Error) { lock.withLock { _errors.append(e) } }
 }
