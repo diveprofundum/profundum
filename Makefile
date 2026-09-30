@@ -122,9 +122,32 @@ audit:
 deny:
 	cd core && cargo deny check
 
-# Run mutation testing on the Rust compute core (slow — use locally, not in CI)
+# Mutation testing on the Rust compute core.
+#
+# Default: incremental — only mutants on lines changed under core/ relative to
+# MUTANTS_BASE (default: main), including uncommitted work. Typically seconds
+# to a few minutes. Skips entirely when core/ is unchanged.
+#   make mutants               incremental (per-PR validation step)
+#   make mutants FULL=1        whole crate (~45 min; also run weekly in CI, see
+#                              .github/workflows/mutants.yml)
+#   make mutants MUTANTS_BASE=origin/main
+MUTANTS_BASE ?= main
+MUTANTS_JOBS ?= 2
 mutants:
-	cd core && cargo mutants --timeout 60
+	@if [ -n "$(FULL)" ]; then \
+	  cd core && cargo mutants --timeout 60 --jobs $(MUTANTS_JOBS); \
+	else \
+	  git rev-parse --verify --quiet "$(MUTANTS_BASE)" >/dev/null \
+	    || { echo "mutants: base '$(MUTANTS_BASE)' not found; set MUTANTS_BASE or use FULL=1"; exit 1; }; \
+	  git -C core diff --relative --merge-base "$(MUTANTS_BASE)" -- . > core/mutants.diff; \
+	  if [ ! -s core/mutants.diff ]; then \
+	    echo "mutants: no changes under core/ since $(MUTANTS_BASE); nothing to mutate (FULL=1 for whole crate)"; \
+	    rm -f core/mutants.diff; \
+	  else \
+	    cd core && cargo mutants --timeout 60 --jobs $(MUTANTS_JOBS) --in-diff mutants.diff; \
+	    status=$$?; rm -f mutants.diff; exit $$status; \
+	  fi; \
+	fi
 
 # ──────────────────────────────────────────────────────────────
 # Coverage
@@ -199,7 +222,7 @@ help:
 	@echo "  make security                   Run all security checks (audit + deny)"
 	@echo "  make audit                      Check deps for known vulnerabilities"
 	@echo "  make deny                       Check license compliance + advisories"
-	@echo "  make mutants                    Run mutation testing on Rust core"
+	@echo "  make mutants                    Mutation-test Rust lines changed vs main (FULL=1 for whole crate)"
 	@echo ""
 	@echo "Coverage:"
 	@echo "  make coverage                   Generate lcov reports (Rust + Swift)"

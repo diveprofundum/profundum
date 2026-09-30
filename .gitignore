@@ -7,8 +7,9 @@
 .claude/
 
 # Rust
+# core/Cargo.lock is committed: the crate produces a binary artifact (xcframework),
+# so CI, cargo audit/deny and local builds must resolve identical dependency versions.
 target/
-Cargo.lock
 
 # Swift Package Manager
 .build/
@@ -79,3 +80,4 @@ core/mutants.out.old/
 *.log
 tmp_logs/
 core/.cargo/config.toml
+core/mutants.diff

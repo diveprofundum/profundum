@@ -6,8 +6,13 @@
 //! This crate is designed to be used via FFI (UniFFI) from Swift/Kotlin.
 //! All functions are pure - no database, no storage, no side effects.
 
-// Allow clippy lint that triggers on generated UniFFI code
+// Allow clippy lints that trigger on generated UniFFI scaffolding (OUT_DIR/divelog_compute.uniffi.rs),
+// which we cannot annotate directly:
+// - empty_line_after_doc_comments: doc-comment layout in generated wrappers
+// - large_const_arrays (warn-by-default since Rust 1.98): UniFFI's `UNIFFI_META_CONST_*` metadata
+//   byte arrays exceed clippy's size threshold; they are compile-time metadata, never copied at runtime
 #![allow(clippy::empty_line_after_doc_comments)]
+#![allow(clippy::large_const_arrays)]
 
 pub mod buhlmann;
 pub mod deco;
