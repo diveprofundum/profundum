@@ -1,0 +1,99 @@
+name: Mutation testing
+
+# Two modes:
+#   - pull_request (core/** changed): incremental — only mutants on lines the PR
+#     touches (`cargo mutants --in-diff`). Usually a few minutes.
+#   - schedule / workflow_dispatch: full crate. Too slow for every PR (~45 min),
+#     so it runs weekly and on demand; results are uploaded as an artifact.
+#
+# Locally the equivalent is `make mutants` (incremental) / `make mutants FULL=1`.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'core/**'
+      - 'rust-toolchain.toml'
+      - 'Makefile'
+      - '.github/workflows/mutants.yml'
+  schedule:
+    - cron: '0 6 * * 1' # Mondays 06:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  incremental:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: |
+          channel=$(grep -E '^channel' rust-toolchain.toml | cut -d'"' -f2)
+          test -n "$channel" || { echo "::error::could not read channel from rust-toolchain.toml"; exit 1; }
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@26.2.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core -> target
+
+      - name: Mutate lines changed in this PR
+        run: make mutants MUTANTS_BASE=${{ github.base_ref }} MUTANTS_JOBS=2
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutants-incremental
+          path: core/mutants.out
+          if-no-files-found: ignore
+
+  full:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: |
+          channel=$(grep -E '^channel' rust-toolchain.toml | cut -d'"' -f2)
+          test -n "$channel" || { echo "::error::could not read channel from rust-toolchain.toml"; exit 1; }
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@26.2.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core -> target
+
+      - name: Mutate the whole crate
+        run: make mutants FULL=1 MUTANTS_JOBS=2
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutants-full
+          path: core/mutants.out

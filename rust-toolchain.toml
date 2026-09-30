@@ -1,0 +1,13 @@
+# Pinned toolchain for the Rust compute core (core/).
+# Lives at the repo root because rustup resolves this file from the current
+# directory, and build-xcframework.sh invokes cargo from the root via --manifest-path.
+#
+# `cargo clippy -- -D warnings` runs in CI, so a new stable release that adds a
+# warn-by-default lint would turn `main` red without any code change (this
+# happened with `large_const_arrays` in 1.98). Pinning keeps local and CI
+# clippy identical; bump deliberately (and fix new lints) in a dedicated PR.
+#
+# The CI workflow (.github/workflows/ci.yml) reads this file for its toolchain.
+[toolchain]
+channel = "1.98.0"
+components = ["rustfmt", "clippy", "llvm-tools-preview"]

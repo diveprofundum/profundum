@@ -45,11 +45,14 @@ make help              # Show all available targets
 ```
 
 ### CI Pipeline
-GitHub Actions (`.github/workflows/ci.yml`) with path-filtered jobs:
-- **`rust-lint`** / **`rust-test`** — triggered by changes to `core/**`
-- **`swift-test`** — triggered by changes to `core/**`, `apple/**`, or `Profundum/**` (runs on macOS, rebuilds xcframework)
-- **`coverage`** — collects Rust + Swift coverage, uploads to Codecov (95% project / 90% patch thresholds)
+GitHub Actions (`.github/workflows/ci.yml`) with path-filtered jobs. All Rust jobs use the toolchain pinned in the root `rust-toolchain.toml` (bump it deliberately in its own PR, fixing any new clippy lints); `core/Cargo.lock` is committed.
+- **`rust-lint`** / **`rust-test`** — triggered by changes to `core/**` or `rust-toolchain.toml`
+- **`swift-test`** — triggered by changes to `core/**`, `apple/**`, or `Profundum/**` (runs on macOS, rebuilds xcframework, then collects Rust + Swift coverage and uploads to Codecov: 95% project / 90% patch thresholds)
+- **`security`** — cargo audit + cargo deny against the committed `Cargo.lock`
 - **`version-check`** — ensures VERSION file matches all manifests
+- **Mutation testing** (`.github/workflows/mutants.yml`) — incremental `--in-diff` run on PRs touching `core/**`, `rust-toolchain.toml`, `Makefile` or the workflow itself; full-crate run weekly (Mon 06:00 UTC) and via `workflow_dispatch`, results as artifacts
+
+All cargo invocations in CI, the Makefile and `build-xcframework.sh` pass `--locked`; a dependency change requires an explicit `cargo update` and a committed `Cargo.lock` diff.
 
 ### Versioning
 Single version for the entire monorepo. Source of truth: `VERSION` file at root.
@@ -221,7 +224,7 @@ Variables available for segment formulas:
 | 2. Tests | `make test` | Rust + Swift test suites |
 | 3. Build | `xcodebuild build -project Profundum/Profundum.xcodeproj -scheme Profundum -destination 'platform=macOS' -quiet` | macOS build |
 | 4. Security | `make security` | cargo audit + cargo deny |
-| 5. Mutation testing | `make mutants` | Rust compute core (slow, local only). **Run alone**: never in parallel with builds, tests, or other heavy processes — it saturates the machine. Wait for everything else to finish first, and run nothing else until it completes. |
+| 5. Mutation testing | `make mutants` | **Incremental**: mutates only Rust lines changed vs `main` (seconds to a few minutes); skips itself when `core/` is unchanged. Never run `FULL=1` as a PR step — the whole-crate run (~45 min) happens in CI weekly and on demand (`.github/workflows/mutants.yml`), and the same incremental run also executes in CI on PRs touching `core/`. **Run alone**: never in parallel with builds, tests, or other heavy processes. |
 | 6. Version check | `make version-check` | Only if manifests changed |
 
 **After opening the PR**, run code reviews:

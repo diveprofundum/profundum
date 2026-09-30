@@ -31,7 +31,7 @@ jobs:
           filters: |
             rust:
               - 'core/**'
-              - 'Cargo.toml'
+              - 'rust-toolchain.toml'
               - 'VERSION'
             swift:
               - 'apple/**'
@@ -53,8 +53,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: |
+          channel=$(grep -E '^channel' rust-toolchain.toml | cut -d'"' -f2)
+          test -n "$channel" || { echo "::error::could not read channel from rust-toolchain.toml"; exit 1; }
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
@@ -66,7 +74,7 @@ jobs:
         working-directory: core
 
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
         working-directory: core
 
   rust-test:
@@ -76,14 +84,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: |
+          channel=$(grep -E '^channel' rust-toolchain.toml | cut -d'"' -f2)
+          test -n "$channel" || { echo "::error::could not read channel from rust-toolchain.toml"; exit 1; }
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: core -> target
 
       - name: Run tests
-        run: cargo test
+        run: cargo test --locked
         working-directory: core
 
   # ─────────────────────────────────────────────────────────
@@ -132,8 +149,16 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: |
+          channel=$(grep -E '^channel' rust-toolchain.toml | cut -d'"' -f2)
+          test -n "$channel" || { echo "::error::could not read channel from rust-toolchain.toml"; exit 1; }
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
           components: llvm-tools-preview
           targets: aarch64-apple-darwin,x86_64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
 
@@ -188,11 +213,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: |
+          channel=$(grep -E '^channel' rust-toolchain.toml | cut -d'"' -f2)
+          test -n "$channel" || { echo "::error::could not read channel from rust-toolchain.toml"; exit 1; }
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
 
-      - name: Generate Cargo.lock
-        run: cargo generate-lockfile
-        working-directory: core
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
 
       - name: Check for known vulnerabilities
         uses: rustsec/audit-check@v2.0.0
