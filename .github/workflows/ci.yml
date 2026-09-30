@@ -55,7 +55,10 @@ jobs:
 
       - name: Read pinned Rust toolchain
         id: toolchain
-        run: echo "channel=$(grep -E '^channel' rust-toolchain.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+        run: |
+          channel=$(grep -E '^channel' rust-toolchain.toml | cut -d'"' -f2)
+          test -n "$channel" || { echo "::error::could not read channel from rust-toolchain.toml"; exit 1; }
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -71,7 +74,7 @@ jobs:
         working-directory: core
 
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
         working-directory: core
 
   rust-test:
@@ -83,7 +86,10 @@ jobs:
 
       - name: Read pinned Rust toolchain
         id: toolchain
-        run: echo "channel=$(grep -E '^channel' rust-toolchain.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+        run: |
+          channel=$(grep -E '^channel' rust-toolchain.toml | cut -d'"' -f2)
+          test -n "$channel" || { echo "::error::could not read channel from rust-toolchain.toml"; exit 1; }
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -94,7 +100,7 @@ jobs:
           workspaces: core -> target
 
       - name: Run tests
-        run: cargo test
+        run: cargo test --locked
         working-directory: core
 
   # ─────────────────────────────────────────────────────────
@@ -145,7 +151,10 @@ jobs:
 
       - name: Read pinned Rust toolchain
         id: toolchain
-        run: echo "channel=$(grep -E '^channel' rust-toolchain.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+        run: |
+          channel=$(grep -E '^channel' rust-toolchain.toml | cut -d'"' -f2)
+          test -n "$channel" || { echo "::error::could not read channel from rust-toolchain.toml"; exit 1; }
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -206,7 +215,10 @@ jobs:
 
       - name: Read pinned Rust toolchain
         id: toolchain
-        run: echo "channel=$(grep -E '^channel' rust-toolchain.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+        run: |
+          channel=$(grep -E '^channel' rust-toolchain.toml | cut -d'"' -f2)
+          test -n "$channel" || { echo "::error::could not read channel from rust-toolchain.toml"; exit 1; }
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@master
         with:

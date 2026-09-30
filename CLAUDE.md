@@ -47,10 +47,12 @@ make help              # Show all available targets
 ### CI Pipeline
 GitHub Actions (`.github/workflows/ci.yml`) with path-filtered jobs. All Rust jobs use the toolchain pinned in the root `rust-toolchain.toml` (bump it deliberately in its own PR, fixing any new clippy lints); `core/Cargo.lock` is committed.
 - **`rust-lint`** / **`rust-test`** — triggered by changes to `core/**` or `rust-toolchain.toml`
-- **`swift-test`** — triggered by changes to `core/**`, `apple/**`, or `Profundum/**` (runs on macOS, rebuilds xcframework)
-- **`coverage`** — collects Rust + Swift coverage, uploads to Codecov (95% project / 90% patch thresholds)
+- **`swift-test`** — triggered by changes to `core/**`, `apple/**`, or `Profundum/**` (runs on macOS, rebuilds xcframework, then collects Rust + Swift coverage and uploads to Codecov: 95% project / 90% patch thresholds)
+- **`security`** — cargo audit + cargo deny against the committed `Cargo.lock`
 - **`version-check`** — ensures VERSION file matches all manifests
-- **Mutation testing** (`.github/workflows/mutants.yml`) — incremental `--in-diff` run on PRs touching `core/**`; full-crate run weekly (Mon 06:00 UTC) and via `workflow_dispatch`, results as artifacts
+- **Mutation testing** (`.github/workflows/mutants.yml`) — incremental `--in-diff` run on PRs touching `core/**`, `rust-toolchain.toml`, `Makefile` or the workflow itself; full-crate run weekly (Mon 06:00 UTC) and via `workflow_dispatch`, results as artifacts
+
+All cargo invocations in CI, the Makefile and `build-xcframework.sh` pass `--locked`; a dependency change requires an explicit `cargo update` and a committed `Cargo.lock` diff.
 
 ### Versioning
 Single version for the entire monorepo. Source of truth: `VERSION` file at root.

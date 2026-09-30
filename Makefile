@@ -23,12 +23,12 @@ swift-bindings: xcframework
 
 # Run Rust tests
 rust-test:
-	cd core && cargo test
+	cd core && cargo test --locked
 
 # Lint Rust code
 rust-lint:
 	cd core && cargo fmt --check
-	cd core && cargo clippy --all-targets --all-features -- -D warnings
+	cd core && cargo clippy --locked --all-targets --all-features -- -D warnings
 
 # Lint Swift code
 swift-lint:
@@ -125,26 +125,35 @@ deny:
 # Mutation testing on the Rust compute core.
 #
 # Default: incremental — only mutants on lines changed under core/ relative to
-# MUTANTS_BASE (default: main), including uncommitted work. Typically seconds
-# to a few minutes. Skips entirely when core/ is unchanged.
+# MUTANTS_BASE (default: main, falling back to origin/main), including
+# uncommitted work. Typically seconds to a few minutes. Skips entirely when
+# core/ is unchanged.
 #   make mutants               incremental (per-PR validation step)
 #   make mutants FULL=1        whole crate (~45 min; also run weekly in CI, see
 #                              .github/workflows/mutants.yml)
-#   make mutants MUTANTS_BASE=origin/main
+#   make mutants MUTANTS_BASE=origin/main MUTANTS_JOBS=2
+# MUTANTS_JOBS defaults to 1 (cargo-mutants' own default): each parallel job
+# rebuilds the UniFFI scaffolding and the memory cost adds up locally (PRO-52).
 MUTANTS_BASE ?= main
-MUTANTS_JOBS ?= 2
+MUTANTS_JOBS ?= 1
+MUTANTS_ARGS = --timeout 60 --jobs $(MUTANTS_JOBS) --cargo-arg=--locked
 mutants:
-	@if [ -n "$(FULL)" ]; then \
-	  cd core && cargo mutants --timeout 60 --jobs $(MUTANTS_JOBS); \
+	@if [ "$(FULL)" = "1" ]; then \
+	  cd core && cargo mutants $(MUTANTS_ARGS); \
+	elif [ -n "$(FULL)" ]; then \
+	  echo "mutants: FULL must be 1 or unset (got '$(FULL)')"; exit 2; \
 	else \
-	  git rev-parse --verify --quiet "$(MUTANTS_BASE)" >/dev/null \
-	    || { echo "mutants: base '$(MUTANTS_BASE)' not found; set MUTANTS_BASE or use FULL=1"; exit 1; }; \
-	  git -C core diff --relative --merge-base "$(MUTANTS_BASE)" -- . > core/mutants.diff; \
+	  base="$(MUTANTS_BASE)"; \
+	  git rev-parse --verify --quiet "$$base^{commit}" >/dev/null \
+	    || { base="origin/$(MUTANTS_BASE)"; git rev-parse --verify --quiet "$$base^{commit}" >/dev/null; } \
+	    || { echo "mutants: neither '$(MUTANTS_BASE)' nor 'origin/$(MUTANTS_BASE)' found; set MUTANTS_BASE or use FULL=1"; exit 1; }; \
+	  git -C core diff --relative --merge-base "$$base" -- . > core/mutants.diff; \
 	  if [ ! -s core/mutants.diff ]; then \
-	    echo "mutants: no changes under core/ since $(MUTANTS_BASE); nothing to mutate (FULL=1 for whole crate)"; \
+	    echo "mutants: no changes under core/ since $$base; nothing to mutate (FULL=1 for whole crate)"; \
 	    rm -f core/mutants.diff; \
 	  else \
-	    cd core && cargo mutants --timeout 60 --jobs $(MUTANTS_JOBS) --in-diff mutants.diff; \
+	    echo "mutants: incremental run against $$base"; \
+	    cd core && cargo mutants $(MUTANTS_ARGS) --in-diff mutants.diff; \
 	    status=$$?; rm -f mutants.diff; exit $$status; \
 	  fi; \
 	fi

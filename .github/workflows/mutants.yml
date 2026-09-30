@@ -14,13 +14,14 @@ on:
     paths:
       - 'core/**'
       - 'rust-toolchain.toml'
+      - 'Makefile'
       - '.github/workflows/mutants.yml'
   schedule:
     - cron: '0 6 * * 1' # Mondays 06:00 UTC
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -35,20 +36,25 @@ jobs:
 
       - name: Read pinned Rust toolchain
         id: toolchain
-        run: echo "channel=$(grep -E '^channel' rust-toolchain.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+        run: |
+          channel=$(grep -E '^channel' rust-toolchain.toml | cut -d'"' -f2)
+          test -n "$channel" || { echo "::error::could not read channel from rust-toolchain.toml"; exit 1; }
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
 
-      - uses: taiki-e/install-action@cargo-mutants
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@26.2.0
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: core -> target
 
       - name: Mutate lines changed in this PR
-        run: make mutants MUTANTS_BASE=origin/${{ github.base_ref }} MUTANTS_JOBS=2
+        run: make mutants MUTANTS_BASE=${{ github.base_ref }} MUTANTS_JOBS=2
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -66,13 +72,18 @@ jobs:
 
       - name: Read pinned Rust toolchain
         id: toolchain
-        run: echo "channel=$(grep -E '^channel' rust-toolchain.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+        run: |
+          channel=$(grep -E '^channel' rust-toolchain.toml | cut -d'"' -f2)
+          test -n "$channel" || { echo "::error::could not read channel from rust-toolchain.toml"; exit 1; }
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
 
-      - uses: taiki-e/install-action@cargo-mutants
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@26.2.0
 
       - uses: Swatinem/rust-cache@v2
         with:

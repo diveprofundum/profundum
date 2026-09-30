@@ -14,23 +14,23 @@ echo "Building DivelogCompute for all Apple platforms..."
 
 # Build for macOS (arm64)
 echo "Building for macOS arm64..."
-cargo build --manifest-path "$SCRIPT_DIR/Cargo.toml" --release --target aarch64-apple-darwin
+cargo build --locked --manifest-path "$SCRIPT_DIR/Cargo.toml" --release --target aarch64-apple-darwin
 
 # Build for macOS (x86_64)
 echo "Building for macOS x86_64..."
-cargo build --manifest-path "$SCRIPT_DIR/Cargo.toml" --release --target x86_64-apple-darwin
+cargo build --locked --manifest-path "$SCRIPT_DIR/Cargo.toml" --release --target x86_64-apple-darwin
 
 # Build for iOS (arm64)
 echo "Building for iOS arm64..."
-cargo build --manifest-path "$SCRIPT_DIR/Cargo.toml" --release --target aarch64-apple-ios
+cargo build --locked --manifest-path "$SCRIPT_DIR/Cargo.toml" --release --target aarch64-apple-ios
 
 # Build for iOS Simulator (arm64)
 echo "Building for iOS Simulator arm64..."
-cargo build --manifest-path "$SCRIPT_DIR/Cargo.toml" --release --target aarch64-apple-ios-sim
+cargo build --locked --manifest-path "$SCRIPT_DIR/Cargo.toml" --release --target aarch64-apple-ios-sim
 
 # Build for iOS Simulator (x86_64)
 echo "Building for iOS Simulator x86_64..."
-cargo build --manifest-path "$SCRIPT_DIR/Cargo.toml" --release --target x86_64-apple-ios
+cargo build --locked --manifest-path "$SCRIPT_DIR/Cargo.toml" --release --target x86_64-apple-ios
 
 # Create output directories
 MACOS_DIR="$BUILD_DIR/macos-universal"
@@ -61,7 +61,7 @@ lipo -create \
 GENERATED_DIR="$PROJECT_ROOT/apple/DivelogCore/Sources/RustBridge/Generated"
 mkdir -p "$GENERATED_DIR"
 pushd "$SCRIPT_DIR" > /dev/null
-cargo run --features=uniffi/cli \
+cargo run --locked --features=uniffi/cli \
     --bin uniffi-bindgen generate src/divelog_compute.udl \
     --language swift \
     --out-dir "$GENERATED_DIR"
