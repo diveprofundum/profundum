@@ -428,6 +428,14 @@ public final class DivelogDatabase: Sendable {
             """)
         }
 
+        // Migration 19: Exit GPS fix, distinct from the entry fix in lat/lon.
+        migrator.registerMigration("019_dive_exit_location") { db in
+            try db.execute(sql: """
+                ALTER TABLE dives ADD COLUMN exit_lat REAL;
+                ALTER TABLE dives ADD COLUMN exit_lon REAL;
+            """)
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

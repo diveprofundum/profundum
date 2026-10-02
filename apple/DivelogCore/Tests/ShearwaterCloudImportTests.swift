@@ -685,6 +685,36 @@ final class ShearwaterCloudImportTests: XCTestCase {
         XCTAssertEqual(dive.lon!, -87.53497, accuracy: 0.00001)
     }
 
+    func testImportGpsExitFromGnss() throws {
+        let path = try createShearwaterDB(dives: [
+            ShearwaterTestDive(diveId: 1, diveDate: "2024-01-01 08:00:00", depthFt: 50,
+                               durationSec: 1800, serial: "SN001",
+                               gnssEntryLocation: "17.31584, -87.53497",
+                               gnssExitLocation: "17.31610, -87.53520"),
+        ])
+
+        let result = try importService.importFromFile(at: path)
+        XCTAssertEqual(result.divesImported, 1)
+
+        let dive = try diveService.listDives()[0]
+        XCTAssertEqual(dive.exitLat!, 17.31610, accuracy: 0.00001)
+        XCTAssertEqual(dive.exitLon!, -87.53520, accuracy: 0.00001)
+    }
+
+    func testImportSucceedsWhenGnssExitColumnIsAbsent() throws {
+        let path = try createShearwaterDB(dives: [
+            ShearwaterTestDive(diveId: 1, diveDate: "2024-01-01 08:00:00", depthFt: 50,
+                               durationSec: 1800, serial: "SN001",
+                               gnssEntryLocation: "17.31584, -87.53497"),
+        ], includeExitColumn: false)
+
+        let result = try importService.importFromFile(at: path)
+        XCTAssertEqual(result.divesImported, 1)
+        let dive = try diveService.listDives()[0]
+        XCTAssertEqual(dive.lat!, 17.31584, accuracy: 0.00001)
+        XCTAssertNil(dive.exitLat)
+    }
+
     func testImportEnvironmentFields() throws {
         let path = try createShearwaterDB(dives: [
             ShearwaterTestDive(diveId: 1, diveDate: "2024-01-01 08:00:00", depthFt: 50,
@@ -1303,17 +1333,24 @@ final class ShearwaterCloudImportTests: XCTestCase {
         var averageTemp: Double? = nil
         var endGf99: Double? = nil
         var gnssEntryLocation: String? = nil
+        var gnssExitLocation: String? = nil
         var environment: String? = nil
         var visibility: String? = nil
         var weather: String? = nil
     }
 
-    private func createShearwaterDB(dives: [ShearwaterTestDive]) throws -> String {
+    private func createShearwaterDB(
+        dives: [ShearwaterTestDive],
+        includeExitColumn: Bool = true
+    ) throws -> String {
         let tempDir = FileManager.default.temporaryDirectory
         let path = tempDir.appendingPathComponent(UUID().uuidString + ".db").path
         tempFiles.append(path)
 
         let db = try DatabaseQueue(path: path)
+        let exitColumn = includeExitColumn ? "GnssExitLocation TEXT," : ""
+        let exitInsertColumn = includeExitColumn ? "GnssExitLocation, " : ""
+        let exitPlaceholder = includeExitColumn ? "?, " : ""
         try db.write { conn in
             try conn.execute(sql: """
                 CREATE TABLE dive_details (
@@ -1333,6 +1370,7 @@ final class ShearwaterCloudImportTests: XCTestCase {
                     AverageTemp REAL,
                     EndGF99 REAL,
                     GnssEntryLocation TEXT,
+                    \(exitColumn)
                     Environment TEXT,
                     Visibility TEXT,
                     Weather TEXT
@@ -1347,32 +1385,34 @@ final class ShearwaterCloudImportTests: XCTestCase {
             """)
 
             for dive in dives {
+                var arguments: [DatabaseValueConvertible?] = [
+                    dive.diveId,
+                    dive.diveDate,
+                    dive.depthFt,
+                    dive.durationSec,
+                    dive.serial,
+                    dive.site,
+                    dive.location,
+                    dive.buddy,
+                    dive.diveNumber,
+                    dive.averageDepth,
+                    dive.notes,
+                    dive.minTemp,
+                    dive.maxTemp,
+                    dive.averageTemp,
+                    dive.endGf99,
+                    dive.gnssEntryLocation,
+                ]
+                if includeExitColumn {
+                    arguments.append(dive.gnssExitLocation)
+                }
+                arguments.append(contentsOf: [dive.environment, dive.visibility, dive.weather])
                 try conn.execute(
                     sql: """
-                        INSERT INTO dive_details (DiveId, DiveDate, Depth, DiveLengthTime, SerialNumber, Site, Location, Buddy, DiveNumber, AverageDepth, Notes, MinTemp, MaxTemp, AverageTemp, EndGF99, GnssEntryLocation, Environment, Visibility, Weather)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO dive_details (DiveId, DiveDate, Depth, DiveLengthTime, SerialNumber, Site, Location, Buddy, DiveNumber, AverageDepth, Notes, MinTemp, MaxTemp, AverageTemp, EndGF99, GnssEntryLocation, \(exitInsertColumn)Environment, Visibility, Weather)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \(exitPlaceholder)?, ?, ?)
                     """,
-                    arguments: [
-                        dive.diveId,
-                        dive.diveDate,
-                        dive.depthFt,
-                        dive.durationSec,
-                        dive.serial,
-                        dive.site,
-                        dive.location,
-                        dive.buddy,
-                        dive.diveNumber,
-                        dive.averageDepth,
-                        dive.notes,
-                        dive.minTemp,
-                        dive.maxTemp,
-                        dive.averageTemp,
-                        dive.endGf99,
-                        dive.gnssEntryLocation,
-                        dive.environment,
-                        dive.visibility,
-                        dive.weather
-                    ]
+                    arguments: StatementArguments(arguments)
                 )
 
                 if dive.calculatedValues != nil || dive.dataBytes2 != nil || dive.dataBytes1 != nil {

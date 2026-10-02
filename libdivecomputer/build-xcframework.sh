@@ -47,13 +47,12 @@ if compgen -G "$PATCH_DIR/*.patch" > /dev/null; then
 fi
 SRC_DIR="$PATCHED_SRC"
 
-# Generate configure script if needed
-pushd "$SRC_DIR" > /dev/null
-if [ ! -f configure ]; then
-    echo "Running autoreconf..."
-    autoreconf --install
-fi
-popd > /dev/null
+# Regenerate configure from configure.ac. A previously generated `configure`
+# in the submodule working tree is gitignored and can be older than the
+# pinned commit (and stamped for a different automake), so `make` would try
+# to rebuild it with a tool that is not installed.
+echo "Running autoreconf..."
+(cd "$SRC_DIR" && autoreconf --install)
 
 # Build for a single target using out-of-tree builds
 # Usage: build_target <arch> <host-triple> <sdk> <output-dir> <min-version-flag>
