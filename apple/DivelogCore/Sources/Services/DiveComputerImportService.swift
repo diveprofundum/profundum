@@ -304,6 +304,7 @@ public final class DiveComputerImportService: Sendable {
            let existingDiveId = try findExistingDiveByFingerprint(fingerprint: fp) {
             if try hasSamplesFromDevice(diveId: existingDiveId, deviceId: deviceId) {
                 try linkFingerprint(fp, deviceId: deviceId, toDiveId: existingDiveId)
+                try fillMissingCoordinates(parsed, diveId: existingDiveId)
                 return .skipped
             }
             // Fall through — this device hasn't contributed samples.
@@ -330,6 +331,7 @@ public final class DiveComputerImportService: Sendable {
                         try Self.insertSourceFingerprint(
                             fp, deviceId: deviceId, diveId: existingDiveId, db: db
                         )
+                        try Self.fillMissingCoordinates(parsed, diveId: existingDiveId, db: db)
                         return .skipped
                     }
                     // Cross-device merge via fingerprint match
@@ -364,6 +366,7 @@ public final class DiveComputerImportService: Sendable {
                         try Self.insertSourceFingerprint(
                             fp, deviceId: deviceId, diveId: existingDiveId, db: db
                         )
+                        try Self.fillMissingCoordinates(parsed, diveId: existingDiveId, db: db)
                         return .skipped
                     }
                     try Self.mergeSamplesInTransaction(
@@ -455,6 +458,7 @@ public final class DiveComputerImportService: Sendable {
     private static func mergeSamplesInTransaction(
         _ parsed: ParsedDive, deviceId: String, intoDiveId existingDiveId: String, db: Database
     ) throws {
+        try fillMissingCoordinates(parsed, diveId: existingDiveId, db: db)
         let existingMixes = try GasMix
             .filter(Column("dive_id") == existingDiveId)
             .fetchAll(db)
@@ -649,6 +653,8 @@ public final class DiveComputerImportService: Sendable {
                 surfacePressureBar: originalDive.surfacePressureBar,
                 lat: originalDive.lat,
                 lon: originalDive.lon,
+                exitLat: originalDive.exitLat,
+                exitLon: originalDive.exitLon,
                 maxCeilingM: splitStats.maxCeilingM,
                 environment: originalDive.environment,
                 visibility: originalDive.visibility,
@@ -836,7 +842,23 @@ public final class DiveComputerImportService: Sendable {
         )
     }
 
-    /// Links an existing dive to a new BLE fingerprint (skips if already linked).
+    /// Writes entry/exit GPS onto an existing dive only where that pair is still empty.
+    private func fillMissingCoordinates(_ parsed: ParsedDive, diveId: String) throws {
+        try database.dbQueue.write { db in
+            try Self.fillMissingCoordinates(parsed, diveId: diveId, db: db)
+        }
+    }
+
+    private static func fillMissingCoordinates(
+        _ parsed: ParsedDive, diveId: String, db: Database
+    ) throws {
+        guard var dive = try Dive.fetchOne(db, key: diveId) else { return }
+        let filled = DiveDataMapper.fillingMissingCoordinates(dive, from: parsed)
+        guard filled != dive else { return }
+        dive = filled
+        try dive.update(db)
+    }
+
     private func linkFingerprint(
         _ fingerprint: Data, deviceId: String, toDiveId diveId: String
     ) throws {

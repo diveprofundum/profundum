@@ -180,6 +180,20 @@ public final class DiveService: Sendable {
 
     // MARK: - Site Operations
 
+    /// Writes entry coordinates onto a site that does not have any yet.
+    /// Returns false when the site is missing or already has coordinates.
+    @discardableResult
+    public func setSiteCoordinatesIfMissing(siteId: String, lat: Double, lon: Double) throws -> Bool {
+        try database.dbQueue.write { db in
+            guard var site = try Site.fetchOne(db, key: siteId) else { return false }
+            guard site.lat == nil, site.lon == nil else { return false }
+            site.lat = lat
+            site.lon = lon
+            try site.update(db)
+            return true
+        }
+    }
+
     public func saveSite(_ site: Site, tags: [String] = []) throws {
         try database.dbQueue.write { db in
             try site.save(db)

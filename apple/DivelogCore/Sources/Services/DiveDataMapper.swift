@@ -57,6 +57,9 @@ public struct ParsedDive: Sendable {
     public var surfacePressureBar: Float?
     public var lat: Double?
     public var lon: Double?
+    /// Last GPS fix. Equal to the entry fix when the computer reported only one.
+    public var exitLat: Double?
+    public var exitLon: Double?
     public var gasMixes: [ParsedGasMix]
     public var tanks: [ParsedTank]
     /// Timezone offset in seconds from UTC. Non-nil when the parser provides timezone info.
@@ -85,6 +88,8 @@ public struct ParsedDive: Sendable {
         surfacePressureBar: Float? = nil,
         lat: Double? = nil,
         lon: Double? = nil,
+        exitLat: Double? = nil,
+        exitLon: Double? = nil,
         gasMixes: [ParsedGasMix] = [],
         tanks: [ParsedTank] = [],
         timezoneOffsetSec: Int32? = nil
@@ -111,6 +116,8 @@ public struct ParsedDive: Sendable {
         self.surfacePressureBar = surfacePressureBar
         self.lat = lat
         self.lon = lon
+        self.exitLat = exitLat
+        self.exitLon = exitLon
         self.gasMixes = gasMixes
         self.tanks = tanks
         self.timezoneOffsetSec = timezoneOffsetSec
@@ -181,6 +188,43 @@ public struct ParsedSample: Sendable {
 
 /// Maps parsed dive computer data to domain models.
 public enum DiveDataMapper {
+    /// A fix libdivecomputer already accepted, minus the null-island sentinel and out-of-range values.
+    public static func isUsableCoordinate(lat: Double, lon: Double) -> Bool {
+        lat.isFinite && lon.isFinite
+            && abs(lat) <= 90 && abs(lon) <= 180
+            && !(lat == 0 && lon == 0)
+    }
+
+    /// First usable fix becomes the entry. Every later usable fix replaces the exit.
+    public static func recordLocation(lat: Double, lon: Double, on dive: inout ParsedDive) {
+        guard isUsableCoordinate(lat: lat, lon: lon) else { return }
+        if dive.lat == nil || dive.lon == nil {
+            dive.lat = lat
+            dive.lon = lon
+        }
+        dive.exitLat = lat
+        dive.exitLon = lon
+    }
+
+    /// Fills entry or exit only where the stored dive has neither coordinate of the pair.
+    /// A hand-set value is left alone.
+    public static func fillingMissingCoordinates(_ dive: Dive, from parsed: ParsedDive) -> Dive {
+        var updated = dive
+        if updated.lat == nil, updated.lon == nil,
+           let lat = parsed.lat, let lon = parsed.lon,
+           isUsableCoordinate(lat: lat, lon: lon) {
+            updated.lat = lat
+            updated.lon = lon
+        }
+        if updated.exitLat == nil, updated.exitLon == nil,
+           let lat = parsed.exitLat, let lon = parsed.exitLon,
+           isUsableCoordinate(lat: lat, lon: lon) {
+            updated.exitLat = lat
+            updated.exitLon = lon
+        }
+        return updated
+    }
+
     /// Clips post-dive surface timeout padding from samples.
     ///
     /// Shearwater computers stay in dive mode for up to 10 minutes after surfacing.
@@ -264,6 +308,8 @@ public enum DiveDataMapper {
             surfacePressureBar: parsed.surfacePressureBar,
             lat: parsed.lat,
             lon: parsed.lon,
+            exitLat: parsed.exitLat,
+            exitLon: parsed.exitLon,
             maxCeilingM: maxCeiling,
             timezoneOffsetSec: parsed.timezoneOffsetSec
         )

@@ -483,6 +483,8 @@ public final class ShearwaterCloudImportService: Sendable {
             let mergedSurfacePressure = primaryResult.parsedInfo.surfacePressureBar
             let mergedLat = parseResults.compactMap(\.parsedInfo.lat).first
             let mergedLon = parseResults.compactMap(\.parsedInfo.lon).first
+            let mergedExitLat = parseResults.compactMap(\.parsedInfo.exitLat).first
+            let mergedExitLon = parseResults.compactMap(\.parsedInfo.exitLon).first
             let mergedEnvironment = parseResults.compactMap(\.parsedInfo.environment).first
             let mergedVisibility = parseResults.compactMap(\.parsedInfo.visibility).first
             let mergedWeather = parseResults.compactMap(\.parsedInfo.weather).first
@@ -541,6 +543,8 @@ public final class ShearwaterCloudImportService: Sendable {
                 surfacePressureBar: mergedSurfacePressure,
                 lat: mergedLat,
                 lon: mergedLon,
+                exitLat: mergedExitLat,
+                exitLon: mergedExitLon,
                 groupId: groupId,
                 maxCeilingM: mergedMaxCeiling,
                 environment: mergedEnvironment,
@@ -709,9 +713,14 @@ public final class ShearwaterCloudImportService: Sendable {
 
                 // Only parse the binary log when something is actually missing:
                 // a nil dive-level field or an absent per-device settings row.
+                let rowHasEntry = stringFromRow(entry.row, column: "GnssEntryLocation")?.isEmpty == false
+                let rowHasExit = stringFromRow(entry.row, column: "GnssExitLocation")?.isEmpty == false
+                let needsGpsBackfill = (dive.lat == nil && rowHasEntry)
+                    || (dive.exitLat == nil && rowHasExit)
                 let needsDiveFieldBackfill = dive.gfLow == nil || dive.gfHigh == nil
                     || dive.decoModel == nil || dive.salinity == nil
                     || dive.surfacePressureBar == nil || dive.endGf99 == nil
+                    || needsGpsBackfill
                 let needsSettingsRow: Bool = try {
                     guard let deviceId else { return false }
                     return try DiveDeviceSettings
@@ -756,6 +765,17 @@ public final class ShearwaterCloudImportService: Sendable {
                     changed = true
                 }
                 if dive.endGf99 == nil, let v = parsed.endGf99 { dive.endGf99 = v; changed = true }
+                if dive.lat == nil, dive.lon == nil, let lat = parsed.lat, let lon = parsed.lon {
+                    dive.lat = lat
+                    dive.lon = lon
+                    changed = true
+                }
+                if dive.exitLat == nil, dive.exitLon == nil,
+                   let lat = parsed.exitLat, let lon = parsed.exitLon {
+                    dive.exitLat = lat
+                    dive.exitLon = lon
+                    changed = true
+                }
 
                 if changed {
                     try dive.update(db)
@@ -789,6 +809,8 @@ public final class ShearwaterCloudImportService: Sendable {
         var surfacePressureBar: Float?
         var lat: Double?
         var lon: Double?
+        var exitLat: Double?
+        var exitLon: Double?
         var environment: String?
         var visibility: String?
         var weather: String?
@@ -883,19 +905,14 @@ public final class ShearwaterCloudImportService: Sendable {
         let salinity = parsedDive?.salinity
         let surfacePressureBar = parsedDive?.surfacePressureBar
 
-        // GPS from GnssEntryLocation "lat,lon"
-        let (lat, lon): (Double?, Double?) = {
-            guard let gnss = stringFromRow(row, column: "GnssEntryLocation"), !gnss.isEmpty else {
-                return (parsedDive?.lat, parsedDive?.lon)
-            }
-            let parts = gnss.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-            guard parts.count == 2,
-                  let lat = Double(parts[0]),
-                  let lon = Double(parts[1]) else {
-                return (parsedDive?.lat, parsedDive?.lon)
-            }
-            return (lat, lon)
-        }()
+        // GPS from GnssEntryLocation / GnssExitLocation ("lat,lon").
+        // A missing exit column is entry-only, not a failed import.
+        let entry = parseGnssPair(stringFromRow(row, column: "GnssEntryLocation"))
+        let lat = entry?.0 ?? parsedDive?.lat
+        let lon = entry?.1 ?? parsedDive?.lon
+        let exit = parseGnssPair(stringFromRow(row, column: "GnssExitLocation"))
+        let exitLat = exit?.0 ?? parsedDive?.exitLat
+        let exitLon = exit?.1 ?? parsedDive?.exitLon
 
         // Environment fields
         let environment = stringFromRow(row, column: "Environment")
@@ -932,6 +949,8 @@ public final class ShearwaterCloudImportService: Sendable {
             surfacePressureBar: surfacePressureBar,
             lat: lat,
             lon: lon,
+            exitLat: exitLat,
+            exitLon: exitLon,
             environment: environment,
             visibility: visibility,
             weather: weather,
@@ -940,6 +959,17 @@ public final class ShearwaterCloudImportService: Sendable {
     }
 
     // MARK: - Private Helpers
+
+    /// Parses a Shearwater `"lat,lon"` string. Returns nil when the column is absent or malformed.
+    private func parseGnssPair(_ raw: String?) -> (Double, Double)? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let parts = raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        guard parts.count == 2, let lat = Double(parts[0]), let lon = Double(parts[1]),
+              DiveDataMapper.isUsableCoordinate(lat: lat, lon: lon) else {
+            return nil
+        }
+        return (lat, lon)
+    }
 
     /// Safely extract a String from a Row column regardless of SQLite storage class.
     /// Returns nil if the column doesn't exist in the row.

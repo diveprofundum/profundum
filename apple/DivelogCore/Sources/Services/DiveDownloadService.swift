@@ -492,6 +492,10 @@ private func parseDiveData(
         decoModel: decoModelStr,
         salinity: salinityStr,
         surfacePressureBar: atmStatus == DC_STATUS_SUCCESS ? Float(atmospheric) : nil,
+        lat: sampleContext.entryLat,
+        lon: sampleContext.entryLon,
+        exitLat: sampleContext.exitLat,
+        exitLon: sampleContext.exitLon,
         gasMixes: parsedGasMixes,
         timezoneOffsetSec: timezoneOffsetSec
     ))
@@ -520,6 +524,10 @@ private struct SampleCallbackContext {
     var currentGasmixIndex: Int?
     var maxCeiling: Float = 0
     var ppo2CallbackCount: Int = 0
+    var entryLat: Double?
+    var entryLon: Double?
+    var exitLat: Double?
+    var exitLon: Double?
 
     mutating func commitCurrentSample() {
         samples.append(ParsedSample(
@@ -622,6 +630,19 @@ private func sampleCallback(
 
     case DC_SAMPLE_GASMIX:
         ctx.pointee.currentGasmixIndex = Int(v.gasmix)
+
+    case DC_SAMPLE_LOCATION:
+        let location = v.location
+        let lat = location.latitude
+        let lon = location.longitude
+        guard lat.isFinite, lon.isFinite, abs(lat) <= 90, abs(lon) <= 180,
+              !(lat == 0 && lon == 0) else { break }
+        if ctx.pointee.entryLat == nil || ctx.pointee.entryLon == nil {
+            ctx.pointee.entryLat = lat
+            ctx.pointee.entryLon = lon
+        }
+        ctx.pointee.exitLat = lat
+        ctx.pointee.exitLon = lon
 
     case DC_SAMPLE_DECO:
         let deco = v.deco

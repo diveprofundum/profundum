@@ -1,5 +1,6 @@
 import Charts
 import DivelogCore
+import MapKit
 import SwiftUI
 
 struct DiveDetailView: View {
@@ -34,6 +35,8 @@ struct DiveDetailView: View {
     @State private var showBottomEndOverride = false
     @State private var showDecoStartOverride = false
     @State private var currentDive: Dive?
+    @State private var linkedSite: Site?
+    @Environment(\.openURL) private var openURL
     @State private var showReplaySheet = false
 
     var onDiveUpdated: (() -> Void)?
@@ -880,17 +883,106 @@ struct DiveDetailView: View {
                 .font(.headline)
 
             if let lat = dive.lat, let lon = dive.lon {
-                HStack(spacing: 4) {
-                    Image(systemName: "location")
-                        .foregroundColor(.secondary)
-                    Text(String(format: "%.5f, %.5f", lat, lon))
-                        .font(.body)
-                        .foregroundColor(.secondary)
-                        .textSelection(.enabled)
+                let entry = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+                let exit = distinctExitCoordinate(entryLat: lat, entryLon: lon)
+                Map(position: .constant(.region(mapRegion(entry: entry, exit: exit)))) {
+                    Marker("Entry", coordinate: entry)
+                    if let exit {
+                        Marker("Exit", coordinate: exit)
+                    }
                 }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("GPS coordinates: \(String(format: "%.5f", lat)), \(String(format: "%.5f", lon))")
+                .mapStyle(.standard)
+                .frame(height: 180)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(locationSummary(entryLat: lat, entryLon: lon, exit: exit))
+
+                coordinateRow(title: "Entry", lat: lat, lon: lon)
+                if let exit {
+                    coordinateRow(title: "Exit", lat: exit.latitude, lon: exit.longitude)
+                }
+
+                Button("Open in Maps") {
+                    openEntryInMaps(lat: lat, lon: lon)
+                }
+                .accessibilityHint("Opens the entry coordinates in Maps")
+
+                if let site = linkedSite, site.lat == nil, site.lon == nil {
+                    Button("Set site coordinates from this dive") {
+                        applyEntryToSite(lat: lat, lon: lon)
+                    }
+                    .accessibilityHint("Writes the entry fix onto \(site.name), which has no coordinates yet")
+                }
             }
+        }
+    }
+
+    private func coordinateRow(title: String, lat: Double, lon: Double) -> some View {
+        HStack(spacing: 4) {
+            Text(title)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .frame(width: 44, alignment: .leading)
+            Text(String(format: "%.5f, %.5f", lat, lon))
+                .font(.body)
+                .foregroundColor(.secondary)
+                .textSelection(.enabled)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title) \(String(format: "%.5f", lat)), \(String(format: "%.5f", lon))")
+    }
+
+    /// Exit pin only when it is a different place from the entry fix.
+    private func distinctExitCoordinate(entryLat: Double, entryLon: Double) -> CLLocationCoordinate2D? {
+        guard let exitLat = dive.exitLat, let exitLon = dive.exitLon else { return nil }
+        let samePlace = abs(exitLat - entryLat) < 0.00001 && abs(exitLon - entryLon) < 0.00001
+        return samePlace ? nil : CLLocationCoordinate2D(latitude: exitLat, longitude: exitLon)
+    }
+
+    private func mapRegion(entry: CLLocationCoordinate2D, exit: CLLocationCoordinate2D?) -> MKCoordinateRegion {
+        guard let exit else {
+            return MKCoordinateRegion(center: entry, latitudinalMeters: 500, longitudinalMeters: 500)
+        }
+        let center = CLLocationCoordinate2D(
+            latitude: (entry.latitude + exit.latitude) / 2,
+            longitude: (entry.longitude + exit.longitude) / 2
+        )
+        let latDelta = max(abs(entry.latitude - exit.latitude) * 1.8, 0.002)
+        let lonDelta = max(abs(entry.longitude - exit.longitude) * 1.8, 0.002)
+        return MKCoordinateRegion(
+            center: center,
+            span: MKCoordinateSpan(latitudeDelta: latDelta, longitudeDelta: lonDelta)
+        )
+    }
+
+    private func locationSummary(entryLat: Double, entryLon: Double, exit: CLLocationCoordinate2D?) -> String {
+        let entry = String(format: "Entry %.5f, %.5f", entryLat, entryLon)
+        guard let exit else { return entry }
+        return entry + String(format: ". Exit %.5f, %.5f", exit.latitude, exit.longitude)
+    }
+
+    private func openEntryInMaps(lat: Double, lon: Double) {
+        var components = URLComponents(string: "http://maps.apple.com/")
+        components?.queryItems = [
+            URLQueryItem(name: "ll", value: "\(lat),\(lon)"),
+            URLQueryItem(name: "q", value: "Dive entry"),
+        ]
+        if let url = components?.url {
+            openURL(url)
+        }
+    }
+
+    private func applyEntryToSite(lat: Double, lon: Double) {
+        guard let siteId = dive.siteId else { return }
+        do {
+            let updated = try appState.diveService.setSiteCoordinatesIfMissing(
+                siteId: siteId, lat: lat, lon: lon
+            )
+            if updated {
+                linkedSite = try appState.diveService.getSite(id: siteId)
+            }
+        } catch {
+            errorMessage = "Failed to update site coordinates: \(error.localizedDescription)"
         }
     }
 
@@ -999,6 +1091,11 @@ struct DiveDetailView: View {
             let diveId = dive.id
             // Refresh dive from DB to pick up saved changes (e.g. override)
             currentDive = try appState.diveService.getDive(id: diveId)
+            if let siteId = currentDive?.siteId {
+                linkedSite = try appState.diveService.getSite(id: siteId)
+            } else {
+                linkedSite = nil
+            }
             let detail = try appState.diveService.getDiveDetail(diveId: diveId)
             samples = detail.samples
             tags = detail.tags

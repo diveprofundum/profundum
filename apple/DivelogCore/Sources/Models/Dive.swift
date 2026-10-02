@@ -37,6 +37,10 @@ public struct Dive: Identifiable, Equatable, Hashable, Sendable {
     public var surfacePressureBar: Float?
     public var lat: Double?
     public var lon: Double?
+    /// Last GPS fix of the dive (Shearwater closing record, or the last location sample).
+    /// Nil when the computer reported only an entry fix, or none.
+    public var exitLat: Double?
+    public var exitLon: Double?
     public var groupId: String?
     public var environment: String?
     public var maxCeilingM: Float?
@@ -83,6 +87,8 @@ public struct Dive: Identifiable, Equatable, Hashable, Sendable {
         surfacePressureBar: Float? = nil,
         lat: Double? = nil,
         lon: Double? = nil,
+        exitLat: Double? = nil,
+        exitLon: Double? = nil,
         groupId: String? = nil,
         maxCeilingM: Float? = nil,
         environment: String? = nil,
@@ -123,6 +129,8 @@ public struct Dive: Identifiable, Equatable, Hashable, Sendable {
         self.surfacePressureBar = surfacePressureBar
         self.lat = lat
         self.lon = lon
+        self.exitLat = exitLat
+        self.exitLon = exitLon
         self.groupId = groupId
         self.maxCeilingM = maxCeilingM
         self.environment = environment
@@ -189,6 +197,8 @@ extension Dive: Codable, FetchableRecord, PersistableRecord {
         case surfacePressureBar = "surface_pressure_bar"
         case lat
         case lon
+        case exitLat = "exit_lat"
+        case exitLon = "exit_lon"
         case groupId = "group_id"
         case maxCeilingM = "max_ceiling_m"
         case environment
